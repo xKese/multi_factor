@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from threading import Lock
 
 import pandas as pd
 
 from .config import Settings
-from .data_loader import load_from_excel
 from .scoring import compute_scores
-
-
-EXCEL_PATH = Path(__file__).resolve().parent.parent.parent / "M&S_Multi-Faktor-Model.xlsx"
 
 
 @dataclass
@@ -39,15 +34,9 @@ class AppState:
             else:
                 self.scored = compute_scores(self.raw, self.settings)
 
-    def load_excel(self) -> None:
-        if EXCEL_PATH.exists():
-            self.raw = load_from_excel(EXCEL_PATH)
-            self.recompute()
-
     def set_raw(self, df: pd.DataFrame) -> None:
         self.raw = df
         self.recompute()
 
 
 STATE = AppState()
-STATE.load_excel()

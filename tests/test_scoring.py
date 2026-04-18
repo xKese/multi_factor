@@ -1,28 +1,25 @@
-"""Smoke-Tests: Lädt echte Excel-Daten und prüft plausible Outputs."""
+"""Smoke-Tests: Lädt Koyfin-CSV-Fixture und prüft plausible Outputs."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
-
 from app.core.config import Settings
-from app.core.data_loader import load_from_excel
+from app.core.data_loader import load_koyfin_csv
 from app.core.scoring import compute_scores
 
 
-EXCEL = Path(__file__).resolve().parent.parent / "M&S_Multi-Faktor-Model.xlsx"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "koyfin_sample.csv"
 
 
 def test_full_pipeline():
-    df = load_from_excel(EXCEL)
-    assert len(df) > 500, "Erwarte > 500 Aktien im Universum"
+    df = load_koyfin_csv(FIXTURE.read_bytes())
+    assert len(df) >= 10, "Erwarte mindestens 10 Aktien im Fixture"
     assert "ticker" in df.columns
 
     settings = Settings()
     scored = compute_scores(df, settings)
 
-    # Score-Spalten vorhanden und in Range.
     for col in [
         "value_score",
         "quality_score",
@@ -35,11 +32,9 @@ def test_full_pipeline():
         vals = scored[col].dropna()
         assert vals.min() >= 0 and vals.max() <= 100, f"{col} out of [0,100]"
 
-    # Piotroski-Range.
     piotr = scored["piotroski"].dropna()
     assert piotr.min() >= 0 and piotr.max() <= 9
 
-    # Klassifikation liefert erwartete Labels.
     assert scored["classification"].isin(
         [
             "A - Exzellent",
@@ -52,7 +47,6 @@ def test_full_pipeline():
         ]
     ).all()
 
-    # Empfehlung-Labels.
     assert scored["recommendation"].isin(
         ["STRONG BUY", "BUY", "HOLD", "SELL", "Filter nicht bestanden", "-"]
     ).all()

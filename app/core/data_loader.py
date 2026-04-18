@@ -1,4 +1,4 @@
-"""CSV-Import für den Koyfin-Export und Excel-Backfill."""
+"""CSV-Import für den Koyfin-Export."""
 
 from __future__ import annotations
 
@@ -34,10 +34,11 @@ def _normalize_percent(df: pd.DataFrame) -> pd.DataFrame:
     for col in PERCENT_COLUMNS:
         if col not in df.columns:
             continue
-        series = df[col]
+        series = df[col].astype(float)
         big_mask = series.abs() > 1
         if big_mask.any():
-            df.loc[big_mask, col] = series.loc[big_mask] / 100.0
+            series.loc[big_mask] = series.loc[big_mask] / 100.0
+        df[col] = series
     return df
 
 
@@ -66,17 +67,6 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = np.nan
 
-    df = _coerce_numeric(df)
-    df = _normalize_percent(df)
-    df = df.dropna(subset=["ticker"]).reset_index(drop=True)
-    return df
-
-
-def load_from_excel(path: str | Path) -> pd.DataFrame:
-    """Lädt das ``Daten_Import``-Sheet aus der Original-Excel-Datei."""
-    df = pd.read_excel(path, sheet_name="Daten_Import", header=1, engine="openpyxl")
-    df = df.iloc[1:, : len(KOYFIN_COLUMNS)].copy()
-    df.columns = KOYFIN_COLUMNS[: df.shape[1]]
     df = _coerce_numeric(df)
     df = _normalize_percent(df)
     df = df.dropna(subset=["ticker"]).reset_index(drop=True)

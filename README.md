@@ -1,7 +1,8 @@
 # Multi-Faktor Scoring Model (Dash App)
 
-Python/Dash-Anwendung, die das Excel-Modell `M&S_Multi-Faktor-Model.xlsx` der
-Meeder & Seifer Vermögensverwaltung eins zu eins abbildet.
+Eigenständige Python/Dash-Anwendung, die das Multi-Faktor-Scoring-Modell von
+Meeder & Seifer eins zu eins abbildet. Dateninput erfolgt ausschließlich über
+einen Koyfin-CSV-Upload im Tab **Daten-Import**.
 
 ## Funktionsumfang
 
@@ -15,7 +16,7 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 | M&S Portfolio    | Firmenportfolio                                 |
 | Mein Portfolio   | Persönliches Portfolio                          |
 | Factor_Timing    | Taktische Faktor-Allokation mit Makro-Regime    |
-| Daten_Import     | CSV-Upload (Koyfin-Export)                      |
+| Daten_Import     | CSV-Upload (Koyfin-Export, einziger Input)      |
 | Berechnungen     | automatisch (Scoring-Engine)                    |
 | Piotroski        | automatisch (F-Score-Engine)                    |
 | Einstellungen    | Editierbare Gewichte/Filter                     |
@@ -33,15 +34,35 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 - **Piotroski F-Score** (9 Kriterien, 0 – 9 Punkte)
 - **SMA-50/SMA-200-Signal**: Golden Cross, Death Cross, Kurs ≷ SMA-200
 
-## Installation
+## Installation & Start
 
 ```bash
 pip install -r requirements.txt
 python -m app.main
 ```
 
-App läuft auf <http://127.0.0.1:8050>.
+App läuft auf <http://127.0.0.1:8050>. Beim Start ist kein Universum geladen —
+das Dashboard zeigt eine Hinweis-Meldung.
 
-## Koyfin-Export
+## Daten hochladen
 
-CSV mit 57 Spalten (siehe `app/core/schema.py`) – Details im Anleitung-Tab.
+1. Browser auf <http://127.0.0.1:8050/daten-import>
+2. Koyfin-CSV-Export (57 Spalten, siehe `app/core/schema.py`) per Drag & Drop
+   oder Klick auswählen
+3. Nach erfolgreichem Import werden Dashboard, Einzelanalyse, SMA-Signale,
+   Portfolios und Perzentil-Hilfe automatisch befüllt
+
+### CSV-Format
+
+- Trennzeichen: `;` oder `,` (Auto-Detection)
+- Dezimaltrennzeichen: `,` (europäisch)
+- Prozent-Werte dürfen als `15,3` oder `0,153` vorliegen (Auto-Normalisierung)
+- Spalten-Reihenfolge: siehe `KOYFIN_COLUMNS` in `app/core/schema.py`
+
+## Tests
+
+```bash
+python -m tests.test_scoring
+```
+
+Smoke-Test gegen `tests/fixtures/koyfin_sample.csv` (10 synthetische Tickers).
