@@ -11,20 +11,34 @@ externalPort = 80
 expertMode = true
 
 [workflows]
+runButton = "Project"
 
 [[workflows.workflow]]
 name = "App"
 mode = "sequential"
-author = 46154419
+author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python main.py"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [[workflows.workflow]]
 name = "Start"
 mode = "sequential"
 author = 46154419
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "App"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
