@@ -1,4 +1,4 @@
-"""Einzelanalyse je Ticker (entspricht Sheet ``Einzelanalyse``)."""
+"""Einzelanalyse je Ticker im Morningstar-Quote-Layout."""
 
 from __future__ import annotations
 
@@ -6,8 +6,23 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html, register_page
+from dash.exceptions import PreventUpdate
 
+from app.core.peers import compute_peers
 from app.core.state import STATE
+from app.pages.common import page_title
+from app.ui import (
+    MS_LIGHT,
+    factor_breakdown,
+    fmt_de,
+    fmt_indicator,
+    fmt_int,
+    fmt_market_cap,
+    fmt_percent,
+    ms_badge,
+    quote_header,
+    section_header,
+)
 
 
 INDICATOR_GROUPS = {
@@ -56,14 +71,15 @@ INDICATOR_GROUPS = {
 def _kv_table(pairs: list[tuple[str, str]], row: pd.Series) -> dbc.Table:
     rows = []
     for label, col in pairs:
-        val = row.get(col)
-        if pd.isna(val):
-            display = "-"
-        elif isinstance(val, float):
-            display = f"{val:,.3f}"
-        else:
-            display = str(val)
-        rows.append(html.Tr([html.Td(label), html.Td(display)]))
+        display = fmt_indicator(col, row.get(col))
+        rows.append(
+            html.Tr(
+                [
+                    html.Td(label, className="ms-muted"),
+                    html.Td(display, className="ms-tabular text-end"),
+                ]
+            )
+        )
     return dbc.Table(
         [html.Tbody(rows)],
         bordered=False,
@@ -84,7 +100,7 @@ def layout(ticker: str = "", **_) -> html.Div:
 
     return html.Div(
         [
-            html.H2("Einzelanalyse"),
+            page_title("Einzelanalyse", "Wähle einen Titel für das vollständige Profil."),
             dbc.Row(
                 [
                     dbc.Col(
@@ -95,15 +111,257 @@ def layout(ticker: str = "", **_) -> html.Div:
                             placeholder="Ticker wählen …",
                             searchable=True,
                         ),
-                        md=4,
+                        md=5,
                     ),
                 ],
                 className="mb-3",
             ),
             html.Div(id="ea-content"),
-        ],
-        className="p-4",
+        ]
     )
+
+
+_RUECKBLICK_WINDOWS = (
+    ("ret_12m", "12M"),
+    ("ret_6m", "6M"),
+    ("ret_3m", "3M"),
+    ("ret_1m", "1M"),
+)
+
+
+def _rueckblick(r: pd.Series) -> html.Div | None:
+    """Kompakte Visualisierung der vier Rückblicks-Returns (1M/3M/6M/12M).
+
+    Keine Sparkline: mangels monatlicher Schlusskurse im Koyfin-Export sind
+    das vier disjunkte Zeitfenster. Gepunktete Verbindungslinie + expliziter
+    Label machen klar, dass zwischen den Punkten nicht interpoliert ist.
+    """
+
+    points: list[tuple[str, float]] = []
+    for col, label in _RUECKBLICK_WINDOWS:
+        v = r.get(col)
+        if pd.notna(v):
+            points.append((label, float(v) * 100.0))
+    if not points:
+        return None
+
+    ret12 = r.get("ret_12m")
+    if pd.notna(ret12) and ret12 >= 0:
+        color = "#1B7F3A"
+    elif pd.notna(ret12) and ret12 < 0:
+        color = "#C2281E"
+    else:
+        color = "#0B3D91"
+
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+
+    fig = go.Figure()
+    fig.add_shape(
+        type="line",
+        xref="paper",
+        yref="y",
+        x0=0,
+        x1=1,
+        y0=0,
+        y1=0,
+        line=dict(color="#CFCFCB", width=1, dash="dot"),
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=xs,
+            y=ys,
+            mode="lines+markers",
+            line=dict(color=color, width=1.4, dash="dot"),
+            marker=dict(size=6, color=color),
+            hovertemplate="Return %{x}: %{y:.1f}%<extra></extra>",
+            showlegend=False,
+        )
+    )
+    fig.update_layout(
+        template=MS_LIGHT,
+        height=48,
+        width=160,
+        margin=dict(l=4, r=4, t=4, b=4),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False, zeroline=False),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+
+    return html.Div(
+        [
+            html.Span(
+                "Rückblicksfenster · 12M · 6M · 3M · 1M",
+                className="ms-rueckblick-label",
+            ),
+            dcc.Graph(
+                figure=fig,
+                config={"displayModeBar": False, "scrollZoom": False},
+                className="ms-rueckblick-graph",
+            ),
+        ],
+        className="ms-rueckblick",
+    )
+
+
+def _filter_badges(r: pd.Series) -> html.Div:
+    badges: list = []
+
+    piotr = r.get("piotroski")
+    if pd.notna(piotr):
+        ok = piotr >= STATE.settings.min_piotroski
+        badges.append(
+            ms_badge("Piotroski", f"{fmt_int(piotr)} / 9", tone="up" if ok else "down")
+        )
+    else:
+        badges.append(ms_badge("Piotroski", "-"))
+
+    altman = r.get("altman_z")
+    if pd.notna(altman):
+        ok = altman >= STATE.settings.min_altman_z
+        badges.append(
+            ms_badge("Altman Z", fmt_de(altman, 2), tone="up" if ok else "down")
+        )
+    else:
+        badges.append(ms_badge("Altman Z", "-"))
+
+    sma = r.get("sma_signal") or "-"
+    sma_tone = None
+    if "GOLDEN" in str(sma):
+        sma_tone = "up"
+    elif "DEATH" in str(sma):
+        sma_tone = "down"
+    elif "<" in str(sma):
+        sma_tone = "warn"
+    elif ">" in str(sma):
+        sma_tone = "info"
+    badges.append(ms_badge("SMA-Signal", str(sma), tone=sma_tone))
+
+    rec = r.get("recommendation") or "-"
+    rec_tone = {
+        "STRONG BUY": "up",
+        "BUY": "up",
+        "HOLD": "warn",
+        "SELL": "down",
+    }.get(rec)
+    badges.append(ms_badge("Empfehlung", str(rec), tone=rec_tone))
+
+    filt = r.get("filter_ok") or "-"
+    badges.append(
+        ms_badge(
+            "Filter",
+            "bestanden" if filt == "JA" else "nicht bestanden",
+            tone="up" if filt == "JA" else "down",
+        )
+    )
+
+    return html.Div(badges, className="ms-badge-row")
+
+
+def _peer_card(peer: pd.Series) -> dcc.Link:
+    """Eine klickbare Comparable-Karte (Link zur Einzelanalyse des Peers)."""
+
+    ticker = str(peer["ticker"])
+    name = str(peer.get("name") or "")
+
+    meta_parts: list[str] = []
+    if peer.get("industry"):
+        meta_parts.append(str(peer["industry"]))
+    elif peer.get("sector"):
+        meta_parts.append(str(peer["sector"]))
+
+    score = peer.get("total_score")
+    score_display = fmt_de(score, 1) if pd.notna(score) else "-"
+
+    ret_12m = peer.get("ret_12m")
+    if pd.notna(ret_12m):
+        ret_tone = "up" if float(ret_12m) >= 0 else "down"
+        ret_badge = ms_badge("12M", fmt_percent(ret_12m), tone=ret_tone)
+    else:
+        ret_badge = ms_badge("12M", "-")
+
+    factors = {
+        "Value": peer.get("value_score"),
+        "Quality": peer.get("quality_score"),
+        "Growth": peer.get("growth_score"),
+        "Momentum": peer.get("momentum_score"),
+        "Low Vol": peer.get("lowvol_score"),
+    }
+
+    card = dbc.Card(
+        dbc.CardBody(
+            [
+                html.Div(
+                    [
+                        html.Span(ticker, className="ms-peer-ticker"),
+                        html.Span(score_display, className="ms-peer-score"),
+                    ],
+                    className="ms-peer-head",
+                ),
+                html.Div(name, className="ms-peer-name"),
+                html.Div(" · ".join(meta_parts) or " ", className="ms-peer-meta"),
+                html.Div(
+                    [
+                        ms_badge("Score", score_display),
+                        ret_badge,
+                    ],
+                    className="ms-peer-badges",
+                ),
+                factor_breakdown(factors),
+            ]
+        ),
+        className="ms-peer-card h-100",
+    )
+
+    return dcc.Link(
+        card,
+        href=f"/einzelanalyse?ticker={ticker}",
+        className="ms-peer-link",
+    )
+
+
+def _comparables_controls() -> html.Div:
+    """Toggle: ähnliches Profil (Distanz) vs. Top-Score in der Industrie."""
+    return html.Div(
+        dbc.RadioItems(
+            id="ea-comparables-mode",
+            options=[
+                {"label": "Ähnliches Profil", "value": "similar"},
+                {"label": "Top-Score in Industrie", "value": "top_score"},
+            ],
+            value="similar",
+            inline=True,
+            class_name="btn-group",
+            input_class_name="btn-check",
+            label_class_name="btn btn-sm btn-outline-secondary",
+        ),
+        className="mb-3",
+    )
+
+
+@callback(
+    Output("ea-ticker", "value"),
+    Input("ms-location", "search"),
+    prevent_initial_call=True,
+)
+def _sync_ticker_from_url(search: str | None):
+    """Ticker-Dropdown bei URL-Query-Wechsel nachziehen (Deep-Link).
+
+    Beim Klick auf eine Peer-Karte wechselt ``dcc.Location.search`` clientseitig
+    auf ``?ticker=XYZ``. Da der Pfadname gleich bleibt, ruft Dash das Layout
+    nicht erneut auf — wir aktualisieren darum die Dropdown-Auswahl manuell,
+    was den bestehenden ``_render``-Callback auslöst.
+    """
+    from urllib.parse import parse_qs
+
+    if not search:
+        raise PreventUpdate
+    qs = parse_qs(search.lstrip("?"))
+    tickers = qs.get("ticker")
+    if not tickers or not tickers[0]:
+        raise PreventUpdate
+    return tickers[0]
 
 
 @callback(Output("ea-content", "children"), Input("ea-ticker", "value"))
@@ -116,112 +374,59 @@ def _render(ticker: str | None):
         return dbc.Alert(f"Ticker {ticker} nicht gefunden.", color="warning")
     r = row.iloc[0]
 
-    header = dbc.Row(
-        [
-            dbc.Col(html.H3(f"{r['ticker']} – {r['name']}"), md=8),
-            dbc.Col(
-                html.Div(
-                    [
-                        html.H3(
-                            f"{r['total_score']:.1f}"
-                            if pd.notna(r["total_score"])
-                            else "-",
-                            className="mb-0 text-end",
-                        ),
-                        html.Small(r["classification"], className="text-muted"),
-                    ]
-                ),
-                md=4,
-            ),
-        ],
-        className="mb-3",
-    )
+    score = r.get("total_score")
+    score_display = fmt_de(score, 1) if pd.notna(score) else "-"
+    classification = r.get("classification") or ""
 
-    meta = dbc.Row(
-        [
-            dbc.Col(html.Div([html.Strong("Sektor: "), r["sector"] or "-"]), md=3),
-            dbc.Col(html.Div([html.Strong("Industrie: "), r["industry"] or "-"]), md=3),
-            dbc.Col(html.Div([html.Strong("Region: "), r["region"] or "-"]), md=3),
-            dbc.Col(
-                html.Div(
-                    [
-                        html.Strong("Market Cap: "),
-                        f"{r['market_cap']:,.0f} Mio." if pd.notna(r["market_cap"]) else "-",
-                    ]
-                ),
-                md=3,
-            ),
-        ],
-        className="mb-3",
+    meta: list[str] = []
+    if r.get("sector"):
+        meta.append(str(r["sector"]))
+    if r.get("industry"):
+        meta.append(str(r["industry"]))
+    if r.get("region"):
+        meta.append(str(r["region"]))
+    if pd.notna(r.get("market_cap")):
+        meta.append(f"Market Cap {fmt_market_cap(r['market_cap'])}")
+
+    header = quote_header(
+        ticker=str(r["ticker"]),
+        name=str(r.get("name") or ""),
+        meta=meta,
+        score_value=score_display,
+        score_label=classification or "Gesamt-Score",
     )
 
     factors = {
-        "Value": r["value_score"],
-        "Quality": r["quality_score"],
-        "Growth": r["growth_score"],
-        "Momentum": r["momentum_score"],
-        "Low Vol": r["lowvol_score"],
+        "Value": r.get("value_score"),
+        "Quality": r.get("quality_score"),
+        "Growth": r.get("growth_score"),
+        "Momentum": r.get("momentum_score"),
+        "Low Vol": r.get("lowvol_score"),
     }
-    fig = go.Figure(
+
+    radar = go.Figure(
         go.Scatterpolar(
-            r=[0 if pd.isna(v) else v for v in factors.values()],
+            r=[0 if pd.isna(v) else float(v) for v in factors.values()],
             theta=list(factors.keys()),
             fill="toself",
-            name=r["ticker"],
+            name=str(r["ticker"]),
+            line=dict(color="#0B3D91"),
+            fillcolor="rgba(11,61,145,0.18)",
         )
     )
-    fig.update_layout(
+    radar.update_layout(
+        template=MS_LIGHT,
         polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
         showlegend=False,
-        height=360,
-        title="Faktor-Scores",
+        height=320,
+        margin=dict(l=16, r=16, t=8, b=8),
     )
 
-    filter_badges = dbc.Row(
+    factor_card = dbc.Card(
         [
-            dbc.Col(
-                dbc.Alert(
-                    f"Piotroski: {r['piotroski']:.0f} / 9"
-                    if pd.notna(r["piotroski"])
-                    else "Piotroski: -",
-                    color="success"
-                    if pd.notna(r["piotroski"]) and r["piotroski"] >= STATE.settings.min_piotroski
-                    else "danger",
-                ),
-                md=3,
-            ),
-            dbc.Col(
-                dbc.Alert(
-                    f"Altman Z: {r['altman_z']:.2f}"
-                    if pd.notna(r["altman_z"])
-                    else "Altman Z: -",
-                    color="success"
-                    if pd.notna(r["altman_z"]) and r["altman_z"] >= STATE.settings.min_altman_z
-                    else "danger",
-                ),
-                md=3,
-            ),
-            dbc.Col(
-                dbc.Alert(
-                    f"SMA-Signal: {r['sma_signal']}",
-                    color="info",
-                ),
-                md=3,
-            ),
-            dbc.Col(
-                dbc.Alert(
-                    f"Empfehlung: {r['recommendation']}",
-                    color={
-                        "STRONG BUY": "success",
-                        "BUY": "success",
-                        "HOLD": "warning",
-                        "SELL": "danger",
-                    }.get(r["recommendation"], "secondary"),
-                ),
-                md=3,
-            ),
-        ],
-        className="mb-3",
+            dbc.CardHeader("Faktor-Breakdown"),
+            dbc.CardBody(factor_breakdown(factors)),
+        ]
     )
 
     cards = []
@@ -239,17 +444,54 @@ def _render(ticker: str | None):
             )
         )
 
+    sections: list = [header]
+    rueckblick = _rueckblick(r)
+    if rueckblick is not None:
+        sections.append(rueckblick)
+    sections.append(_filter_badges(r))
+
+    comparables_block = [
+        section_header("Comparables"),
+        _comparables_controls(),
+        html.Div(id="ea-comparables"),
+    ]
+
     return html.Div(
-        [
-            header,
-            meta,
-            filter_badges,
+        sections + [
+            section_header("Faktor-Profil"),
             dbc.Row(
-                [dbc.Col(dcc.Graph(figure=fig), md=6), dbc.Col(md=6)],
-                className="mb-2",
+                [
+                    dbc.Col(
+                        dcc.Graph(figure=radar, config={"displayModeBar": False}),
+                        md=6,
+                    ),
+                    dbc.Col(factor_card, md=6),
+                ]
             ),
+            section_header("Kennzahlen"),
             dbc.Row(cards),
-        ]
+        ] + comparables_block
+    )
+
+
+@callback(
+    Output("ea-comparables", "children"),
+    Input("ea-ticker", "value"),
+    Input("ea-comparables-mode", "value"),
+)
+def _render_comparables(ticker: str | None, mode: str | None):
+    empty = dbc.Alert("Keine Comparables verfügbar.", color="light", className="mb-0")
+    if not ticker or STATE.scored.empty:
+        return empty
+    peers = compute_peers(STATE.scored, ticker, n=6, mode=mode or "similar")
+    if peers.empty:
+        return empty
+    return dbc.Row(
+        [
+            dbc.Col(_peer_card(peer), xs=12, sm=6, md=4, lg=2, className="mb-3")
+            for _, peer in peers.iterrows()
+        ],
+        className="ms-peer-row",
     )
 
 

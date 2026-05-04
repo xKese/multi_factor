@@ -1,4 +1,11 @@
-"""CSV-Import für den Koyfin-Export."""
+"""CSV-Import für den Koyfin-Export.
+
+Koyfin exportiert Prozent- und Return-Werte bereits als Dezimalzahlen
+(z. B. ``0,1889`` für 18,89 %, ``1,2504`` für 125,04 %). Der Loader nimmt
+dieses Format als gegeben an — eine frühere Divisions-Heuristik (|x|>1 →
+/100) führte bei Titeln mit Returns > 100 % zu einer fälschlichen
+Verkleinerung um Faktor 100.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .schema import KOYFIN_COLUMNS, PERCENT_COLUMNS
+from .schema import KOYFIN_COLUMNS
 
 
 NUMERIC_COLUMNS = [
@@ -22,23 +29,6 @@ def _coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
     for col in NUMERIC_COLUMNS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
-
-
-def _normalize_percent(df: pd.DataFrame) -> pd.DataFrame:
-    """Werte, die als ``15.3`` für 15,3 % vorliegen, werden durch 100 geteilt,
-    damit das gesamte Modell mit Dezimalwerten rechnet.
-
-    Heuristik: Werte mit Betrag > 1 gelten als Prozent-Notation.
-    """
-    for col in PERCENT_COLUMNS:
-        if col not in df.columns:
-            continue
-        series = df[col].astype(float)
-        big_mask = series.abs() > 1
-        if big_mask.any():
-            series.loc[big_mask] = series.loc[big_mask] / 100.0
-        df[col] = series
     return df
 
 
@@ -68,6 +58,5 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
             df[col] = np.nan
 
     df = _coerce_numeric(df)
-    df = _normalize_percent(df)
     df = df.dropna(subset=["ticker"]).reset_index(drop=True)
     return df

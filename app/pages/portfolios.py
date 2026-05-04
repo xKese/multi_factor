@@ -7,7 +7,8 @@ import pandas as pd
 from dash import Input, Output, State, callback, dcc, html, register_page
 
 from app.core.state import STATE
-from app.pages.common import format_scored, kpi_card, render_table
+from app.pages.common import format_scored, page_title, render_table
+from app.ui import fmt_de, kpi_band
 
 
 PORTFOLIO_COLS = [
@@ -35,29 +36,25 @@ def _portfolio_df(tickers: list[str]) -> pd.DataFrame:
     return format_scored(df)[PORTFOLIO_COLS]
 
 
-def _kpis(df: pd.DataFrame) -> dbc.Row:
+def _kpis(df: pd.DataFrame) -> html.Div:
     if df.empty:
         avg, n_ok, n_strong, n_sell = "-", 0, 0, 0
     else:
-        avg = f"{df['total_score'].dropna().mean():.1f}"
+        avg = fmt_de(df["total_score"].dropna().mean(), 1)
         n_ok = (df["filter_ok"] == "JA").sum()
         n_strong = (df["recommendation"].isin(["STRONG BUY", "BUY"])).sum()
         n_sell = (df["recommendation"] == "SELL").sum()
-    return dbc.Row(
+    return kpi_band(
         [
-            dbc.Col(kpi_card("Positionen", f"{len(df):,}"), md=3),
-            dbc.Col(kpi_card("Filter OK", f"{n_ok}/{len(df)}"), md=3),
-            dbc.Col(kpi_card("Ø Score", str(avg)), md=3),
-            dbc.Col(
-                kpi_card(
-                    "Buy / Sell",
-                    f"{n_strong} / {n_sell}",
-                    color="success" if n_strong >= n_sell else "danger",
-                ),
-                md=3,
-            ),
-        ],
-        className="mb-3",
+            {"label": "Positionen", "value": fmt_de(len(df), 0)},
+            {"label": "Filter OK", "value": f"{fmt_de(n_ok, 0)} / {fmt_de(len(df), 0)}"},
+            {"label": "Ø Score", "value": str(avg)},
+            {
+                "label": "Buy / Sell",
+                "value": f"{fmt_de(n_strong, 0)} / {fmt_de(n_sell, 0)}",
+                "tone": "up" if n_strong >= n_sell else "down",
+            },
+        ]
     )
 
 
@@ -75,8 +72,8 @@ def _portfolio_block(title: str, store_id: str, input_id: str) -> dbc.Card:
                             ),
                             dbc.Button("Setzen", id=f"{input_id}-btn", color="primary"),
                         ],
-                        className="mb-3",
                     ),
+                    html.Div(id=f"{store_id}-feedback", className="ms-portfolio-feedback"),
                     html.Div(id=f"{store_id}-kpis"),
                     html.Div(id=f"{store_id}-table"),
                 ]
@@ -89,13 +86,15 @@ def _portfolio_block(title: str, store_id: str, input_id: str) -> dbc.Card:
 def layout(**_) -> html.Div:
     return html.Div(
         [
-            html.H2("Portfolios"),
+            page_title(
+                "Portfolios",
+                "Zwei frei definierbare Ticker-Listen — M&S-Kern und persönlich.",
+            ),
             dcc.Store(id="ms-store", data=STATE.ms_portfolio),
             dcc.Store(id="my-store", data=STATE.my_portfolio),
             _portfolio_block("M&S Portfolio", "ms", "ms-input"),
             _portfolio_block("Mein Portfolio", "my", "my-input"),
-        ],
-        className="p-4",
+        ]
     )
 
 
@@ -108,6 +107,8 @@ def _parse(text: str | None) -> list[str]:
 def _bind(store_id: str, input_id: str, target_attr: str):
     @callback(
         Output(f"{store_id}-store", "data"),
+        Output(f"{store_id}-feedback", "children"),
+        Output(f"{store_id}-feedback", "className"),
         Input(f"{input_id}-btn", "n_clicks"),
         State(input_id, "value"),
         State(f"{store_id}-store", "data"),
@@ -115,10 +116,25 @@ def _bind(store_id: str, input_id: str, target_attr: str):
     )
     def _set(n_clicks, value, current):  # noqa: ARG001
         new = _parse(value)
+        base = "ms-portfolio-feedback"
         if not new:
-            return current
+            return current, "", base
         setattr(STATE, target_attr, new)
-        return new
+        if STATE.scored.empty:
+            return (
+                new,
+                f"{len(new)} Ticker gespeichert — kein Universum geladen.",
+                f"{base} is-warn",
+            )
+        universe = set(STATE.scored["ticker"].dropna().astype(str))
+        missing = [t for t in new if t not in universe]
+        if missing:
+            msg = (
+                f"{len(missing)} von {len(new)} Tickern nicht im Universum: "
+                f"{', '.join(missing)}."
+            )
+            return new, msg, f"{base} is-warn"
+        return new, f"{len(new)} Ticker übernommen.", f"{base} is-ok"
 
     @callback(
         Output(f"{store_id}-table", "children"),

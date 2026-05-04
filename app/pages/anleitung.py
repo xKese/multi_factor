@@ -5,6 +5,8 @@ from __future__ import annotations
 import dash_bootstrap_components as dbc
 from dash import dcc, html, register_page
 
+from app.pages.common import page_title
+
 
 TEXT = """
 ## Überblick
@@ -67,10 +69,12 @@ Factor Momentum die taktische Gewichtung bestimmt.
 def layout(**_) -> html.Div:
     return html.Div(
         [
-            html.H2("Anleitung"),
-            dbc.Card(dbc.CardBody(dcc.Markdown(TEXT)), className="shadow-sm"),
-        ],
-        className="p-4",
+            page_title(
+                "Anleitung",
+                "Datenquelle, Scoring-Logik und Interpretation der Kennzahlen.",
+            ),
+            dbc.Card(dbc.CardBody(dcc.Markdown(TEXT))),
+        ]
     )
 
 

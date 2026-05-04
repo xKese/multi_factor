@@ -14,7 +14,24 @@ import numpy as np
 import pandas as pd
 
 from .config import Settings
+from .momentum import (
+    MOMENTUM_DEATH,
+    MOMENTUM_DOWN,
+    MOMENTUM_GOLDEN,
+    MOMENTUM_NONE,
+    MOMENTUM_UP,
+    classify_momentum,
+)
 from .piotroski import compute_piotroski
+
+
+_SMA_ICON_LABELS: dict[str, str] = {
+    MOMENTUM_GOLDEN: "✓ GOLDEN CROSS",
+    MOMENTUM_UP: "● Kurs > SMA-200",
+    MOMENTUM_DOWN: "▼ Kurs < SMA-200",
+    MOMENTUM_DEATH: "⚠ DEATH CROSS",
+    MOMENTUM_NONE: "-",
+}
 
 
 INDICATOR_TO_COLUMN: dict[str, str] = {
@@ -155,18 +172,10 @@ def _recommendation(score: float, filter_ok: str) -> str:
 
 
 def _sma_signal(row: pd.Series) -> str:
-    price = row.get("last_price")
-    sma50 = row.get("sma_50")
-    sma200 = row.get("sma_200")
-    if pd.isna(price) or pd.isna(sma50) or pd.isna(sma200):
-        return "-"
-    if price < sma200 and sma50 < sma200:
-        return "⚠ DEATH CROSS"
-    if price > sma200 and sma50 > sma200:
-        return "✓ GOLDEN CROSS"
-    if price > sma200:
-        return "● Kurs > SMA-200"
-    return "▼ Kurs < SMA-200"
+    state = classify_momentum(
+        row.get("last_price"), row.get("sma_50"), row.get("sma_200")
+    )
+    return _SMA_ICON_LABELS[state]
 
 
 def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
@@ -242,6 +251,11 @@ def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     df["sma_200_distance"] = np.where(
         (df["sma_200"] > 0) & df["last_price"].notna(),
         (df["last_price"] - df["sma_200"]) / df["sma_200"],
+        np.nan,
+    )
+    df["sma_50_distance"] = np.where(
+        (df["sma_50"] > 0) & df["last_price"].notna(),
+        (df["last_price"] - df["sma_50"]) / df["sma_50"],
         np.nan,
     )
 

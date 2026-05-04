@@ -38,5 +38,18 @@ class AppState:
         self.raw = df
         self.recompute()
 
+    def load_from_db(self) -> bool:
+        from .persistence import load_settings, load_universe
+
+        stored_settings = load_settings()
+        if stored_settings is not None:
+            self.settings = stored_settings
+
+        df = load_universe()
+        if df is None or df.empty:
+            return False
+        self.set_raw(df)
+        return True
+
 
 STATE = AppState()

@@ -1,0 +1,352 @@
+"""PostgreSQL-Persistenz für das importierte Koyfin-Universum.
+
+Speichert die Rohdaten genau so, wie ``load_koyfin_csv`` sie liefert, und lädt
+sie beim App-Start zurück in ``STATE``. Fehler sind „fail-open": Engine-Bau
+und Load dürfen nicht raisen, damit die App auch ohne DB startet.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from dataclasses import fields as dataclass_fields
+from datetime import date
+
+import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+
+from .config import Settings
+
+log = logging.getLogger(__name__)
+
+_DEFAULT_URL = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
+_UNIVERSE_TABLE = "koyfin_universe"
+_META_TABLE = "koyfin_meta"
+_SECTOR_SNAPSHOT_TABLE = "sector_momentum_snapshots"
+_SETTINGS_TABLE = "app_settings"
+
+_SETTINGS_FIELDS: tuple[str, ...] = (
+    "factor_weights",
+    "value_weights",
+    "quality_weights",
+    "growth_weights",
+    "momentum_weights",
+    "lowvol_weights",
+    "min_piotroski",
+    "min_altman_z",
+    "min_market_cap",
+    "min_stocks_per_industry",
+    "percentile_mode",
+)
+
+_engine: Engine | None = None
+_engine_tried = False
+
+
+def get_engine() -> Engine | None:
+    """Liefert eine zwischengespeicherte SQLAlchemy-Engine oder ``None``.
+
+    Gibt ``None`` zurück, wenn ``create_engine`` fehlschlägt (z. B. ungültige
+    URL). Ein Verbindungsfehler zur Laufzeit wird hier *nicht* erkannt — das
+    passiert erst bei der tatsächlichen DB-Operation.
+    """
+
+    global _engine, _engine_tried
+    if _engine is not None or _engine_tried:
+        return _engine
+    _engine_tried = True
+    url = os.getenv("DATABASE_URL", _DEFAULT_URL)
+    try:
+        _engine = create_engine(url, pool_pre_ping=True, future=True)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Konnte SQLAlchemy-Engine nicht erstellen: %s", exc)
+        _engine = None
+    return _engine
+
+
+def save_universe(df: pd.DataFrame) -> None:
+    """Ersetzt den Inhalt von ``koyfin_universe`` durch ``df`` und aktualisiert
+    die Meta-Zeile. Raised bei Fehler — der Aufrufer zeigt eine UI-Warnung.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+
+    with engine.begin() as conn:
+        df.to_sql(_UNIVERSE_TABLE, conn, if_exists="replace", index=False)
+        conn.execute(
+            text(
+                f"CREATE TABLE IF NOT EXISTS {_META_TABLE} ("
+                "imported_at TIMESTAMPTZ NOT NULL, "
+                "row_count INTEGER NOT NULL)"
+            )
+        )
+        conn.execute(text(f"DELETE FROM {_META_TABLE}"))
+        conn.execute(
+            text(
+                f"INSERT INTO {_META_TABLE} (imported_at, row_count) "
+                "VALUES (now(), :n)"
+            ),
+            {"n": len(df)},
+        )
+
+
+def load_universe() -> pd.DataFrame | None:
+    """Lädt das Universum aus der DB. Gibt ``None`` zurück, wenn die Tabelle
+    fehlt oder die DB nicht erreichbar ist. Raised nie.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        return pd.read_sql_table(_UNIVERSE_TABLE, engine)
+    except ValueError:
+        log.info("Tabelle %s existiert noch nicht.", _UNIVERSE_TABLE)
+        return None
+    except SQLAlchemyError as exc:
+        log.warning("Laden aus Datenbank fehlgeschlagen: %s", exc)
+        return None
+
+
+def _ensure_sector_snapshot_table(conn) -> None:
+    conn.execute(
+        text(
+            f'CREATE TABLE IF NOT EXISTS {_SECTOR_SNAPSHOT_TABLE} ('
+            'snapshot_date DATE NOT NULL, '
+            'ticker TEXT NOT NULL, '
+            '"group" TEXT NOT NULL, '
+            'display_name TEXT NOT NULL, '
+            'last_price DOUBLE PRECISION, '
+            'sma_50 DOUBLE PRECISION, '
+            'sma_200 DOUBLE PRECISION, '
+            'momentum TEXT NOT NULL, '
+            'imported_at TIMESTAMPTZ NOT NULL DEFAULT now(), '
+            'PRIMARY KEY (snapshot_date, ticker))'
+        )
+    )
+    conn.execute(
+        text(
+            f'CREATE INDEX IF NOT EXISTS idx_sms_date ON '
+            f'{_SECTOR_SNAPSHOT_TABLE}(snapshot_date)'
+        )
+    )
+
+
+def save_sector_snapshot(df: pd.DataFrame, snapshot_date: date) -> int:
+    """UPSERT eines Sektor-Momentum-Snapshots. Liefert die Anzahl geschriebener
+    Zeilen. Raised bei DB-Problemen - der Aufrufer zeigt eine UI-Warnung.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    if df.empty:
+        return 0
+
+    rows = df.to_dict("records")
+    for row in rows:
+        row["snapshot_date"] = snapshot_date
+
+    with engine.begin() as conn:
+        _ensure_sector_snapshot_table(conn)
+        conn.execute(
+            text(
+                f'INSERT INTO {_SECTOR_SNAPSHOT_TABLE} '
+                '(snapshot_date, ticker, "group", display_name, '
+                'last_price, sma_50, sma_200, momentum) '
+                'VALUES (:snapshot_date, :ticker, :group, :display_name, '
+                ':last_price, :sma_50, :sma_200, :momentum) '
+                'ON CONFLICT (snapshot_date, ticker) DO UPDATE SET '
+                '"group" = EXCLUDED."group", '
+                'display_name = EXCLUDED.display_name, '
+                'last_price = EXCLUDED.last_price, '
+                'sma_50 = EXCLUDED.sma_50, '
+                'sma_200 = EXCLUDED.sma_200, '
+                'momentum = EXCLUDED.momentum, '
+                'imported_at = now()'
+            ),
+            rows,
+        )
+    return len(rows)
+
+
+def load_sector_snapshots(limit_weeks: int = 12) -> pd.DataFrame:
+    """Laedt die juengsten ``limit_weeks`` Snapshot-Datumswerte inkl. aller
+    Ticker-Zeilen. Gibt bei DB-Fehlern oder fehlender Tabelle einen leeren
+    DataFrame zurueck. Raised nie.
+    """
+
+    empty = pd.DataFrame(
+        columns=[
+            "snapshot_date",
+            "ticker",
+            "group",
+            "display_name",
+            "last_price",
+            "sma_50",
+            "sma_200",
+            "momentum",
+        ]
+    )
+    engine = get_engine()
+    if engine is None:
+        return empty
+    try:
+        with engine.begin() as conn:
+            _ensure_sector_snapshot_table(conn)
+            return pd.read_sql(
+                text(
+                    f'SELECT snapshot_date, ticker, "group", display_name, '
+                    'last_price, sma_50, sma_200, momentum '
+                    f'FROM {_SECTOR_SNAPSHOT_TABLE} '
+                    'WHERE snapshot_date IN ('
+                    '  SELECT snapshot_date FROM ('
+                    '    SELECT DISTINCT snapshot_date '
+                    f'    FROM {_SECTOR_SNAPSHOT_TABLE} '
+                    '    ORDER BY snapshot_date DESC LIMIT :n'
+                    '  ) s'
+                    ') '
+                    'ORDER BY snapshot_date ASC, ticker ASC'
+                ),
+                conn,
+                params={"n": int(limit_weeks)},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Sektor-Snapshots fehlgeschlagen: %s", exc)
+        return empty
+
+
+def list_sector_snapshot_dates() -> list[tuple[date, int]]:
+    """Liefert alle vorhandenen Snapshot-Daten mit der Zeilenanzahl je Datum,
+    absteigend sortiert (neuestes zuerst). Bei DB-Fehler -> leere Liste."""
+
+    engine = get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            _ensure_sector_snapshot_table(conn)
+            rows = conn.execute(
+                text(
+                    f"SELECT snapshot_date, COUNT(*) AS n "
+                    f"FROM {_SECTOR_SNAPSHOT_TABLE} "
+                    "GROUP BY snapshot_date "
+                    "ORDER BY snapshot_date DESC"
+                )
+            ).fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Auflisten der Sektor-Snapshots fehlgeschlagen: %s", exc)
+        return []
+    return [(row[0], int(row[1])) for row in rows]
+
+
+def delete_sector_snapshot(snapshot_date: date) -> int:
+    """Loescht alle Ticker-Zeilen eines Datums. Liefert die Zahl der geloeschten
+    Zeilen. Raised bei DB-Problemen - der Aufrufer zeigt eine UI-Warnung."""
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+
+    with engine.begin() as conn:
+        _ensure_sector_snapshot_table(conn)
+        result = conn.execute(
+            text(
+                f"DELETE FROM {_SECTOR_SNAPSHOT_TABLE} "
+                "WHERE snapshot_date = :d"
+            ),
+            {"d": snapshot_date},
+        )
+    return int(result.rowcount or 0)
+
+
+def _settings_to_dict(s: Settings) -> dict:
+    return {name: getattr(s, name) for name in _SETTINGS_FIELDS}
+
+
+def _apply_settings_dict(s: Settings, payload: dict) -> None:
+    """Spiegelt persistierte Werte auf ein Settings-Objekt. Unbekannte Keys
+    werden ignoriert, fehlende Keys behalten den Default."""
+
+    field_types = {f.name: f.type for f in dataclass_fields(Settings)}
+    for key in _SETTINGS_FIELDS:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if field_types.get(key) == "dict[str, float]" and isinstance(value, dict):
+            value = {k: float(v) for k, v in value.items()}
+        setattr(s, key, value)
+
+
+def _ensure_settings_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_SETTINGS_TABLE} ("
+            "id INTEGER PRIMARY KEY, "
+            "data JSONB NOT NULL, "
+            "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        )
+    )
+
+
+def save_settings(settings: Settings) -> None:
+    """UPSERT der App-Einstellungen als JSON (single-row, id=1).
+
+    Raised bei DB-Problemen - der Aufrufer zeigt eine UI-Warnung.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+
+    payload = json.dumps(_settings_to_dict(settings))
+    with engine.begin() as conn:
+        _ensure_settings_table(conn)
+        conn.execute(
+            text(
+                f"INSERT INTO {_SETTINGS_TABLE} (id, data, updated_at) "
+                "VALUES (1, CAST(:data AS JSONB), now()) "
+                "ON CONFLICT (id) DO UPDATE SET "
+                "data = EXCLUDED.data, updated_at = EXCLUDED.updated_at"
+            ),
+            {"data": payload},
+        )
+
+
+def load_settings() -> Settings | None:
+    """Laedt die zuletzt gespeicherten Einstellungen. Gibt ``None`` zurueck,
+    wenn keine vorhanden sind oder die DB nicht erreichbar ist. Raised nie."""
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_settings_table(conn)
+            row = conn.execute(
+                text(f"SELECT data FROM {_SETTINGS_TABLE} WHERE id = 1")
+            ).fetchone()
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Einstellungen fehlgeschlagen: %s", exc)
+        return None
+
+    if row is None:
+        return None
+    data = row[0]
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as exc:
+            log.warning("Einstellungs-JSON unleserlich: %s", exc)
+            return None
+    if not isinstance(data, dict):
+        return None
+
+    settings = Settings()
+    _apply_settings_dict(settings, data)
+    return settings

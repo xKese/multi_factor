@@ -10,47 +10,35 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, callback, dcc, html, register_page
 
 from app.core.data_loader import load_koyfin_csv
+from app.core.persistence import save_universe
 from app.core.state import STATE
+from app.pages.common import page_title
+from app.ui import fmt_de, section_header
 
 
 def layout(**_) -> html.Div:
     return html.Div(
         [
-            html.H2("Daten-Import"),
-            dbc.Alert(
-                [
-                    html.Strong("Format: "),
-                    "Koyfin-CSV-Export mit 57 Spalten (siehe Anleitung). ",
-                    "Die ersten zwei Zeilen (Metadaten / Original-Header) werden übersprungen.",
-                ],
-                color="info",
+            page_title(
+                "Daten-Import",
+                "Koyfin-CSV-Export mit 57 Spalten (siehe Anleitung). Die ersten "
+                "zwei Zeilen werden übersprungen.",
             ),
             dcc.Upload(
                 id="upload-csv",
                 children=html.Div(
                     [
                         "Datei hierher ziehen oder ",
-                        html.A("klicken zum Auswählen", className="text-primary"),
+                        html.A("klicken zum Auswählen"),
                     ]
                 ),
-                style={
-                    "width": "100%",
-                    "height": "120px",
-                    "lineHeight": "120px",
-                    "borderWidth": "2px",
-                    "borderStyle": "dashed",
-                    "borderRadius": "8px",
-                    "textAlign": "center",
-                    "backgroundColor": "#fafafa",
-                },
+                className="ms-upload",
                 multiple=False,
             ),
             html.Div(id="upload-status", className="mt-3"),
-            html.Hr(),
-            html.H4("Aktuelles Universum"),
+            section_header("Aktuelles Universum"),
             html.Div(id="universe-summary"),
-        ],
-        className="p-4",
+        ]
     )
 
 
@@ -69,11 +57,24 @@ def _handle(contents: str | None, filename: str | None):
         try:
             df = load_koyfin_csv(raw)
             STATE.set_raw(df)
-            status = dbc.Alert(
-                f"✓ {filename}: {len(df):,} Aktien geladen um "
-                f"{datetime.now():%H:%M:%S}.",
-                color="success",
-            )
+            alerts = [
+                dbc.Alert(
+                    f"✓ {filename}: {fmt_de(len(df), 0)} Aktien geladen um "
+                    f"{datetime.now():%H:%M:%S}.",
+                    color="success",
+                )
+            ]
+            try:
+                save_universe(df)
+            except Exception as exc:  # noqa: BLE001
+                alerts.append(
+                    dbc.Alert(
+                        f"Warnung: Datenbank-Speicherung fehlgeschlagen ({exc}). "
+                        "Daten sind nur in dieser Session verfügbar.",
+                        color="warning",
+                    )
+                )
+            status = html.Div(alerts)
         except Exception as exc:  # noqa: BLE001
             status = dbc.Alert(f"Fehler: {exc}", color="danger")
 
@@ -85,35 +86,35 @@ def _handle(contents: str | None, filename: str | None):
         [
             html.Tbody(
                 [
-                    html.Tr([html.Td("Aktien"), html.Td(f"{len(df):,}")]),
+                    html.Tr([html.Td("Aktien"), html.Td(fmt_de(len(df), 0))]),
                     html.Tr(
                         [
                             html.Td("Filter bestanden"),
-                            html.Td(f"{(df['filter_ok']=='JA').sum():,}"),
+                            html.Td(fmt_de((df["filter_ok"] == "JA").sum(), 0)),
                         ]
                     ),
                     html.Tr(
                         [
                             html.Td("Ø Gesamt-Score"),
-                            html.Td(f"{df['total_score'].dropna().mean():.1f}"),
+                            html.Td(fmt_de(df["total_score"].dropna().mean(), 1)),
                         ]
                     ),
                     html.Tr(
                         [
                             html.Td("Sektoren"),
-                            html.Td(f"{df['sector'].nunique()}"),
+                            html.Td(fmt_de(df["sector"].nunique(), 0)),
                         ]
                     ),
                     html.Tr(
                         [
                             html.Td("Industrien"),
-                            html.Td(f"{df['industry'].nunique()}"),
+                            html.Td(fmt_de(df["industry"].nunique(), 0)),
                         ]
                     ),
                     html.Tr(
                         [
                             html.Td("Regionen"),
-                            html.Td(f"{df['region'].nunique()}"),
+                            html.Td(fmt_de(df["region"].nunique(), 0)),
                         ]
                     ),
                 ]

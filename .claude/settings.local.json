@@ -1,7 +1,32 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "WebFetch(domain:www.morningstar.com)",
+      "WebSearch",
+      "WebFetch(domain:designsystem.morningstar.com)",
+      "WebFetch(domain:design.morningstar.com)",
+      "Bash(python *)",
+      "Bash(curl -fsS http://127.0.0.1:8050 -o /dev/null)",
+      "Bash(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8050__TRACKED_VAR__)",
+      "Bash(pkill -f \"python -m app.main\")",
+      "Bash(node *)",
+      "Bash(python main.py)",
+      "Bash(echo \"PID=$!\")",
+      "Bash(curl -s -o /tmp/index.html -w \"HTTP %{http_code} %{size_download}B\\\\n\" http://127.0.0.1:5000/)",
+      "Bash(curl -s -o /tmp/js.txt -w \"HTTP %{http_code} %{size_download}B\\\\n\" http://127.0.0.1:5000/assets/ms-theme.js)",
+      "Read(//tmp/**)",
+      "Bash(pkill -f \"python main.py\")",
+      "Bash(pkill -f \"port=5137\")",
+      "Bash(pkill -f \"main.py\")",
+      "Bash(curl -sf -o /dev/null http://127.0.0.1:5137/)",
+      "Bash(set -e)",
+      "Bash(curl -s -w \"HTTP %{http_code} %{size_download}B\\\\n\" -o /tmp/layout.json http://127.0.0.1:5137/_dash-layout)",
+      "Bash(curl -s -w \"HTTP %{http_code} %{size_download}B\\\\n\" -o /tmp/js.txt http://127.0.0.1:5137/assets/ms-theme.js)",
+      "Bash(curl -s http://127.0.0.1:5137/_dash-dependencies)",
+      "Bash(PYTHONPATH=. python3 tests/test_scoring.py)",
+      "Bash(pip install *)",
+      "Bash(PYTHONPATH=. python3 *)"
     ]
   }
 }

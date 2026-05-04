@@ -9,6 +9,9 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html, register_page
 
+from app.pages.common import page_title
+from app.ui import MS_LIGHT, fmt_signed_percent, fmt_percent, ms_badge, section_header
+
 
 STRATEGIC = {"Value": 0.2375, "Quality": 0.2375, "Growth": 0.2375,
              "Momentum": 0.2375, "Low Volatility": 0.05}
@@ -47,10 +50,9 @@ def _input(label: str, input_id: str, value: float, step: float = 0.1) -> dbc.Ro
 def layout(**_) -> html.Div:
     return html.Div(
         [
-            html.H2("Factor Timing System"),
-            html.P(
-                "Regelbasierte taktische Faktor-Allokation – 6-Monats-Horizont.",
-                className="text-muted",
+            page_title(
+                "Factor Timing System",
+                "Regelbasierte taktische Faktor-Allokation — 6-Monats-Horizont.",
             ),
             dbc.Row(
                 [
@@ -108,8 +110,7 @@ def layout(**_) -> html.Div:
                 className="mb-3",
             ),
             html.Div(id="ft-output"),
-        ],
-        className="p-4",
+        ]
     )
 
 
@@ -173,16 +174,36 @@ def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
     tactical = {k: v / s for k, v in tactical.items()}
 
     fig = go.Figure()
-    fig.add_bar(x=list(STRATEGIC.keys()), y=list(STRATEGIC.values()), name="Strategisch")
-    fig.add_bar(x=list(tactical.keys()), y=list(tactical.values()), name="Taktisch")
+    fig.add_bar(
+        x=list(STRATEGIC.keys()),
+        y=list(STRATEGIC.values()),
+        name="Strategisch",
+        marker_color="#6B6B68",
+    )
+    fig.add_bar(
+        x=list(tactical.keys()),
+        y=list(tactical.values()),
+        name="Taktisch",
+        marker_color="#0B3D91",
+    )
     fig.update_layout(
+        template=MS_LIGHT,
         barmode="group",
-        title=f"Regime: {regime} — Taktische Faktor-Allokation",
         yaxis_tickformat=".0%",
-        height=380,
+        height=340,
+        margin=dict(l=48, r=16, t=24, b=32),
     )
 
-    regime_badge = dbc.Alert(f"Aktuelles Regime: {regime}", color="primary")
+    regime_tone = {
+        "GOLDILOCKS": "up",
+        "HEATING UP": "warn",
+        "SLOWDOWN": "down",
+        "STAGFLATION": "down",
+    }.get(regime)
+    regime_badge = html.Div(
+        ms_badge("Aktuelles Regime", regime, tone=regime_tone),
+        className="ms-badge-row",
+    )
     table = dbc.Table(
         [
             html.Thead(
@@ -195,9 +216,9 @@ def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
                     html.Tr(
                         [
                             html.Td(f),
-                            html.Td(f"{STRATEGIC[f]:.1%}"),
-                            html.Td(f"{tactical[f]:.1%}"),
-                            html.Td(f"{tactical[f] - STRATEGIC[f]:+.1%}"),
+                            html.Td(fmt_percent(STRATEGIC[f], 1)),
+                            html.Td(fmt_percent(tactical[f], 1)),
+                            html.Td(fmt_signed_percent(tactical[f] - STRATEGIC[f], 1)),
                             html.Td(mom_signal[f]),
                         ]
                     )
@@ -210,7 +231,14 @@ def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
         hover=True,
     )
 
-    return html.Div([regime_badge, dcc.Graph(figure=fig), table])
+    return html.Div(
+        [
+            regime_badge,
+            section_header("Allokation", subtitle=f"Regime: {regime}"),
+            dcc.Graph(figure=fig, config={"displayModeBar": False}),
+            table,
+        ]
+    )
 
 
 register_page(__name__, path="/factor-timing", name="Factor Timing", layout=layout)

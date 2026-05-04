@@ -6,12 +6,17 @@ import dash_bootstrap_components as dbc
 from dash import html, register_page
 
 from app.core.state import STATE
-from app.pages.common import render_table
+from app.pages.common import page_title, render_table
 
 
 def layout(**_) -> html.Div:
     if STATE.scored.empty:
-        return dbc.Alert("Keine Daten geladen.", color="info", className="m-4")
+        return html.Div(
+            [
+                page_title("Industrie-Perzentil Übersicht"),
+                dbc.Alert("Keine Daten geladen.", color="info"),
+            ]
+        )
 
     df = STATE.scored
     min_count = STATE.settings.min_stocks_per_industry
@@ -27,15 +32,13 @@ def layout(**_) -> html.Div:
 
     return html.Div(
         [
-            html.H2("Industrie-Perzentil Übersicht"),
-            html.P(
-                f"Fallback auf Sektor-Perzentil bei < {min_count} Aktien (anpassbar "
-                "im Einstellungen-Tab).",
-                className="text-muted",
+            page_title(
+                "Industrie-Perzentil Übersicht",
+                f"Fallback auf Sektor-Perzentil bei < {min_count} Aktien "
+                "(anpassbar im Einstellungen-Tab).",
             ),
             render_table(summary, id="perz-table", page_size=50),
-        ],
-        className="p-4",
+        ]
     )
 
 
