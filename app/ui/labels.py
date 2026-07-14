@@ -65,8 +65,13 @@ INDICATOR_LABELS: dict[str, str] = {
     "sma_50_distance": "Abstand SMA-50 (%)",
     "sma_gap": "SMA-50 vs SMA-200 (%)",
     "direction": "Richtung",
+    "sma_20": "SMA-20",
     "sma_50": "SMA-50",
     "sma_200": "SMA-200",
+    "sma_20_distance": "Abstand SMA-20 (%)",
+    "mom_12_1": "Momentum 12-1 (%)",
+    "dist_52w_high": "Abstand 52W-Hoch (%)",
+    "trend_phase": "Trend-Phase",
     # Factor-IDs (in Einstellungen)
     "value": "Value",
     "quality": "Quality",

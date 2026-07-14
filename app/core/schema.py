@@ -62,6 +62,11 @@ KOYFIN_COLUMNS: list[str] = [
     "export_date",
 ]
 
+# Optionale Spalten, die der Loader per Header-Erkennung extrahiert (Position
+# im Export beliebig). NICHT in KOYFIN_COLUMNS aufnehmen — das Mapping der 57
+# Basisspalten ist positional und würde sich sonst verschieben.
+OPTIONAL_COLUMNS: tuple[str, ...] = ("sma_20",)
+
 PERCENT_COLUMNS: set[str] = {
     "div_yield",
     "roe",

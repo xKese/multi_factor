@@ -14,7 +14,7 @@ from app.ui import command_palette_layout, fmt_de, register_plotly_templates
 NAV_ORDER = {
     "Dashboard": 0,
     "Einzelanalyse": 1,
-    "SMA-Signale": 2,
+    "Momentum-Monitor": 2,
     "Sektor-Momentum": 3,
     "Portfolios": 4,
     "Factor Timing": 5,

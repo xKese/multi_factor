@@ -27,6 +27,7 @@ _UNIVERSE_TABLE = "koyfin_universe"
 _META_TABLE = "koyfin_meta"
 _SECTOR_SNAPSHOT_TABLE = "sector_momentum_snapshots"
 _SECTOR_SCORE_HISTORY_TABLE = "sector_score_history"
+_SIGNAL_HISTORY_TABLE = "universe_signal_history"
 _SETTINGS_TABLE = "app_settings"
 _FACTOR_TIMING_TABLE = "factor_timing_inputs"
 
@@ -432,6 +433,144 @@ def load_sector_score_history(limit_snapshots: int = 12) -> pd.DataFrame:
             )
     except SQLAlchemyError as exc:
         log.warning("Laden der Sektor-Score-Historie fehlgeschlagen: %s", exc)
+        return empty
+    if not df.empty:
+        df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
+    return df
+
+
+_SIGNAL_HISTORY_COLS: tuple[str, ...] = (
+    "momentum",
+    "trend_phase",
+    "last_price",
+    "sma_20",
+    "sma_50",
+    "sma_200",
+    "ret_1m",
+    "mom_12_1",
+    "dist_52w_high",
+    "total_score",
+)
+
+
+def _ensure_signal_history_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_SIGNAL_HISTORY_TABLE} ("
+            "snapshot_date DATE NOT NULL, "
+            "ticker TEXT NOT NULL, "
+            "momentum TEXT NOT NULL, "
+            "trend_phase TEXT, "
+            "last_price DOUBLE PRECISION, "
+            "sma_20 DOUBLE PRECISION, "
+            "sma_50 DOUBLE PRECISION, "
+            "sma_200 DOUBLE PRECISION, "
+            "ret_1m DOUBLE PRECISION, "
+            "mom_12_1 DOUBLE PRECISION, "
+            "dist_52w_high DOUBLE PRECISION, "
+            "total_score DOUBLE PRECISION, "
+            "imported_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "PRIMARY KEY (snapshot_date, ticker))"
+        )
+    )
+    conn.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS idx_ush_date ON "
+            f"{_SIGNAL_HISTORY_TABLE}(snapshot_date)"
+        )
+    )
+
+
+def save_signal_history(df: pd.DataFrame, snapshot_date: date) -> int:
+    """UPSERT der SMA-Signal-Zustände je Aktie für ein Snapshot-Datum.
+
+    ``df`` braucht mindestens ``ticker`` und ``momentum`` (kanonischer
+    ``classify_momentum``-State); weitere Kennzahlen-Spalten aus
+    ``_SIGNAL_HISTORY_COLS`` werden mitgespeichert, fehlende als NULL.
+    Raised bei DB-Problemen — der Aufrufer zeigt eine UI-Warnung.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    if df is None or df.empty:
+        return 0
+
+    rows: list[dict] = []
+    for _, r in df.iterrows():
+        ticker = r.get("ticker")
+        momentum = r.get("momentum")
+        if not isinstance(ticker, str) or not ticker or not isinstance(momentum, str):
+            continue
+        row: dict = {"snapshot_date": snapshot_date, "ticker": ticker}
+        for c in _SIGNAL_HISTORY_COLS:
+            val = r.get(c)
+            if c in ("momentum", "trend_phase"):
+                row[c] = str(val) if isinstance(val, str) else None
+            elif val is None or (isinstance(val, float) and pd.isna(val)):
+                row[c] = None
+            else:
+                try:
+                    row[c] = float(val)
+                except (TypeError, ValueError):
+                    row[c] = None
+        rows.append(row)
+    if not rows:
+        return 0
+
+    update_cols = ", ".join(f"{c} = EXCLUDED.{c}" for c in _SIGNAL_HISTORY_COLS)
+    with engine.begin() as conn:
+        _ensure_signal_history_table(conn)
+        conn.execute(
+            text(
+                f"INSERT INTO {_SIGNAL_HISTORY_TABLE} "
+                f"(snapshot_date, ticker, {', '.join(_SIGNAL_HISTORY_COLS)}) "
+                f"VALUES (:snapshot_date, :ticker, "
+                f"{', '.join(':' + c for c in _SIGNAL_HISTORY_COLS)}) "
+                "ON CONFLICT (snapshot_date, ticker) DO UPDATE SET "
+                f"{update_cols}, imported_at = now()"
+            ),
+            rows,
+        )
+    return len(rows)
+
+
+def load_signal_history(limit_snapshots: int = 26) -> pd.DataFrame:
+    """Lädt die ``limit_snapshots`` jüngsten Signal-Snapshots komplett.
+
+    Liefert einen DataFrame mit ``snapshot_date, ticker, momentum, …``,
+    aufsteigend nach Datum sortiert. Bei DB-Fehlern oder fehlender Tabelle
+    wird ein leerer DataFrame zurückgegeben. Raised nie.
+    """
+
+    empty = pd.DataFrame(
+        columns=["snapshot_date", "ticker", *_SIGNAL_HISTORY_COLS]
+    )
+    engine = get_engine()
+    if engine is None:
+        return empty
+    try:
+        with engine.begin() as conn:
+            _ensure_signal_history_table(conn)
+            df = pd.read_sql(
+                text(
+                    f"SELECT snapshot_date, ticker, "
+                    f"{', '.join(_SIGNAL_HISTORY_COLS)} "
+                    f"FROM {_SIGNAL_HISTORY_TABLE} "
+                    "WHERE snapshot_date IN ("
+                    "  SELECT snapshot_date FROM ("
+                    "    SELECT DISTINCT snapshot_date "
+                    f"    FROM {_SIGNAL_HISTORY_TABLE} "
+                    "    ORDER BY snapshot_date DESC LIMIT :n"
+                    "  ) s"
+                    ") "
+                    "ORDER BY snapshot_date ASC, ticker ASC"
+                ),
+                conn,
+                params={"n": int(limit_snapshots)},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Signal-Historie fehlgeschlagen: %s", exc)
         return empty
     if not df.empty:
         df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date

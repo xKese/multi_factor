@@ -22,7 +22,14 @@ SCORE_COLORS = {
 
 # Spalten, die bereits im DataFrame in Prozent-Notation vorliegen (× 100,
 # z. B. ``sma_200_distance`` nach :func:`format_scored`).
-_PRE_MULTIPLIED_PCT: set[str] = {"sma_200_distance", "sma_50_distance", "sma_gap"}
+_PRE_MULTIPLIED_PCT: set[str] = {
+    "sma_200_distance",
+    "sma_50_distance",
+    "sma_20_distance",
+    "sma_gap",
+    "mom_12_1",
+    "dist_52w_high",
+}
 
 # Score-Spalten (0–100, eine Nachkommastelle).
 _SCORE_COLS: set[str] = {
@@ -237,7 +244,7 @@ def format_scored(df: pd.DataFrame) -> pd.DataFrame:
     for col in _SCORE_COLS:
         if col in df.columns:
             df[col] = df[col].round(1)
-    for col in ("sma_200_distance", "sma_50_distance", "sma_gap"):
+    for col in _PRE_MULTIPLIED_PCT:
         if col in df.columns:
             # In Prozent-Punkt-Einheit (× 100) für das pre-multiplied Format.
             df[col] = (df[col] * 100).round(2)

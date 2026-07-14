@@ -68,7 +68,7 @@ def _empty_state() -> html.Div:
                     html.H2("Noch keine Daten geladen", className="ms-empty-title"),
                     html.P(
                         "Lade einen Koyfin-CSV-Export hoch, um Dashboard, "
-                        "Einzelanalyse und SMA-Signale zu befüllen.",
+                        "Einzelanalyse und Momentum-Monitor zu befüllen.",
                         className="ms-empty-sub",
                     ),
                     html.Div(
