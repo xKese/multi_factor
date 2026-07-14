@@ -46,6 +46,33 @@ python -m app.main
 App läuft auf <http://127.0.0.1:8050>. Beim Start ist kein Universum geladen —
 das Dashboard zeigt eine Hinweis-Meldung.
 
+Ohne Datenbank läuft die App im In-Memory-Modus: Importierte Daten und
+Einstellungen gehen bei einem Neustart verloren. Für dauerhafte Speicherung
+eine PostgreSQL-URL über die Umgebungsvariable `DATABASE_URL` setzen.
+
+Hinweis: Der PDF-Factsheet-Export (WeasyPrint) benötigt die Systembibliotheken
+Pango, Cairo und GDK-Pixbuf. Fehlen sie, läuft die App trotzdem — nur der
+PDF-Export schlägt fehl.
+
+## Docker
+
+Vollständig lokaler Betrieb inklusive PostgreSQL-Persistenz und aller
+WeasyPrint-Abhängigkeiten:
+
+```bash
+docker compose up --build
+```
+
+App läuft auf <http://localhost:5000>. Die importierten Daten liegen im
+Docker-Volume `pgdata` und überleben Container-Neustarts.
+
+Ohne Compose (dann ohne Persistenz):
+
+```bash
+docker build -t multi-factor .
+docker run -p 5000:5000 multi-factor
+```
+
 ## Daten hochladen
 
 1. Browser auf <http://127.0.0.1:8050/daten-import>

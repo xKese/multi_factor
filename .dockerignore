@@ -1,0 +1,15 @@
+.git
+.claude
+.replit
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.env
+.DS_Store
+*.xlsx
+koyfin_GICS-Sektoren Global_2026.04.22_01.05.57.647.csv
+app/Aktien Factsheet-handoff
+Dockerfile
+docker-compose.yml
