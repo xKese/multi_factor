@@ -17,29 +17,29 @@ from dash import html
 # ---- Farb-Tokens (mirror der CSS-Variablen) ---------------------------------
 
 LIGHT = {
-    "bg": "#FFFFFF",
-    "surface": "#F7F7F5",
-    "border": "#E4E4E0",
-    "text": "#1A1A1A",
-    "text_muted": "#6B6B68",
-    "accent": "#0B3D91",
-    "up": "#1B7F3A",
-    "down": "#C2281E",
-    "warn": "#B8860B",
-    "palette": ["#0B3D91", "#3C7CC9", "#1B7F3A", "#C98A0E", "#7A4AA0", "#B8433A"],
+    "bg": "#FBF8F2",
+    "surface": "#FFFFFF",
+    "border": "#E2DED4",
+    "text": "#1A1A19",
+    "text_muted": "#6E6E68",
+    "accent": "#2A4D38",
+    "up": "#2F7A3A",
+    "down": "#B23A2E",
+    "warn": "#A37F2F",
+    "palette": ["#2A4D38", "#6B8F77", "#A37F2F", "#C9A24B", "#3D8A4A", "#BE9136"],
 }
 
 DARK = {
-    "bg": "#0F1114",
-    "surface": "#17191D",
-    "border": "#2A2D33",
-    "text": "#EDEDEA",
-    "text_muted": "#9A9A95",
-    "accent": "#5B8DEF",
-    "up": "#4CAF6E",
-    "down": "#E06B60",
-    "warn": "#D8B35B",
-    "palette": ["#5B8DEF", "#7AA3F2", "#4CAF6E", "#D8B35B", "#A68BD3", "#D8756B"],
+    "bg": "#14201A",
+    "surface": "#1A2A22",
+    "border": "#2A3A30",
+    "text": "#F1ECE0",
+    "text_muted": "#9DA89E",
+    "accent": "#B8D4BE",
+    "up": "#6FBF80",
+    "down": "#E07B70",
+    "warn": "#D8B872",
+    "palette": ["#B8D4BE", "#D8B872", "#6FBF80", "#E5C58A", "#9DC3A4", "#C9A24B"],
 }
 
 MS_LIGHT = "ms_light"

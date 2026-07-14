@@ -58,5 +58,20 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
             df[col] = np.nan
 
     df = _coerce_numeric(df)
+
+    # Koyfin liefert die annualisierte Volatilität bereits als Prozent-Wert
+    # (z. B. ``28,4`` für 28,4 %), während andere Prozent-Felder (Returns,
+    # Margins) als Dezimalanteil exportiert werden. Damit alle Prozent-Felder
+    # einheitlich als Dezimalanteil im DataFrame liegen (Konvention von
+    # ``PERCENT_FIELDS``/``fmt_percent``), skalieren wir hier um.
+    if "volatility_1y" in df.columns:
+        df["volatility_1y"] = df["volatility_1y"] / 100.0
+
+    # Koyfin-Watchlist-Exporte enthalten Gruppen-Überschriften (z. B. "MSCI World",
+    # "Unclassified", "Watch") als Zeilen, in denen nur die Ticker-Spalte gefüllt ist.
+    # Erkennen über fehlenden Namen UND fehlenden Kurs — echte Datenzeilen haben beide.
+    if {"name", "last_price"}.issubset(df.columns):
+        df = df.loc[~(df["name"].isna() & df["last_price"].isna())]
+
     df = df.dropna(subset=["ticker"]).reset_index(drop=True)
     return df

@@ -4,16 +4,56 @@ from __future__ import annotations
 
 import base64
 import io
-from datetime import datetime
+import logging
+from datetime import date, datetime
 
 import dash_bootstrap_components as dbc
+import pandas as pd
 from dash import Input, Output, callback, dcc, html, register_page
 
 from app.core.data_loader import load_koyfin_csv
-from app.core.persistence import save_universe
+from app.core.persistence import save_sector_score_history, save_universe
+from app.core.sector_momentum import aggregate_sectors, aggregates_to_history_records
 from app.core.state import STATE
 from app.pages.common import page_title
 from app.ui import fmt_de, section_header
+
+log = logging.getLogger(__name__)
+
+
+def _snapshot_date_from_universe(df: pd.DataFrame) -> date:
+    """Liefert das Snapshot-Datum für die Score-History.
+
+    Bevorzugt das Maximum von ``export_date`` aus dem Universum (Koyfin liefert
+    je Zeile ein Datum mit). Bei fehlendem oder unparsbarem Wert: heutiges
+    Datum.
+    """
+    if "export_date" in df.columns:
+        parsed = pd.to_datetime(df["export_date"], errors="coerce").dropna()
+        if not parsed.empty:
+            return parsed.max().date()
+    return date.today()
+
+
+def _persist_sector_score_history() -> None:
+    """Persistiert die aktuellen Sektor-/Industrie-Aggregate als Snapshot.
+
+    Wird nach :func:`STATE.set_raw` aufgerufen. Fehler werden geloggt, aber
+    nicht propagiert — die Score-History ist eine Komfortfunktion, ihr
+    Ausfall darf den Daten-Import nicht blockieren.
+    """
+    df = STATE.scored
+    if df is None or df.empty:
+        return
+    try:
+        agg = aggregate_sectors(df)
+        records = aggregates_to_history_records(agg)
+        if not records:
+            return
+        snap = _snapshot_date_from_universe(df)
+        save_sector_score_history(records, snap)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Sektor-Score-Historie konnte nicht gespeichert werden: %s", exc)
 
 
 def layout(**_) -> html.Div:
@@ -74,6 +114,7 @@ def _handle(contents: str | None, filename: str | None):
                         color="warning",
                     )
                 )
+            _persist_sector_score_history()
             status = html.Div(alerts)
         except Exception as exc:  # noqa: BLE001
             status = dbc.Alert(f"Fehler: {exc}", color="danger")

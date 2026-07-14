@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>Aktien Factsheet — Multi-Faktor-Modell</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <template id="__bundler_thumbnail" data-bg-color="#fafaf7">
+    <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+      <rect x="180" y="120" width="840" height="560" fill="#ffffff" stroke="#1a1a1a" stroke-width="4"/>
+      <rect x="220" y="170" width="280" height="48" fill="#1a1a1a"/>
+      <rect x="220" y="240" width="380" height="14" fill="#737067"/>
+      <rect x="760" y="170" width="220" height="80" fill="#1b5e3a"/>
+      <rect x="220" y="320" width="760" height="2" fill="#1a1a1a"/>
+      <rect x="220" y="350" width="180" height="60" fill="#efece4"/>
+      <rect x="420" y="350" width="180" height="60" fill="#efece4"/>
+      <rect x="620" y="350" width="180" height="60" fill="#efece4"/>
+      <rect x="820" y="350" width="160" height="60" fill="#efece4"/>
+      <rect x="220" y="450" width="340" height="180" fill="#fafaf7" stroke="#1a1a1a" stroke-width="2"/>
+      <rect x="600" y="450" width="380" height="180" fill="#fafaf7" stroke="#1a1a1a" stroke-width="2"/>
+    </svg>
+  </template>
+  <style>
+    html, body { margin: 0; padding: 0; background: #e9e8e4; }
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="data.jsx"></script>
+  <script type="text/babel" src="variation-editorial.jsx"></script>
+  <script type="text/babel" src="variation-swiss.jsx"></script>
+  <script type="text/babel" src="variation-card.jsx"></script>
+
+  <script type="text/babel">
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "ticker": "MSFT",
+      "dense": false,
+      "showPeers": true,
+      "focus": "all"
+    }/*EDITMODE-END*/;
+
+    function App() {
+      const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+      const { ticker, dense, showPeers, focus } = tweaks;
+
+      const variations = [
+        { id: "editorial", label: "Editorial", Component: EditorialFactsheet, subtitle: "Magazin-Typografie, ruhig" },
+        { id: "swiss", label: "Swiss Grid", Component: SwissFactsheet, subtitle: "Strikt, monochrom, präzise" },
+        { id: "card", label: "Card Mosaic", Component: CardFactsheet, subtitle: "Weiche Karten, modern" },
+      ];
+
+      const visible = focus === "all" ? variations : variations.filter(v => v.id === focus);
+
+      return (
+        <>
+          <DesignCanvas
+            title="Aktien-Factsheet"
+            subtitle="Multi-Faktor-Modell · A4 Hochformat · 3 Aesthetik-Varianten"
+          >
+            <DCSection id="variations" title="Varianten" subtitle="Jeweils ein A4-Bogen (210 × 297 mm)">
+              {visible.map(v => {
+                const C = v.Component;
+                return (
+                  <DCArtboard
+                    key={v.id + ticker + dense + showPeers}
+                    id={v.id}
+                    label={`${v.label} · ${ticker}`}
+                    width={794}
+                    height={1123}
+                  >
+                    <C ticker={ticker} dense={dense} showPeers={showPeers} />
+                  </DCArtboard>
+                );
+              })}
+            </DCSection>
+          </DesignCanvas>
+
+          <TweaksPanel title="Tweaks">
+            <TweakSection title="Inhalt">
+              <TweakRadio
+                label="Ticker"
+                value={ticker}
+                onChange={(v) => setTweak("ticker", v)}
+                options={[
+                  { value: "ASML", label: "ASML" },
+                  { value: "NVDA", label: "NVDA" },
+                  { value: "MSFT", label: "MSFT" },
+                  { value: "TSM", label: "TSMC" },
+                ]}
+              />
+              <TweakSelect
+                label="Variante anzeigen"
+                value={focus}
+                onChange={(v) => setTweak("focus", v)}
+                options={[
+                  { value: "all", label: "Alle 3 vergleichen" },
+                  { value: "editorial", label: "Nur Editorial" },
+                  { value: "swiss", label: "Nur Swiss Grid" },
+                  { value: "card", label: "Nur Card Mosaic" },
+                ]}
+              />
+            </TweakSection>
+            <TweakSection title="Layout">
+              <TweakToggle
+                label="Dichte Darstellung"
+                value={dense}
+                onChange={(v) => setTweak("dense", v)}
+              />
+              <TweakToggle
+                label="Comparables zeigen"
+                value={showPeers}
+                onChange={(v) => setTweak("showPeers", v)}
+              />
+            </TweakSection>
+          </TweaksPanel>
+        </>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>

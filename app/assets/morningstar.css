@@ -1118,3 +1118,1560 @@ hr { border-color: var(--ms-border); opacity: 1; }
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
+
+/* ==========================================================================
+   M&S Brand-Refresh — Forest Green + Gold + Cream
+   Overrides der Tokens (gilt global) und neue Dashboard-Komponenten.
+   Design-Quelle: Claude-Design-Handoff "M&S Multi Faktor".
+   ========================================================================== */
+
+:root {
+  /* Marken-Override: warmes Cream-Paper, Forest-Green-Akzent */
+  --ms-bg: #FBF8F2;
+  --ms-surface: #FFFFFF;
+  --ms-surface-alt: #F6F2EA;
+  --ms-border: #E2DED4;
+  --ms-border-strong: #B5B3AC;
+  --ms-text: #1A1A19;
+  --ms-text-muted: #6E6E68;
+  --ms-text-subtle: #8A8A85;
+
+  --ms-accent: #2A4D38;          /* forest-green-800, primär */
+  --ms-accent-hover: #1F3A2A;    /* green-900 */
+  --ms-accent-soft: #EEF2EE;     /* green-50 */
+
+  --ms-up: #2F7A3A;
+  --ms-up-soft: #E6F0E8;
+  --ms-down: #B23A2E;
+  --ms-down-soft: #F7E6E3;
+  --ms-warn: #A37F2F;
+  --ms-warn-soft: #F7EFD8;
+  --ms-info: #2A4D38;
+  --ms-info-soft: #EEF2EE;
+
+  /* Score-Grade in M&S-Tönen */
+  --ms-score-a:  #1F6B33;
+  --ms-score-bp: #3D8A4A;
+  --ms-score-b:  #6F9A52;
+  --ms-score-c:  #BE9136;
+  --ms-score-d:  #C57A3A;
+  --ms-score-f:  #A23A2D;
+
+  /* Chart-Palette: Green/Gold-getönt */
+  --ms-chart-1: #2A4D38;
+  --ms-chart-2: #6B8F77;
+  --ms-chart-3: #A37F2F;
+  --ms-chart-4: #C9A24B;
+  --ms-chart-5: #3D8A4A;
+  --ms-chart-6: #BE9136;
+
+  /* Neue M&S-Tokens */
+  --ms-gold: #A37F2F;
+  --ms-gold-2: #C9A24B;
+  --ms-gold-soft: #F1E6CC;
+  --ms-green-deep: #1F3A2A;
+  --ms-green-mid: #3D6B4D;
+  --ms-paper: #F6F2EA;
+
+  --ms-font-serif: "Cormorant Garamond", "Garamond", "Georgia", "Times New Roman", serif;
+}
+
+[data-theme="dark"] {
+  --ms-bg: #14201A;
+  --ms-surface: #1A2A22;
+  --ms-surface-alt: #122019;
+  --ms-border: #2A3A30;
+  --ms-border-strong: #3A4D40;
+  --ms-text: #F1ECE0;
+  --ms-text-muted: #9DA89E;
+  --ms-text-subtle: #7A8478;
+
+  --ms-accent: #B8D4BE;
+  --ms-accent-hover: #E5DEC8;
+  --ms-accent-soft: #1F3A2A;
+
+  --ms-up: #6FBF80;
+  --ms-up-soft: #1F3A2A;
+  --ms-down: #E07B70;
+  --ms-down-soft: #3A1F1B;
+  --ms-warn: #D8B872;
+  --ms-warn-soft: #2D2618;
+
+  --ms-gold: #D8B872;
+  --ms-gold-2: #E5C58A;
+  --ms-gold-soft: #2D2618;
+  /* Design-Vorlage: --app-accent-deep flippt im Dark-Mode auf cremig.
+     Damit bleiben Cormorant-Headlines lesbar (cream auf dunkelgrün). */
+  --ms-green-deep: #E5DEC8;
+  /* --ms-paper bleibt absichtlich cremig (Designvorlage definiert keinen Dark-Override) */
+}
+
+/* ---- Quote-Hero ---------------------------------------------------------- */
+.ms-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 32px;
+  padding: 32px 36px;
+  background: var(--ms-surface);
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-r-card);
+  position: relative;
+  overflow: hidden;
+}
+.ms-hero::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--ms-gold);
+}
+.ms-hero-eyebrow {
+  font-family: var(--ms-font-sans);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-gold);
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+.ms-hero-title {
+  font-family: var(--ms-font-serif);
+  font-weight: 500;
+  font-size: 44px;
+  line-height: 1.05;
+  color: var(--ms-green-deep);
+  margin: 0 0 4px;
+  letter-spacing: -0.012em;
+}
+.ms-hero-subhead {
+  font-family: var(--ms-font-serif);
+  font-style: italic;
+  font-size: 18px;
+  color: var(--ms-text-muted);
+  margin: 0 0 16px;
+  font-weight: 400;
+}
+.ms-hero-meta {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ms-text-muted);
+  letter-spacing: 0.02em;
+}
+.ms-hero-meta .ms-sep { color: var(--ms-border-strong); }
+.ms-hero-meta strong {
+  color: var(--ms-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ms-hero-score {
+  text-align: right;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.ms-score-num {
+  font-family: var(--ms-font-serif);
+  font-size: 84px;
+  line-height: 0.9;
+  font-weight: 500;
+  color: var(--ms-green-deep);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.ms-score-suf {
+  font-size: 28px;
+  color: var(--ms-text-muted);
+  font-weight: 400;
+  margin-left: 2px;
+}
+.ms-score-class {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-gold);
+  font-weight: 600;
+}
+.ms-score-ctx {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--ms-text-muted);
+  text-align: right;
+}
+.ms-score-ctx strong {
+  color: var(--ms-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+/* ---- Markt-Regime-Streifen ---------------------------------------------- */
+.ms-regime-strip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 18px;
+  background: var(--ms-green-deep);
+  color: var(--ms-paper);
+  border-radius: var(--ms-r-badge);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.ms-regime-strip .ms-rg-lab {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ms-gold-2);
+  font-weight: 600;
+}
+.ms-regime-strip .ms-rg-val {
+  color: var(--ms-paper);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ms-regime-strip .ms-rg-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(246, 242, 234, 0.18);
+}
+.ms-regime-strip .ms-rg-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: rgba(246, 242, 234, 0.08);
+  border: 1px solid rgba(246, 242, 234, 0.18);
+  border-radius: var(--ms-r-badge);
+}
+.ms-regime-strip .ms-rg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ms-gold-2);
+  display: inline-block;
+}
+
+/* ---- Card (Dashboard-Komponente) ---------------------------------------- */
+.ms-card {
+  background: var(--ms-surface);
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-r-card);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.ms-card-h {
+  font-family: var(--ms-font-sans);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  margin: 0;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.ms-card-h-meta {
+  font-family: var(--ms-font-sans);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ms-text-muted);
+  text-transform: none;
+  font-weight: 400;
+}
+
+.ms-row {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+.ms-row.ms-r-3 { grid-template-columns: 1fr 1fr 1fr; }
+.ms-row.ms-r-2 { grid-template-columns: 1fr 1fr; }
+@media (max-width: 1100px) {
+  .ms-row.ms-r-3 { grid-template-columns: 1fr; }
+}
+
+/* ---- Empfehlungs-Bar ---------------------------------------------------- */
+.ms-rec-bar {
+  display: flex;
+  height: 28px;
+  border-radius: var(--ms-r-badge);
+  overflow: hidden;
+  border: 1px solid var(--ms-border);
+  background: var(--ms-bg);
+}
+.ms-rec-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ms-rec-seg.is-strong { background: var(--ms-score-a); }
+.ms-rec-seg.is-buy    { background: var(--ms-score-bp); }
+.ms-rec-seg.is-hold   { background: var(--ms-score-c); }
+.ms-rec-seg.is-sell   { background: var(--ms-score-f); }
+.ms-rec-seg.is-fail   { background: var(--ms-border-strong); color: var(--ms-text); }
+
+.ms-rec-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--ms-text-muted);
+}
+.ms-rec-legend .ms-rl-it { display: inline-flex; align-items: center; gap: 6px; }
+.ms-rec-legend .ms-rl-sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  display: inline-block;
+}
+.ms-rec-legend .ms-rl-it.is-strong .ms-rl-sw { background: var(--ms-score-a); }
+.ms-rec-legend .ms-rl-it.is-buy    .ms-rl-sw { background: var(--ms-score-bp); }
+.ms-rec-legend .ms-rl-it.is-hold   .ms-rl-sw { background: var(--ms-score-c); }
+.ms-rec-legend .ms-rl-it.is-sell   .ms-rl-sw { background: var(--ms-score-f); }
+.ms-rec-legend .ms-rl-it.is-fail   .ms-rl-sw { background: var(--ms-border-strong); }
+.ms-rec-legend strong {
+  color: var(--ms-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* ---- Faktor-Säulen (vertikal) ------------------------------------------ */
+.ms-factor-cols {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  margin-top: 4px;
+}
+.ms-fc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.ms-fc-bar-wrap {
+  width: 100%;
+  height: 130px;
+  position: relative;
+  background:
+    repeating-linear-gradient(
+      to top,
+      transparent 0,
+      transparent calc(20% - 1px),
+      var(--ms-border) calc(20% - 1px),
+      var(--ms-border) 20%
+    ),
+    var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-r-badge);
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+.ms-fc-bar {
+  width: 100%;
+  background: var(--ms-accent);
+  position: relative;
+}
+.ms-fc-bar.is-deep { background: var(--ms-green-deep); }
+.ms-fc-bar.is-gold { background: var(--ms-gold); }
+.ms-fc-name {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+}
+.ms-fc-val {
+  font-family: var(--ms-font-serif);
+  font-size: 24px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-green-deep);
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.ms-fc-w {
+  font-size: 10px;
+  color: var(--ms-text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* ---- Sektor-Liste ------------------------------------------------------- */
+.ms-sec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ms-sec-row {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) 36px 32px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 140ms ease;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ms-r-badge);
+  text-align: left;
+  color: var(--ms-text);
+  font-family: inherit;
+}
+.ms-sec-row:hover { background: var(--ms-surface-alt); }
+.ms-sec-row.is-active { background: var(--ms-gold-soft); }
+.ms-sec-row .ms-sec-nm {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-sec-row .ms-sec-bar {
+  height: 8px;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: 1px;
+  overflow: hidden;
+  position: relative;
+}
+.ms-sec-row .ms-sec-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ms-accent);
+}
+.ms-sec-row .ms-sec-bar > span.is-warn { background: var(--ms-warn); }
+.ms-sec-row .ms-sec-bar > span.is-down { background: var(--ms-down); }
+.ms-sec-row .ms-sec-v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}
+.ms-sec-row .ms-sec-n {
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-text-muted);
+  text-align: right;
+  font-size: 11px;
+}
+
+/* ---- Bewegungen (Mover) ------------------------------------------------- */
+.ms-movers { display: flex; flex-direction: column; }
+.ms-mover {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ms-border);
+  font-size: 12px;
+  cursor: pointer;
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  text-align: left;
+  font-family: inherit;
+  color: var(--ms-text);
+  width: 100%;
+}
+.ms-mover:last-child { border-bottom: 0; }
+.ms-mover:hover { background: var(--ms-surface-alt); }
+.ms-mover .ms-mv-tk {
+  font-weight: 700;
+  color: var(--ms-green-deep);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.ms-mover .ms-mv-nm {
+  color: var(--ms-text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ms-mover .ms-mv-nm small {
+  display: block;
+  color: var(--ms-text-muted);
+  font-size: 10px;
+  margin-top: 1px;
+}
+.ms-mover .ms-mv-v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12px;
+  text-align: right;
+}
+.ms-mover .ms-mv-v.is-up { color: var(--ms-up); }
+.ms-mover .ms-mv-v.is-down { color: var(--ms-down); }
+.ms-movers-divider {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ms-border);
+}
+
+/* ---- Top-Tabelle (HTML-basiert) ----------------------------------------- */
+.ms-toptable-wrap {
+  background: var(--ms-surface);
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-r-card);
+  overflow: hidden;
+}
+.ms-toptable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-toptable thead th {
+  text-align: left;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+  padding: 10px 12px;
+  background: var(--ms-surface-alt);
+  border-bottom: 1px solid var(--ms-border);
+  white-space: nowrap;
+}
+.ms-toptable thead th.is-num { text-align: right; }
+.ms-toptable td {
+  padding: 0 12px;
+  height: 36px;
+  border-bottom: 1px solid var(--ms-border);
+  vertical-align: middle;
+}
+.ms-toptable td.is-num { text-align: right; font-weight: 500; }
+.ms-toptable tbody tr { background: var(--ms-surface); }
+.ms-toptable tbody tr:hover { background: var(--ms-accent-soft); }
+.ms-toptable tbody tr:last-child td { border-bottom: 0; }
+.ms-toptable .ms-tt-tk {
+  font-weight: 700;
+  color: var(--ms-green-deep);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+.ms-toptable .ms-tt-tk:hover { color: var(--ms-gold); text-decoration: underline; }
+.ms-toptable .ms-tt-muted { color: var(--ms-text-muted); }
+.ms-toptable .ms-tt-rec {
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ms-toptable .ms-tt-rec.is-strong { color: var(--ms-score-a); }
+.ms-toptable .ms-tt-rec.is-buy    { color: var(--ms-score-bp); }
+.ms-toptable .ms-tt-rec.is-hold   { color: var(--ms-score-c); }
+.ms-toptable .ms-tt-rec.is-sell   { color: var(--ms-score-f); }
+.ms-toptable .ms-tt-rec.is-fail   { color: var(--ms-text-muted); }
+
+/* Mini-Faktor-Streifen in Tabelle */
+.ms-mini-fac {
+  display: inline-flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 18px;
+}
+.ms-mini-fac span {
+  width: 5px;
+  background: var(--ms-accent);
+  display: block;
+  min-height: 1px;
+}
+.ms-mini-fac span.is-gold  { background: var(--ms-gold); }
+.ms-mini-fac span.is-deep  { background: var(--ms-green-deep); }
+.ms-mini-fac span.is-muted { background: var(--ms-border-strong); }
+
+/* Score-Pille */
+.ms-score-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--ms-r-badge);
+  font-weight: 700;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: white;
+}
+.ms-score-pill.is-a  { background: var(--ms-score-a); }
+.ms-score-pill.is-bp { background: var(--ms-score-bp); }
+.ms-score-pill.is-b  { background: var(--ms-score-b); }
+.ms-score-pill.is-c  { background: var(--ms-score-c); }
+.ms-score-pill.is-d  { background: var(--ms-score-d); }
+.ms-score-pill.is-f  { background: var(--ms-score-f); }
+
+/* ---- Dashboard-Section-Head -------------------------------------------- */
+.ms-dash-section {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 32px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ms-border);
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.ms-dash-section h2 {
+  font-family: var(--ms-font-serif);
+  font-weight: 500;
+  font-size: 28px;
+  color: var(--ms-green-deep);
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+.ms-dash-section .ms-eyebrow {
+  display: block;
+  font-family: var(--ms-font-sans);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-gold);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.ms-dash-section .ms-meta {
+  font-size: 12px;
+  color: var(--ms-text-muted);
+}
+.ms-dash-section .ms-meta a {
+  color: var(--ms-gold);
+  cursor: pointer;
+  text-decoration: none;
+}
+.ms-dash-section .ms-meta a:hover { text-decoration: underline; }
+
+/* Bestehende H1 in Page-Titel auf Serif schalten (wenn vorhanden) */
+.ms-page-title { font-family: var(--ms-font-serif); }
+.ms-kpi-value { font-family: var(--ms-font-serif); }
+
+/* ---- Dark-Mode-Korrektur Regime-Streifen --------------------------------
+   Hintergrund flippt designgemäß auf cremig (--ms-green-deep = #E5DEC8).
+   Damit der Streifen lesbar bleibt, werden Text, Labels, Separator
+   und Pills im Dark-Mode auf dunkle Töne umgestellt. */
+[data-theme="dark"] .ms-regime-strip {
+  color: #1F3A2A;
+}
+[data-theme="dark"] .ms-regime-strip .ms-rg-val {
+  color: #1F3A2A;
+}
+[data-theme="dark"] .ms-regime-strip .ms-rg-lab {
+  color: #7F5F18;
+}
+[data-theme="dark"] .ms-regime-strip .ms-rg-sep {
+  background: rgba(31, 58, 42, 0.20);
+}
+[data-theme="dark"] .ms-regime-strip .ms-rg-pill {
+  background: rgba(31, 58, 42, 0.06);
+  border-color: rgba(31, 58, 42, 0.18);
+}
+[data-theme="dark"] .ms-regime-strip .ms-rg-dot {
+  background: #7F5F18;
+}
+
+/* ==========================================================================
+   M&S Einzelanalyse — Tearsheet (Variante A)
+   Design-Quelle: Claude-Design-Handoff (EinzelA in app.jsx).
+   ========================================================================== */
+
+/* ---- Verdict-Streifen --------------------------------------------------- */
+.ms-verdict {
+  margin-top: 16px;
+  padding: 16px 20px;
+  background: var(--ms-surface-alt);
+  border: 1px solid var(--ms-border);
+  border-left: 3px solid var(--ms-accent);
+  border-radius: var(--ms-r-badge);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.ms-verdict-text {
+  font-family: var(--ms-font-serif);
+  font-style: italic;
+  font-size: 17px;
+  color: var(--ms-green-deep);
+  line-height: 1.5;
+  max-width: 70ch;
+  margin: 0;
+}
+.ms-verdict-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- Strengths / Concerns ----------------------------------------------- */
+.ms-sc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.ms-sc-it {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--ms-border);
+  background: var(--ms-bg);
+  border-radius: var(--ms-r-badge);
+}
+.ms-sc-it .ms-sc-lbl {
+  font-size: 11px;
+  color: var(--ms-text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-sc-it .ms-sc-val {
+  font-family: var(--ms-font-serif);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--ms-text);
+}
+.ms-sc-it .ms-sc-pct {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: var(--ms-r-badge);
+}
+.ms-sc-it.is-strength { border-left: 3px solid var(--ms-up); }
+.ms-sc-it.is-strength .ms-sc-pct {
+  background: rgba(47, 122, 58, 0.10);
+  color: var(--ms-up);
+}
+.ms-sc-it.is-concern { border-left: 3px solid var(--ms-down); }
+.ms-sc-it.is-concern .ms-sc-pct {
+  background: rgba(178, 58, 46, 0.08);
+  color: var(--ms-down);
+}
+
+/* ---- Faktor-Decomposition (vertikale Säulen pro Faktor) ----------------- */
+.ms-fac-stack-wrap {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 18px;
+  align-items: end;
+}
+@media (max-width: 800px) {
+  .ms-fac-stack-wrap { grid-template-columns: repeat(2, 1fr); }
+}
+.ms-fac-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.ms-fac-stack .ms-stack-bar {
+  width: 64px;
+  height: 220px;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-r-badge);
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
+}
+.ms-fac-stack .ms-stack-seg {
+  width: 100%;
+  position: relative;
+}
+.ms-fac-stack .ms-stack-seg.s1 { background: var(--ms-green-deep); }
+.ms-fac-stack .ms-stack-seg.s2 { background: var(--ms-accent); }
+.ms-fac-stack .ms-stack-seg.s3 { background: #5a7a64; }
+.ms-fac-stack .ms-stack-seg.s4 { background: var(--ms-gold); }
+.ms-fac-stack .ms-stack-seg.s5 { background: var(--ms-gold-2); }
+[data-theme="dark"] .ms-fac-stack .ms-stack-seg.s3 { background: #8FA994; }
+.ms-fac-stack .ms-stack-meta {
+  text-align: center;
+}
+.ms-fac-stack .ms-stack-name {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+}
+.ms-fac-stack .ms-stack-val {
+  font-family: var(--ms-font-serif);
+  font-size: 28px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-green-deep);
+  line-height: 1;
+  margin: 4px 0 2px;
+}
+.ms-fac-stack .ms-stack-w {
+  font-size: 10px;
+  color: var(--ms-text-muted);
+}
+
+/* ---- 52W-Range Slider --------------------------------------------------- */
+.ms-range-bar {
+  position: relative;
+  height: 8px;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: 1px;
+  margin: 8px 0 14px;
+}
+.ms-range-bar .ms-range-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, var(--ms-down), var(--ms-warn), var(--ms-up));
+  opacity: 0.30;
+}
+.ms-range-bar .ms-range-marker {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 16px;
+  background: var(--ms-gold);
+  transform: translateX(-1px);
+}
+.ms-range-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--ms-text-muted);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+.ms-sma-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  font-size: 12px;
+  align-items: baseline;
+}
+.ms-sma-row .ms-sma-lbl { color: var(--ms-text-muted); }
+.ms-sma-row strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.ms-sma-row .is-up { color: var(--ms-up); }
+.ms-sma-row .is-down { color: var(--ms-down); }
+
+/* ---- Returns Mini-Bars -------------------------------------------------- */
+.ms-ret-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ms-ret-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 60px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-ret-row .ms-ret-lbl {
+  color: var(--ms-text-muted);
+  font-size: 11px;
+}
+.ms-ret-row .ms-ret-track {
+  height: 14px;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: 1px;
+  position: relative;
+  overflow: hidden;
+}
+.ms-ret-row .ms-ret-track .ms-ret-mid {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--ms-border-strong);
+}
+.ms-ret-row .ms-ret-track .ms-ret-fill {
+  position: absolute;
+  top: 0; bottom: 0;
+}
+.ms-ret-row .ms-ret-track .ms-ret-fill.is-up { background: var(--ms-up); left: 50%; }
+.ms-ret-row .ms-ret-track .ms-ret-fill.is-down { background: var(--ms-down); right: 50%; }
+.ms-ret-row .ms-ret-v {
+  text-align: right;
+  font-weight: 600;
+}
+.ms-ret-row .ms-ret-v.is-up { color: var(--ms-up); }
+.ms-ret-row .ms-ret-v.is-down { color: var(--ms-down); }
+
+/* ---- Indikator-Tabelle (mit Perzentil-Bar) ------------------------------ */
+.ms-ind-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-ind-table th {
+  text-align: left;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--ms-border);
+}
+.ms-ind-table th.is-num { text-align: right; }
+.ms-ind-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--ms-border);
+  vertical-align: middle;
+}
+.ms-ind-table td.ms-ind-lbl {
+  color: var(--ms-text-muted);
+  font-size: 12px;
+  max-width: 220px;
+}
+.ms-ind-table td.ms-ind-val {
+  text-align: right;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ms-text);
+}
+.ms-ind-pct-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 10px;
+  align-items: center;
+}
+.ms-ind-track {
+  height: 6px;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: 1px;
+  position: relative;
+  overflow: hidden;
+}
+.ms-ind-fill {
+  height: 100%;
+  background: var(--ms-accent);
+}
+.ms-ind-fill.is-gold { background: var(--ms-gold); }
+.ms-ind-fill.is-warn { background: var(--ms-warn); }
+.ms-ind-fill.is-weak { background: var(--ms-down); opacity: 0.7; }
+.ms-ind-table .ms-ind-pct {
+  text-align: right;
+  font-size: 11px;
+  color: var(--ms-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ms-ind-table tr:hover td {
+  background: var(--ms-surface-alt);
+}
+.ms-ind-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---- Peer-Heatmap-Tabelle ---------------------------------------------- */
+.ms-peer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-peer-table th {
+  text-align: left;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--ms-border);
+  background: var(--ms-surface-alt);
+}
+.ms-peer-table th.is-num { text-align: right; }
+.ms-peer-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--ms-border);
+  vertical-align: middle;
+}
+.ms-peer-table td.is-num { text-align: right; }
+.ms-peer-table tr:hover { background: var(--ms-surface-alt); cursor: pointer; }
+.ms-peer-table tr.is-self {
+  background: var(--ms-gold-soft);
+}
+.ms-peer-table tr.is-self:hover { background: var(--ms-gold-soft); }
+.ms-peer-table .ms-peer-tk {
+  font-weight: 700;
+  color: var(--ms-green-deep);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+.ms-peer-table .ms-peer-tk:hover { color: var(--ms-gold); text-decoration: underline; }
+.ms-peer-table .ms-peer-self-tag {
+  color: var(--ms-gold);
+  margin-left: 6px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* Heatmap-Zelle (klein) */
+.ms-hm {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--ms-r-badge);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  min-width: 32px;
+  text-align: center;
+  color: white;
+}
+.ms-hm.is-a  { background: var(--ms-score-a); }
+.ms-hm.is-bp { background: var(--ms-score-bp); }
+.ms-hm.is-b  { background: var(--ms-score-b); }
+.ms-hm.is-c  { background: var(--ms-score-c); }
+.ms-hm.is-d  { background: var(--ms-score-d); }
+.ms-hm.is-f  { background: var(--ms-score-f); }
+
+/* ---- Hero-Subtitle (kleiner Italic-Name neben Ticker) ------------------- */
+.ms-hero-title .ms-hero-subtitle {
+  font-family: var(--ms-font-serif);
+  font-size: 22px;
+  color: var(--ms-text-muted);
+  font-style: italic;
+  font-weight: 400;
+  margin-left: 10px;
+}
+
+/* ---- Toolbar (Dropdown + PDF-Button) ----------------------------------- */
+.ms-ea-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.ms-ea-toolbar .ms-ea-dropdown { flex: 1; min-width: 280px; max-width: 480px; }
+
+
+/* ============================================================================
+   Sektor-Momentum-Screen (Re-Design aus Claude-Design-Handoff)
+   - RRG-Quadrant, Heatmap-Matrix, klappbare Sektor-Tabelle, Drilldown-Strip,
+     Δ-Score-Chips, Breadth-Bars, CSS-Sparklines.
+   ============================================================================ */
+
+.ms-sm-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 32px;
+  align-items: start;
+}
+.ms-sm-tf { text-align: right; min-width: 220px; }
+.ms-sm-tf-lbl {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-warn);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.ms-sm-tf-sort {
+  font-size: 11px;
+  color: var(--ms-text-muted);
+  margin-top: 10px;
+}
+
+.ms-tabs {
+  display: inline-flex;
+  border: 1px solid var(--ms-border);
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--ms-surface);
+  height: 32px;
+}
+.ms-tabs button {
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--ms-border);
+  padding: 0 14px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ms-text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  height: 100%;
+}
+.ms-tabs button:last-child { border-right: 0; }
+.ms-tabs button:hover { color: var(--ms-text); background: var(--ms-surface-alt); }
+.ms-tabs button.is-active {
+  background: var(--ms-accent);
+  color: var(--ms-bg);
+}
+
+/* ---- Row variant for sektor-momentum (5fr | 7fr) ------------------------- */
+.ms-row.ms-sm-r-2 {
+  grid-template-columns: 5fr 7fr;
+  margin-top: 16px;
+}
+@media (max-width: 1100px) {
+  .ms-row.ms-sm-r-2 { grid-template-columns: 1fr; }
+}
+
+/* ---- RRG-Quadrant -------------------------------------------------------- */
+.ms-rrg-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.05 / 1;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ms-rrg-grid {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to right, transparent 49.7%, var(--ms-border-strong) 49.7%, var(--ms-border-strong) 50.3%, transparent 50.3%),
+    linear-gradient(to bottom, transparent 49.7%, var(--ms-border-strong) 49.7%, var(--ms-border-strong) 50.3%, transparent 50.3%);
+}
+.ms-rrg-q {
+  position: absolute;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+  padding: 8px 10px;
+  pointer-events: none;
+}
+.ms-rrg-q.is-tl { top: 0; left: 0; }
+.ms-rrg-q.is-tr { top: 0; right: 0; text-align: right; }
+.ms-rrg-q.is-bl { bottom: 0; left: 0; }
+.ms-rrg-q.is-br { bottom: 0; right: 0; text-align: right; }
+.ms-rrg-q strong {
+  display: block;
+  font-family: "Cormorant Garamond", "Times New Roman", serif;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--ms-text);
+  margin-bottom: 2px;
+}
+.ms-rrg-axis {
+  position: absolute;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ms-text-muted);
+  font-weight: 500;
+}
+.ms-rrg-axis.is-x { bottom: 8px; left: 50%; transform: translateX(-50%); }
+.ms-rrg-axis.is-y {
+  top: 50%;
+  left: 8px;
+  transform: translateY(-50%) rotate(-90deg);
+  transform-origin: left center;
+  white-space: nowrap;
+}
+.ms-rrg-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 2;
+}
+.ms-rrg-pt {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--ms-accent);
+  border: 2px solid var(--ms-surface);
+  box-shadow: 0 0 0 1px var(--ms-accent);
+  transition: transform 120ms ease;
+}
+.ms-rrg-dot:hover .ms-rrg-pt,
+.ms-rrg-dot.is-active .ms-rrg-pt { transform: scale(1.25); }
+.ms-rrg-code {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 8px;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
+.ms-rrg-lab {
+  position: absolute;
+  left: 16px; top: -6px;
+  font-size: 11px;
+  white-space: nowrap;
+  background: var(--ms-surface);
+  padding: 2px 6px;
+  border: 1px solid var(--ms-border);
+  border-radius: 2px;
+  font-weight: 600;
+  color: var(--ms-text);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  opacity: 0;
+  transition: opacity 100ms ease;
+  z-index: 3;
+}
+.ms-rrg-dot:hover .ms-rrg-lab,
+.ms-rrg-dot.is-active .ms-rrg-lab { opacity: 1; }
+.ms-rrg-dot.is-flip-left .ms-rrg-lab { left: auto; right: 16px; }
+
+.ms-rrg-dot.is-up   .ms-rrg-pt { background: var(--ms-up);   box-shadow: 0 0 0 1px var(--ms-up); }
+.ms-rrg-dot.is-gold .ms-rrg-pt { background: var(--ms-warn); box-shadow: 0 0 0 1px var(--ms-warn); }
+.ms-rrg-dot.is-down .ms-rrg-pt { background: var(--ms-down); box-shadow: 0 0 0 1px var(--ms-down); }
+.ms-rrg-dot.is-warn .ms-rrg-pt { background: var(--ms-score-c); box-shadow: 0 0 0 1px var(--ms-score-c); }
+.ms-rrg-dot.is-active .ms-rrg-lab {
+  background: var(--ms-text);
+  color: var(--ms-bg);
+  border-color: var(--ms-text);
+}
+
+.ms-rrg-foot {
+  font-size: 11px;
+  color: var(--ms-text-muted);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+/* ---- Heatmap-Matrix ------------------------------------------------------ */
+.ms-heatmatrix-wrap { overflow-x: auto; }
+.ms-heatmatrix {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-heatmatrix th {
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--ms-border);
+}
+.ms-heatmatrix th.is-row-h { text-align: left; padding-left: 0; }
+.ms-heatmatrix td { padding: 4px 3px; text-align: center; }
+.ms-heatmatrix td.is-row-h {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--ms-text);
+  padding: 4px 8px 4px 0;
+  white-space: nowrap;
+}
+.ms-heatmatrix tbody tr { cursor: pointer; }
+.ms-heatmatrix tbody tr:hover { background: var(--ms-surface-alt); }
+.ms-heatmatrix tbody tr.is-active { background: var(--ms-warn-soft); }
+.ms-heat-tile {
+  display: block;
+  padding: 8px 4px;
+  border-radius: 2px;
+  font-weight: 600;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: white;
+  cursor: default;
+  letter-spacing: 0.02em;
+}
+.ms-lc-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--ms-warn);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+.ms-breadth-empty {
+  color: var(--ms-text-muted);
+  font-size: 12px;
+}
+
+/* ---- Drilldown-Strip ----------------------------------------------------- */
+.ms-drill-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  background: var(--ms-text);
+  color: var(--ms-bg);
+  border-radius: 2px;
+  margin: 18px 0 14px;
+  flex-wrap: wrap;
+}
+.ms-drill-lbl {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ms-warn);
+  font-weight: 600;
+}
+.ms-drill-h {
+  font-family: "Cormorant Garamond", "Times New Roman", serif;
+  font-size: 22px;
+  margin: 0;
+  font-weight: 500;
+  color: var(--ms-bg);
+  letter-spacing: -0.005em;
+}
+.ms-drill-meta {
+  display: inline-flex;
+  gap: 18px;
+  font-size: 12px;
+  color: var(--ms-bg);
+  opacity: 0.75;
+  flex-wrap: wrap;
+}
+.ms-drill-meta strong {
+  color: var(--ms-bg);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin-left: 4px;
+  opacity: 1;
+}
+.ms-drill-close {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ms-warn);
+  cursor: pointer;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.25);
+  padding: 6px 12px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+.ms-drill-close:hover { background: rgba(255,255,255,0.08); }
+
+/* ---- Sektor-Tabelle (klappbar) ------------------------------------------ */
+.ms-sect-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-sect-table thead th {
+  text-align: left;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+  padding: 12px 10px;
+  background: var(--ms-surface-alt);
+  border-bottom: 1px solid var(--ms-border);
+  white-space: nowrap;
+}
+.ms-sect-table thead th.is-num { text-align: right; }
+.ms-sect-table thead th.is-ctr { text-align: center; }
+.ms-sect-table tbody tr.ms-sect-row > td {
+  padding: 0 10px;
+  height: 44px;
+  border-bottom: 1px solid var(--ms-border);
+  vertical-align: middle;
+  background: var(--ms-bg);
+  cursor: pointer;
+}
+.ms-sect-table tbody tr.ms-sect-row:hover > td { background: var(--ms-surface-alt); }
+.ms-sect-table tbody tr.ms-sect-row.is-open > td {
+  background: var(--ms-warn-soft);
+  border-bottom-color: transparent;
+}
+.ms-sect-table tbody tr.ms-sect-row.is-active > td {
+  background: var(--ms-warn-soft);
+  box-shadow: inset 3px 0 0 var(--ms-warn);
+}
+.ms-sect-table .ms-sect-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--ms-text);
+  font-size: 13px;
+}
+.ms-sect-table .ms-sect-name-text { cursor: pointer; }
+.ms-sect-table .ms-sect-name-text:hover { color: var(--ms-warn); }
+.ms-sect-table .ms-sect-chev {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-right: 1.5px solid var(--ms-text-muted);
+  border-bottom: 1.5px solid var(--ms-text-muted);
+  transform: rotate(-45deg);
+  transition: transform 180ms;
+  margin-left: 2px;
+}
+.ms-sect-table tr.ms-sect-row.is-open .ms-sect-chev { transform: rotate(45deg); }
+.ms-sect-table td.is-num { text-align: right; }
+.ms-sect-table td.is-ctr { text-align: center; }
+
+/* Industrie-Unterzeile */
+.ms-ind-rows td {
+  padding: 0 !important;
+  border-bottom: 1px solid var(--ms-border);
+  background: var(--ms-surface-alt) !important;
+}
+.ms-ind-rows-inner {
+  padding: 6px 0 14px 36px;
+}
+.ms-ind-table-mini {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-ind-table-mini th {
+  text-align: left;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ms-border);
+}
+.ms-ind-table-mini th.is-num { text-align: right; }
+.ms-ind-table-mini td {
+  padding: 6px 8px;
+  border-bottom: 1px dashed var(--ms-border);
+}
+.ms-ind-table-mini td.is-num { text-align: right; font-weight: 500; }
+.ms-ind-table-mini tr:last-child td { border-bottom: none; }
+.ms-ind-table-mini .ms-ind-nm { color: var(--ms-text); }
+
+/* ---- Sparkline (CSS-Bars) ----------------------------------------------- */
+.ms-spark {
+  display: inline-flex;
+  align-items: flex-end;
+  height: 22px;
+  width: 96px;
+  gap: 2px;
+}
+.ms-spark span {
+  flex: 1;
+  background: var(--ms-accent);
+  display: block;
+  min-height: 2px;
+  border-radius: 1px;
+}
+.ms-spark.is-up span    { background: var(--ms-up); }
+.ms-spark.is-down span  { background: var(--ms-down); }
+.ms-spark-empty { color: var(--ms-text-muted); font-size: 11px; }
+
+/* ---- Δ-Score-Chips ------------------------------------------------------- */
+.ms-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ms-delta::before {
+  content: "";
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+}
+.ms-delta.is-up { color: var(--ms-up); }
+.ms-delta.is-up::before { border-bottom: 5px solid var(--ms-up); }
+.ms-delta.is-down { color: var(--ms-down); }
+.ms-delta.is-down::before { border-top: 5px solid var(--ms-down); }
+.ms-delta.is-flat { color: var(--ms-text-muted); }
+.ms-delta.is-flat::before {
+  width: 6px; height: 1px; background: var(--ms-text-muted);
+  border: none;
+}
+
+/* ---- Breadth-Bar (kompakt) ---------------------------------------------- */
+.ms-breadth-cell {
+  display: inline-grid;
+  grid-template-columns: 60px 32px;
+  gap: 8px;
+  align-items: center;
+  width: 100px;
+}
+.ms-breadth-track {
+  height: 6px;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border);
+  border-radius: 1px;
+  overflow: hidden;
+  display: block;
+}
+.ms-breadth-fill {
+  display: block;
+  height: 100%;
+  background: var(--ms-up);
+}
+.ms-breadth-fill.is-warn { background: var(--ms-warn); }
+.ms-breadth-fill.is-weak { background: var(--ms-down); }
+.ms-breadth-num {
+  font-size: 11px;
+  color: var(--ms-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---- Eyebrow + Section-Head (für Detailtabelle) ------------------------- */
+.ms-eyebrow {
+  font-family: var(--ms-font-sans);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-warn);
+  font-weight: 500;
+}
+
+/* Legacy-Akkordeon: dezenter Abstand */
+.ms-sm-legacy { margin-top: 24px; }
+.ms-sm-legacy .accordion-button { font-weight: 600; }

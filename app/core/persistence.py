@@ -26,7 +26,30 @@ _DEFAULT_URL = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
 _UNIVERSE_TABLE = "koyfin_universe"
 _META_TABLE = "koyfin_meta"
 _SECTOR_SNAPSHOT_TABLE = "sector_momentum_snapshots"
+_SECTOR_SCORE_HISTORY_TABLE = "sector_score_history"
 _SETTINGS_TABLE = "app_settings"
+_FACTOR_TIMING_TABLE = "factor_timing_inputs"
+
+# Vollständige Liste der Eingabefelder der Factor-Timing-Seite (Makro-,
+# Sentiment- und Faktor-Momentum-Werte). Wird beim Persistieren als JSONB
+# abgelegt; unbekannte Keys werden beim Laden ignoriert, fehlende kehren als
+# ``None`` zurück (Aufrufer mergt mit Defaults).
+_FACTOR_TIMING_FIELDS: tuple[str, ...] = (
+    "pmi",
+    "pmi_trend",
+    "cli",
+    "spread",
+    "cpi",
+    "vix",
+    "credit",
+    "pcr",
+    "flows",
+    "mom_value",
+    "mom_quality",
+    "mom_growth",
+    "mom_momentum",
+    "mom_lowvol",
+)
 
 _SETTINGS_FIELDS: tuple[str, ...] = (
     "factor_weights",
@@ -265,6 +288,156 @@ def delete_sector_snapshot(snapshot_date: date) -> int:
     return int(result.rowcount or 0)
 
 
+def _ensure_sector_score_history_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_SECTOR_SCORE_HISTORY_TABLE} ("
+            "snapshot_date DATE NOT NULL, "
+            "level TEXT NOT NULL, "
+            "key TEXT NOT NULL, "
+            "score DOUBLE PRECISION, "
+            "ret_1m DOUBLE PRECISION, "
+            "ret_12m DOUBLE PRECISION, "
+            "mom_12_1 DOUBLE PRECISION, "
+            "sma200_dist DOUBLE PRECISION, "
+            "sma50_dist DOUBLE PRECISION, "
+            "breadth_sma200 INTEGER, "
+            "n INTEGER, "
+            "imported_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "PRIMARY KEY (snapshot_date, level, key))"
+        )
+    )
+    conn.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS idx_ssh_date ON "
+            f"{_SECTOR_SCORE_HISTORY_TABLE}(snapshot_date)"
+        )
+    )
+
+
+def save_sector_score_history(
+    records: list[dict], snapshot_date: date
+) -> int:
+    """UPSERT der aggregierten Sektor-/Industrie-Scores für ein Snapshot-Datum.
+
+    ``records`` ist eine Liste mit Dicts, die mindestens ``level`` und ``key``
+    sowie die zu speichernden Kennzahlen enthalten. Felder, die nicht im
+    Schema vorkommen, werden ignoriert. Raised bei DB-Problemen — der
+    Aufrufer zeigt eine UI-Warnung.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    if not records:
+        return 0
+
+    cols = (
+        "score",
+        "ret_1m",
+        "ret_12m",
+        "mom_12_1",
+        "sma200_dist",
+        "sma50_dist",
+        "breadth_sma200",
+        "n",
+    )
+    rows: list[dict] = []
+    for r in records:
+        row = {
+            "snapshot_date": snapshot_date,
+            "level": str(r["level"]),
+            "key": str(r["key"]),
+        }
+        for c in cols:
+            val = r.get(c)
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                row[c] = None
+            else:
+                row[c] = float(val) if c != "breadth_sma200" and c != "n" else int(val)
+        rows.append(row)
+
+    with engine.begin() as conn:
+        _ensure_sector_score_history_table(conn)
+        conn.execute(
+            text(
+                f"INSERT INTO {_SECTOR_SCORE_HISTORY_TABLE} "
+                "(snapshot_date, level, key, score, ret_1m, ret_12m, "
+                "mom_12_1, sma200_dist, sma50_dist, breadth_sma200, n) "
+                "VALUES (:snapshot_date, :level, :key, :score, :ret_1m, "
+                ":ret_12m, :mom_12_1, :sma200_dist, :sma50_dist, "
+                ":breadth_sma200, :n) "
+                "ON CONFLICT (snapshot_date, level, key) DO UPDATE SET "
+                "score = EXCLUDED.score, "
+                "ret_1m = EXCLUDED.ret_1m, "
+                "ret_12m = EXCLUDED.ret_12m, "
+                "mom_12_1 = EXCLUDED.mom_12_1, "
+                "sma200_dist = EXCLUDED.sma200_dist, "
+                "sma50_dist = EXCLUDED.sma50_dist, "
+                "breadth_sma200 = EXCLUDED.breadth_sma200, "
+                "n = EXCLUDED.n, "
+                "imported_at = now()"
+            ),
+            rows,
+        )
+    return len(rows)
+
+
+def load_sector_score_history(limit_snapshots: int = 12) -> pd.DataFrame:
+    """Laedt die ``limit_snapshots`` juengsten Snapshot-Datumswerte komplett.
+
+    Liefert einen DataFrame mit Spalten ``snapshot_date, level, key, score, …``,
+    aufsteigend nach Datum sortiert. Bei DB-Fehlern oder fehlender Tabelle
+    wird ein leerer DataFrame zurueckgegeben. Raised nie.
+    """
+
+    empty = pd.DataFrame(
+        columns=[
+            "snapshot_date",
+            "level",
+            "key",
+            "score",
+            "ret_1m",
+            "ret_12m",
+            "mom_12_1",
+            "sma200_dist",
+            "sma50_dist",
+            "breadth_sma200",
+            "n",
+        ]
+    )
+    engine = get_engine()
+    if engine is None:
+        return empty
+    try:
+        with engine.begin() as conn:
+            _ensure_sector_score_history_table(conn)
+            df = pd.read_sql(
+                text(
+                    f"SELECT snapshot_date, level, key, score, ret_1m, "
+                    "ret_12m, mom_12_1, sma200_dist, sma50_dist, "
+                    "breadth_sma200, n "
+                    f"FROM {_SECTOR_SCORE_HISTORY_TABLE} "
+                    "WHERE snapshot_date IN ("
+                    "  SELECT snapshot_date FROM ("
+                    "    SELECT DISTINCT snapshot_date "
+                    f"    FROM {_SECTOR_SCORE_HISTORY_TABLE} "
+                    "    ORDER BY snapshot_date DESC LIMIT :n"
+                    "  ) s"
+                    ") "
+                    "ORDER BY snapshot_date ASC, level ASC, key ASC"
+                ),
+                conn,
+                params={"n": int(limit_snapshots)},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Sektor-Score-Historie fehlgeschlagen: %s", exc)
+        return empty
+    if not df.empty:
+        df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
+    return df
+
+
 def _settings_to_dict(s: Settings) -> dict:
     return {name: getattr(s, name) for name in _SETTINGS_FIELDS}
 
@@ -316,6 +489,107 @@ def save_settings(settings: Settings) -> None:
             ),
             {"data": payload},
         )
+
+
+def _ensure_factor_timing_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_FACTOR_TIMING_TABLE} ("
+            "id INTEGER PRIMARY KEY, "
+            "data JSONB NOT NULL, "
+            "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        )
+    )
+
+
+def save_factor_timing_inputs(values: dict) -> None:
+    """UPSERT der Factor-Timing-Eingaben als JSON (single-row, id=1).
+
+    Nur Felder aus ``_FACTOR_TIMING_FIELDS`` werden gespeichert; alles andere
+    wird ignoriert. ``None``-Werte werden mitgeschrieben, damit eine
+    versehentlich geleerte Zelle nicht beim nächsten Laden wieder den Default
+    bekommt. Raised bei DB-Problemen — der Aufrufer entscheidet, ob die UI
+    eine Warnung zeigt.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+
+    cleaned: dict[str, float | None] = {}
+    for key in _FACTOR_TIMING_FIELDS:
+        if key not in values:
+            continue
+        v = values[key]
+        if v is None:
+            cleaned[key] = None
+            continue
+        try:
+            cleaned[key] = float(v)
+        except (TypeError, ValueError):
+            cleaned[key] = None
+
+    payload = json.dumps(cleaned)
+    with engine.begin() as conn:
+        _ensure_factor_timing_table(conn)
+        conn.execute(
+            text(
+                f"INSERT INTO {_FACTOR_TIMING_TABLE} (id, data, updated_at) "
+                "VALUES (1, CAST(:data AS JSONB), now()) "
+                "ON CONFLICT (id) DO UPDATE SET "
+                "data = EXCLUDED.data, updated_at = EXCLUDED.updated_at"
+            ),
+            {"data": payload},
+        )
+
+
+def load_factor_timing_inputs() -> dict | None:
+    """Liefert die zuletzt gespeicherten Factor-Timing-Eingaben oder ``None``.
+
+    Gibt ein Dict ausschließlich mit Keys aus ``_FACTOR_TIMING_FIELDS`` zurück,
+    Werte sind ``float`` oder ``None``. Bei DB-Fehlern oder unleserlichem JSON
+    wird ``None`` zurückgegeben — der Aufrufer fällt dann auf Defaults zurück.
+    Raised nie.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_factor_timing_table(conn)
+            row = conn.execute(
+                text(f"SELECT data FROM {_FACTOR_TIMING_TABLE} WHERE id = 1")
+            ).fetchone()
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Factor-Timing-Eingaben fehlgeschlagen: %s", exc)
+        return None
+
+    if row is None:
+        return None
+    data = row[0]
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as exc:
+            log.warning("Factor-Timing-JSON unleserlich: %s", exc)
+            return None
+    if not isinstance(data, dict):
+        return None
+
+    out: dict[str, float | None] = {}
+    for key in _FACTOR_TIMING_FIELDS:
+        if key not in data:
+            continue
+        v = data[key]
+        if v is None:
+            out[key] = None
+            continue
+        try:
+            out[key] = float(v)
+        except (TypeError, ValueError):
+            out[key] = None
+    return out
 
 
 def load_settings() -> Settings | None:

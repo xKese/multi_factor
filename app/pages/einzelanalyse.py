@@ -1,94 +1,60 @@
-"""Einzelanalyse je Ticker im Morningstar-Quote-Layout."""
+"""Einzelanalyse — Variante A "Equity Tearsheet" im M&S-Brand-Refresh.
+
+Re-Design auf Basis des Claude-Design-Handoffs (EinzelA in app.jsx):
+- Quote-Hero mit Rang-Kontext (Sektor / Universum)
+- Verdict-Streifen (Klartext-Fazit + Badges)
+- Stärken / Schwächen (Top/Bottom-3 Indikator-Perzentile)
+- Faktor-Decomposition (5 vertikale Säulen)
+- 52W-Kursband + Returns-Mini-Bars
+- Indikator-Tabellen mit Perzentil-Bars
+- Peer-Vergleich als Heatmap-Tabelle
+"""
 
 from __future__ import annotations
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-import plotly.graph_objects as go
-from dash import Input, Output, callback, dcc, html, register_page
+from datetime import date
+
+from dash import Input, Output, State, callback, dcc, html, no_update, register_page
 from dash.exceptions import PreventUpdate
 
+from app.core.indicators import INDICATOR_GROUPS
 from app.core.peers import compute_peers
+from app.core.scoring import _indicator_percentile
 from app.core.state import STATE
-from app.pages.common import page_title
 from app.ui import (
-    MS_LIGHT,
-    factor_breakdown,
     fmt_de,
     fmt_indicator,
     fmt_int,
     fmt_market_cap,
     fmt_percent,
-    ms_badge,
-    quote_header,
-    section_header,
 )
 
 
-INDICATOR_GROUPS = {
-    "Value": [
-        ("P/B", "pb"),
-        ("P/E", "pe"),
-        ("P/FCF", "pfcf"),
-        ("EV/EBITDA", "ev_ebitda"),
-        ("P/S", "ps"),
-        ("PEG", "peg"),
-        ("Dividend Yield", "div_yield"),
-    ],
-    "Quality": [
-        ("ROE", "roe"),
-        ("ROIC", "roic"),
-        ("ROA", "roa"),
-        ("Gross Margin", "gross_margin"),
-        ("Operating Margin", "op_margin"),
-        ("Debt/Equity", "debt_equity"),
-        ("Interest Coverage", "int_coverage"),
-        ("Current Ratio", "current_ratio"),
-        ("Piotroski", "piotroski"),
-        ("Altman Z", "altman_z"),
-    ],
-    "Growth": [
-        ("Revenue CAGR 3Y", "rev_cagr_3y"),
-        ("EPS CAGR 3Y", "eps_cagr_3y"),
-        ("FCF CAGR 3Y", "fcf_cagr_3y"),
-        ("Forward EPS Growth", "fwd_eps_growth"),
-    ],
-    "Momentum": [
-        ("Return 1M", "ret_1m"),
-        ("Return 3M", "ret_3m"),
-        ("Return 6M", "ret_6m"),
-        ("Return 12M", "ret_12m"),
-        ("EPS Revisions 3M", "eps_revisions_3m"),
-    ],
-    "Low Volatility": [
-        ("Beta", "beta"),
-        ("Volatilität 1Y", "volatility_1y"),
-        ("52W Range %", "range_52w"),
-    ],
-}
+# ── Score → Klassifikation (gespiegelt aus dashboard.py / data.js) ─────────
+
+def _class_of(score: float) -> dict:
+    if score is None or pd.isna(score):
+        return {"code": "–", "label": "Keine Daten", "cls": "f"}
+    if score >= 80: return {"code": "A",  "label": "Exzellent",       "cls": "a"}
+    if score >= 70: return {"code": "B+", "label": "Sehr Gut",        "cls": "bp"}
+    if score >= 60: return {"code": "B",  "label": "Gut",             "cls": "b"}
+    if score >= 50: return {"code": "C",  "label": "Durchschnitt",    "cls": "c"}
+    if score >= 40: return {"code": "D",  "label": "Unterdurch.",     "cls": "d"}
+    return {"code": "F", "label": "Schwach", "cls": "f"}
 
 
-def _kv_table(pairs: list[tuple[str, str]], row: pd.Series) -> dbc.Table:
-    rows = []
-    for label, col in pairs:
-        display = fmt_indicator(col, row.get(col))
-        rows.append(
-            html.Tr(
-                [
-                    html.Td(label, className="ms-muted"),
-                    html.Td(display, className="ms-tabular text-end"),
-                ]
-            )
-        )
-    return dbc.Table(
-        [html.Tbody(rows)],
-        bordered=False,
-        striped=True,
-        hover=True,
-        size="sm",
-        className="mb-0",
-    )
+_FACTORS = [
+    ("Value",    "value_score",    "value"),
+    ("Quality",  "quality_score",  "quality"),
+    ("Growth",   "growth_score",   "growth"),
+    ("Momentum", "momentum_score", "momentum"),
+    ("Low Vol",  "lowvol_score",   "lowvol"),
+]
 
+
+# ── Toolbar (Dropdown + PDF-Button) ────────────────────────────────────────
 
 def layout(ticker: str = "", **_) -> html.Div:
     options = []
@@ -100,229 +66,645 @@ def layout(ticker: str = "", **_) -> html.Div:
 
     return html.Div(
         [
-            page_title("Einzelanalyse", "Wähle einen Titel für das vollständige Profil."),
-            dbc.Row(
+            html.Div(
                 [
-                    dbc.Col(
+                    html.Div(
                         dcc.Dropdown(
                             id="ea-ticker",
                             options=options,
                             value=ticker or (options[0]["value"] if options else None),
                             placeholder="Ticker wählen …",
                             searchable=True,
+                            clearable=False,
                         ),
-                        md=5,
+                        className="ms-ea-dropdown",
+                    ),
+                    dbc.Button(
+                        "PDF-Factsheet",
+                        id="ea-export-pdf",
+                        color="dark",
+                        outline=True,
+                        size="sm",
+                        n_clicks=0,
+                        title="Editorial-Factsheet als PDF exportieren",
                     ),
                 ],
-                className="mb-3",
+                className="ms-ea-toolbar",
             ),
+            dcc.Download(id="ea-pdf-download"),
+            html.Div(id="ea-pdf-error", className="text-danger small mb-2"),
             html.Div(id="ea-content"),
         ]
     )
 
 
-_RUECKBLICK_WINDOWS = (
-    ("ret_12m", "12M"),
-    ("ret_6m", "6M"),
-    ("ret_3m", "3M"),
-    ("ret_1m", "1M"),
-)
+# ── Bausteine ──────────────────────────────────────────────────────────────
+
+def _meta_strong(label: str, value: str) -> html.Span:
+    return html.Span([html.Strong(value), " ", label])
 
 
-def _rueckblick(r: pd.Series) -> html.Div | None:
-    """Kompakte Visualisierung der vier Rückblicks-Returns (1M/3M/6M/12M).
+def _hero_block(r: pd.Series, ranks: dict) -> html.Div:
+    """Quote-Hero mit Rang-Kontext."""
+    score = r.get("total_score")
+    score_val = float(score) if pd.notna(score) else None
+    cls = _class_of(score_val) if score_val is not None else _class_of(None)
 
-    Keine Sparkline: mangels monatlicher Schlusskurse im Koyfin-Export sind
-    das vier disjunkte Zeitfenster. Gepunktete Verbindungslinie + expliziter
-    Label machen klar, dass zwischen den Punkten nicht interpoliert ist.
-    """
+    region = str(r.get("region") or "")
+    industry = str(r.get("industry") or r.get("sector") or "")
+    eyebrow_parts = ["Einzelanalyse"]
+    if region: eyebrow_parts.append(region)
+    if industry: eyebrow_parts.append(industry)
+    eyebrow = " · ".join(eyebrow_parts)
 
-    points: list[tuple[str, float]] = []
-    for col, label in _RUECKBLICK_WINDOWS:
-        v = r.get(col)
-        if pd.notna(v):
-            points.append((label, float(v) * 100.0))
-    if not points:
-        return None
+    last_price = r.get("last_price")
+    market_cap = r.get("market_cap")
+    piotr = r.get("piotroski")
+    altman = r.get("altman_z")
+    beta = r.get("beta")
 
-    ret12 = r.get("ret_12m")
-    if pd.notna(ret12) and ret12 >= 0:
-        color = "#1B7F3A"
-    elif pd.notna(ret12) and ret12 < 0:
-        color = "#C2281E"
-    else:
-        color = "#0B3D91"
+    meta_row = []
+    if pd.notna(last_price):
+        meta_row.append(_meta_strong("Kurs", f"{fmt_de(last_price, 2)} €"))
+    if pd.notna(market_cap):
+        meta_row.append(html.Span("·", className="ms-sep"))
+        meta_row.append(_meta_strong("Mkt. Cap", fmt_market_cap(market_cap)))
+    if pd.notna(piotr):
+        meta_row.append(html.Span("·", className="ms-sep"))
+        meta_row.append(_meta_strong("Piotroski", f"{fmt_int(piotr)} / 9"))
+    if pd.notna(altman):
+        meta_row.append(html.Span("·", className="ms-sep"))
+        meta_row.append(_meta_strong("Altman Z", fmt_de(altman, 2)))
+    if pd.notna(beta):
+        meta_row.append(html.Span("·", className="ms-sep"))
+        meta_row.append(_meta_strong("Beta", fmt_de(beta, 2)))
 
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
+    score_display = fmt_de(score_val, 1) if score_val is not None else "–"
 
-    fig = go.Figure()
-    fig.add_shape(
-        type="line",
-        xref="paper",
-        yref="y",
-        x0=0,
-        x1=1,
-        y0=0,
-        y1=0,
-        line=dict(color="#CFCFCB", width=1, dash="dot"),
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=xs,
-            y=ys,
-            mode="lines+markers",
-            line=dict(color=color, width=1.4, dash="dot"),
-            marker=dict(size=6, color=color),
-            hovertemplate="Return %{x}: %{y:.1f}%<extra></extra>",
-            showlegend=False,
-        )
-    )
-    fig.update_layout(
-        template=MS_LIGHT,
-        height=48,
-        width=160,
-        margin=dict(l=4, r=4, t=4, b=4),
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False, zeroline=False),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-    )
+    score_ctx_parts = []
+    if ranks.get("sector_total"):
+        score_ctx_parts.append(html.Span([
+            "Rang Sektor ",
+            html.Strong(f"{ranks['sector_rank']} / {ranks['sector_total']}"),
+        ]))
+    if ranks.get("uni_total"):
+        score_ctx_parts.append(html.Span([
+            "Rang Universum ",
+            html.Strong(f"{ranks['uni_rank']} / {ranks['uni_total']}"),
+        ]))
+    if ranks.get("sector_avg") is not None:
+        score_ctx_parts.append(html.Span([
+            "Ø Sektor ",
+            html.Strong(fmt_de(ranks["sector_avg"], 1)),
+        ]))
 
     return html.Div(
         [
-            html.Span(
-                "Rückblicksfenster · 12M · 6M · 3M · 1M",
-                className="ms-rueckblick-label",
+            html.Div(
+                [
+                    html.Div(eyebrow, className="ms-hero-eyebrow"),
+                    html.H1(
+                        [
+                            str(r["ticker"]),
+                            html.Span(
+                                str(r.get("name") or ""),
+                                className="ms-hero-subtitle",
+                            ),
+                        ],
+                        className="ms-hero-title",
+                    ),
+                    html.Div(meta_row, className="ms-hero-meta"),
+                ]
             ),
-            dcc.Graph(
-                figure=fig,
-                config={"displayModeBar": False, "scrollZoom": False},
-                className="ms-rueckblick-graph",
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Span(score_display),
+                            html.Span(" / 100", className="ms-score-suf"),
+                        ],
+                        className="ms-score-num",
+                    ),
+                    html.Div(
+                        f"{cls['code']} – {cls['label']}",
+                        className="ms-score-class",
+                    ),
+                    html.Div(score_ctx_parts, className="ms-score-ctx"),
+                ],
+                className="ms-hero-score",
             ),
         ],
-        className="ms-rueckblick",
+        className="ms-hero",
     )
 
 
-def _filter_badges(r: pd.Series) -> html.Div:
-    badges: list = []
+def _ranks(df: pd.DataFrame, r: pd.Series) -> dict:
+    """Sektor- und Universum-Rang des Tickers nach total_score."""
+    out = {}
+    score = r.get("total_score")
+    if pd.isna(score):
+        return out
+    sector = r.get("sector")
+    uni = df.dropna(subset=["total_score"])
+    out["uni_total"] = len(uni)
+    out["uni_rank"] = int((uni["total_score"] > score).sum()) + 1
+    if sector and sector in df["sector"].values:
+        sec = uni[uni["sector"] == sector]
+        out["sector_total"] = len(sec)
+        out["sector_rank"] = int((sec["total_score"] > score).sum()) + 1
+        out["sector_avg"] = float(sec["total_score"].mean())
+    return out
 
-    piotr = r.get("piotroski")
-    if pd.notna(piotr):
-        ok = piotr >= STATE.settings.min_piotroski
-        badges.append(
-            ms_badge("Piotroski", f"{fmt_int(piotr)} / 9", tone="up" if ok else "down")
-        )
+
+def _verdict_text(r: pd.Series) -> str:
+    """Heuristisches Klartext-Fazit aus den Faktor-Scores."""
+    factors = [(label, float(r[col])) for label, col, _ in _FACTORS if pd.notna(r.get(col))]
+    if not factors:
+        return "Faktor-Profil unvollständig — Auswertung nicht möglich."
+    factors_sorted = sorted(factors, key=lambda x: x[1], reverse=True)
+    best, _ = factors_sorted[0]
+    worst, _ = factors_sorted[-1]
+    rec = str(r.get("recommendation") or "")
+    filt = str(r.get("filter_ok") or "")
+
+    pieces = []
+    if best == worst:
+        pieces.append(f"Ausgeglichenes {best}-Profil")
     else:
-        badges.append(ms_badge("Piotroski", "-"))
+        pieces.append(f"{best}-Champion mit {worst}-Schwäche")
+    if filt == "JA":
+        pieces.append("Filter bestanden")
+    elif filt == "NEIN":
+        pieces.append("Filter nicht bestanden")
+    if rec in ("STRONG BUY", "BUY"):
+        pieces.append("klare Kauf-Empfehlung")
+    elif rec == "SELL":
+        pieces.append("Verkaufs-Signal")
+    elif rec == "HOLD":
+        pieces.append("neutrale Haltung")
+    return " – ".join(pieces) + "."
 
-    altman = r.get("altman_z")
-    if pd.notna(altman):
-        ok = altman >= STATE.settings.min_altman_z
-        badges.append(
-            ms_badge("Altman Z", fmt_de(altman, 2), tone="up" if ok else "down")
-        )
+
+def _verdict_block(r: pd.Series) -> html.Div:
+    rec = str(r.get("recommendation") or "–")
+    filt = str(r.get("filter_ok") or "–")
+    sma = str(r.get("sma_signal") or "–")
+    rec_tone = "up" if rec in ("STRONG BUY", "BUY") else "down" if rec == "SELL" else "warn"
+    filt_label = "bestanden" if filt == "JA" else "nicht bestanden" if filt == "NEIN" else filt
+    filt_tone = "up" if filt == "JA" else "down" if filt == "NEIN" else "warn"
+    if "GOLDEN" in sma:
+        sma_label, sma_tone = "Golden Cross", "up"
+    elif "DEATH" in sma:
+        sma_label, sma_tone = "Death Cross", "down"
+    elif ">" in sma:
+        sma_label, sma_tone = "Kurs > SMA-200", "info"
+    elif "<" in sma:
+        sma_label, sma_tone = "Kurs < SMA-200", "warn"
     else:
-        badges.append(ms_badge("Altman Z", "-"))
+        sma_label, sma_tone = sma, None
 
-    sma = r.get("sma_signal") or "-"
-    sma_tone = None
-    if "GOLDEN" in str(sma):
-        sma_tone = "up"
-    elif "DEATH" in str(sma):
-        sma_tone = "down"
-    elif "<" in str(sma):
-        sma_tone = "warn"
-    elif ">" in str(sma):
-        sma_tone = "info"
-    badges.append(ms_badge("SMA-Signal", str(sma), tone=sma_tone))
-
-    rec = r.get("recommendation") or "-"
-    rec_tone = {
-        "STRONG BUY": "up",
-        "BUY": "up",
-        "HOLD": "warn",
-        "SELL": "down",
-    }.get(rec)
-    badges.append(ms_badge("Empfehlung", str(rec), tone=rec_tone))
-
-    filt = r.get("filter_ok") or "-"
-    badges.append(
-        ms_badge(
-            "Filter",
-            "bestanden" if filt == "JA" else "nicht bestanden",
-            tone="up" if filt == "JA" else "down",
+    def _badge(label: str, value: str, tone: str | None) -> html.Span:
+        klass = f"ms-badge is-{tone}" if tone else "ms-badge"
+        return html.Span(
+            [html.Span(label, className="ms-badge-label"),
+             html.Span(value, className="ms-badge-value")],
+            className=klass,
         )
+
+    return html.Div(
+        [
+            html.P(f"„{_verdict_text(r)}\"", className="ms-verdict-text"),
+            html.Div(
+                [
+                    _badge("Empfehlung", rec, rec_tone),
+                    _badge("Filter", filt_label, filt_tone),
+                    _badge("SMA", sma_label, sma_tone),
+                ],
+                className="ms-verdict-badges",
+            ),
+        ],
+        className="ms-verdict",
     )
 
-    return html.Div(badges, className="ms-badge-row")
 
+def _strengths_concerns(df: pd.DataFrame, ticker: str) -> html.Div:
+    """Top-3 / Bottom-3 Indikator-Perzentile für den Ticker."""
+    flat: list[dict] = []
+    idx = df.index[df["ticker"] == ticker]
+    if len(idx) == 0:
+        return html.Div()
+    i = idx[0]
 
-def _peer_card(peer: pd.Series) -> dcc.Link:
-    """Eine klickbare Comparable-Karte (Link zur Einzelanalyse des Peers)."""
+    for grp in INDICATOR_GROUPS:
+        for it in grp.items:
+            if it.key not in df.columns:
+                continue
+            val = df.at[i, it.key]
+            if pd.isna(val):
+                continue
+            try:
+                pct_series = _indicator_percentile(df, it.key, STATE.settings)
+                pct = float(pct_series.loc[i])
+            except Exception:
+                continue
+            if pd.isna(pct):
+                continue
+            flat.append({
+                "factor": grp.name,
+                "label": it.label,
+                "value": fmt_indicator(it.key, val),
+                "pct": int(round(pct * 100)),
+            })
 
-    ticker = str(peer["ticker"])
-    name = str(peer.get("name") or "")
+    if not flat:
+        return html.Div()
 
-    meta_parts: list[str] = []
-    if peer.get("industry"):
-        meta_parts.append(str(peer["industry"]))
-    elif peer.get("sector"):
-        meta_parts.append(str(peer["sector"]))
+    top3 = sorted(flat, key=lambda x: x["pct"], reverse=True)[:3]
+    bot3 = sorted(flat, key=lambda x: x["pct"])[:3]
 
-    score = peer.get("total_score")
-    score_display = fmt_de(score, 1) if pd.notna(score) else "-"
-
-    ret_12m = peer.get("ret_12m")
-    if pd.notna(ret_12m):
-        ret_tone = "up" if float(ret_12m) >= 0 else "down"
-        ret_badge = ms_badge("12M", fmt_percent(ret_12m), tone=ret_tone)
-    else:
-        ret_badge = ms_badge("12M", "-")
-
-    factors = {
-        "Value": peer.get("value_score"),
-        "Quality": peer.get("quality_score"),
-        "Growth": peer.get("growth_score"),
-        "Momentum": peer.get("momentum_score"),
-        "Low Vol": peer.get("lowvol_score"),
-    }
-
-    card = dbc.Card(
-        dbc.CardBody(
+    def _items(items: list[dict], cls: str) -> html.Div:
+        return html.Div(
             [
                 html.Div(
                     [
-                        html.Span(ticker, className="ms-peer-ticker"),
-                        html.Span(score_display, className="ms-peer-score"),
+                        html.Span(f"{it['factor']} · {it['label']}",
+                                  className="ms-sc-lbl",
+                                  title=f"{it['factor']} · {it['label']}"),
+                        html.Span(it["value"], className="ms-sc-val"),
+                        html.Span(f"P{it['pct']}", className="ms-sc-pct"),
                     ],
-                    className="ms-peer-head",
-                ),
-                html.Div(name, className="ms-peer-name"),
-                html.Div(" · ".join(meta_parts) or " ", className="ms-peer-meta"),
-                html.Div(
-                    [
-                        ms_badge("Score", score_display),
-                        ret_badge,
-                    ],
-                    className="ms-peer-badges",
-                ),
-                factor_breakdown(factors),
-            ]
-        ),
-        className="ms-peer-card h-100",
+                    className=f"ms-sc-it is-{cls}",
+                )
+                for it in items
+            ],
+            className="ms-sc-list",
+        )
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.H3(
+                        ["Stärken ",
+                         html.Span("höchste Perzentile", className="ms-card-h-meta")],
+                        className="ms-card-h",
+                    ),
+                    _items(top3, "strength"),
+                ],
+                className="ms-card",
+            ),
+            html.Div(
+                [
+                    html.H3(
+                        ["Schwächen ",
+                         html.Span("niedrigste Perzentile", className="ms-card-h-meta")],
+                        className="ms-card-h",
+                    ),
+                    _items(bot3, "concern"),
+                ],
+                className="ms-card",
+            ),
+        ],
+        className="ms-row ms-r-2",
     )
 
-    return dcc.Link(
-        card,
-        href=f"/einzelanalyse?ticker={ticker}",
-        className="ms-peer-link",
+
+def _factor_decomposition(r: pd.Series) -> html.Div:
+    weights = STATE.settings.factor_weights
+    stacks = []
+    for i, (label, col, key) in enumerate(_FACTORS):
+        v = float(r[col]) if col in r and pd.notna(r[col]) else 0.0
+        height = max(0.0, min(100.0, v))
+        w = weights.get(key, 0.0)
+        stacks.append(
+            html.Div(
+                [
+                    html.Div(
+                        html.Div(
+                            className=f"ms-stack-seg s{i+1}",
+                            style={"height": f"{height}%"},
+                        ),
+                        className="ms-stack-bar",
+                    ),
+                    html.Div(
+                        [
+                            html.Div(fmt_de(v, 0), className="ms-stack-val"),
+                            html.Div(label, className="ms-stack-name"),
+                            html.Div(f"Gewicht {round(w * 100)} %",
+                                     className="ms-stack-w"),
+                        ],
+                        className="ms-stack-meta",
+                    ),
+                ],
+                className="ms-fac-stack",
+            )
+        )
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("Score-Zerlegung", className="ms-eyebrow"),
+                            html.H2("Faktor-Beiträge zum Gesamtscore"),
+                        ]
+                    ),
+                    html.Div(
+                        "Säulenhöhe = Score · Beschriftung = Gewicht",
+                        className="ms-meta",
+                    ),
+                ],
+                className="ms-dash-section",
+            ),
+            html.Div(
+                html.Div(stacks, className="ms-fac-stack-wrap"),
+                className="ms-card",
+            ),
+        ]
+    )
+
+
+def _price_block(r: pd.Series) -> html.Div:
+    last = r.get("last_price")
+    high = r.get("high_52w")
+    low = r.get("low_52w")
+    sma50 = r.get("sma_50")
+    sma200 = r.get("sma_200")
+
+    range_pos = None
+    if pd.notna(last) and pd.notna(high) and pd.notna(low) and high > low:
+        range_pos = (float(last) - float(low)) / (float(high) - float(low)) * 100
+        range_pos = max(0.0, min(100.0, range_pos))
+
+    if range_pos is None:
+        body = [html.Div("Keine Kursdaten verfügbar.", className="ms-tt-muted")]
+    else:
+        sma_row = []
+        if pd.notna(sma50):
+            sma_row.append(html.Span("SMA-50", className="ms-sma-lbl"))
+            sma_row.append(html.Strong(f"{fmt_de(sma50, 2)} €"))
+        if pd.notna(sma200):
+            sma_row.append(html.Span("SMA-200", className="ms-sma-lbl"))
+            sma_row.append(html.Strong(f"{fmt_de(sma200, 2)} €"))
+        if pd.notna(last) and pd.notna(sma200) and float(sma200) > 0:
+            dist = (float(last) - float(sma200)) / float(sma200)
+            tone = "is-up" if dist >= 0 else "is-down"
+            sma_row.append(html.Span("Distanz SMA-200", className="ms-sma-lbl"))
+            sma_row.append(html.Strong(fmt_percent(dist, 1), className=tone))
+
+        body = [
+            html.Div(
+                f"Aktueller Kurs liegt bei {fmt_de(range_pos, 0)} % der Spanne",
+                className="ms-tt-muted",
+                style={"fontSize": "11px"},
+            ),
+            html.Div(
+                [
+                    html.Div(className="ms-range-fill"),
+                    html.Div(
+                        className="ms-range-marker",
+                        style={"left": f"{range_pos}%"},
+                    ),
+                ],
+                className="ms-range-bar",
+            ),
+            html.Div(
+                [
+                    html.Span(f"Tief {fmt_de(low, 2)} €"),
+                    html.Span(f"{fmt_de(last, 2)} €"),
+                    html.Span(f"Hoch {fmt_de(high, 2)} €"),
+                ],
+                className="ms-range-meta",
+            ),
+            html.Div(sma_row, className="ms-sma-row") if sma_row else html.Div(),
+        ]
+
+    return html.Div(
+        [html.H3("Kursband 52 Wochen", className="ms-card-h"), *body],
+        className="ms-card",
+    )
+
+
+def _returns_block(r: pd.Series) -> html.Div:
+    rows = []
+    windows = [("1M", "ret_1m"), ("3M", "ret_3m"), ("6M", "ret_6m"), ("12M", "ret_12m")]
+    # Skala bestimmen: max |return| im Universum, mind. 50 %.
+    max_abs = 0.50
+    for _, col in windows:
+        v = r.get(col)
+        if pd.notna(v):
+            max_abs = max(max_abs, abs(float(v)))
+    if max_abs == 0:
+        max_abs = 0.50
+
+    for label, col in windows:
+        v = r.get(col)
+        if pd.isna(v):
+            rows.append(html.Div(
+                [
+                    html.Span(label, className="ms-ret-lbl"),
+                    html.Span(html.Span(className="ms-ret-mid"),
+                              className="ms-ret-track"),
+                    html.Span("–", className="ms-ret-v"),
+                ],
+                className="ms-ret-row",
+            ))
+            continue
+        v = float(v)
+        # max width = halbe Bar-Breite (50 %).
+        width_pct = min(50.0, abs(v) / max_abs * 50.0)
+        tone = "is-up" if v >= 0 else "is-down"
+        rows.append(html.Div(
+            [
+                html.Span(label, className="ms-ret-lbl"),
+                html.Span(
+                    [
+                        html.Span(className="ms-ret-mid"),
+                        html.Span(
+                            className=f"ms-ret-fill {tone}",
+                            style={"width": f"{width_pct}%"},
+                        ),
+                    ],
+                    className="ms-ret-track",
+                ),
+                html.Span(fmt_percent(v, 1), className=f"ms-ret-v {tone}"),
+            ],
+            className="ms-ret-row",
+        ))
+
+    return html.Div(
+        [
+            html.H3("Rückblick Returns", className="ms-card-h"),
+            html.Div(rows, className="ms-ret-list"),
+        ],
+        className="ms-card",
+    )
+
+
+def _indicator_table_card(df: pd.DataFrame, ticker: str, group) -> html.Div:
+    idx = df.index[df["ticker"] == ticker]
+    if len(idx) == 0:
+        return html.Div()
+    i = idx[0]
+
+    rows = []
+    for it in group.items:
+        if it.key not in df.columns:
+            continue
+        val = df.at[i, it.key]
+        try:
+            pct_series = _indicator_percentile(df, it.key, STATE.settings)
+            pct_val = pct_series.loc[i]
+        except Exception:
+            pct_val = None
+        pct = int(round(float(pct_val) * 100)) if pd.notna(pct_val) else None
+
+        if pct is None:
+            fill_cls = "is-weak"
+            fill_width = 0
+            pct_cell = "–"
+        else:
+            if pct >= 70:   fill_cls = ""
+            elif pct >= 30: fill_cls = "is-warn"
+            else:           fill_cls = "is-weak"
+            fill_width = pct
+            pct_cell = f"P{pct}"
+
+        rows.append(
+            html.Tr(
+                [
+                    html.Td(it.label, className="ms-ind-lbl"),
+                    html.Td(fmt_indicator(it.key, val), className="ms-ind-val"),
+                    html.Td(
+                        html.Div(
+                            [
+                                html.Div(
+                                    html.Div(
+                                        className=f"ms-ind-fill {fill_cls}".strip(),
+                                        style={"width": f"{fill_width}%"},
+                                    ),
+                                    className="ms-ind-track",
+                                ),
+                                html.Span(pct_cell, className="ms-ind-pct"),
+                            ],
+                            className="ms-ind-pct-cell",
+                        ),
+                    ),
+                ]
+            )
+        )
+
+    return html.Div(
+        [
+            html.H3(
+                [
+                    group.name, " ",
+                    html.Span(f"{len(group.items)} Indikatoren",
+                              className="ms-card-h-meta"),
+                ],
+                className="ms-card-h",
+            ),
+            html.Table(
+                [
+                    html.Thead(
+                        html.Tr([
+                            html.Th("Kennzahl"),
+                            html.Th("Wert", className="is-num"),
+                            html.Th("Perzentil-Rang"),
+                        ])
+                    ),
+                    html.Tbody(rows),
+                ],
+                className="ms-ind-table",
+            ),
+        ],
+        className="ms-card",
+    )
+
+
+def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
+    peers = compute_peers(scored, ticker, n=6, mode=mode)
+    if peers.empty:
+        return html.Div(
+            "Keine Comparables verfügbar.",
+            className="ms-tt-muted",
+            style={"padding": "16px"},
+        )
+
+    def _hm(v) -> html.Span:
+        if pd.isna(v):
+            return html.Span("–", className="ms-hm is-f")
+        cls = _class_of(float(v))["cls"]
+        return html.Span(fmt_de(float(v), 0), className=f"ms-hm is-{cls}")
+
+    rows = []
+    self_ticker = ticker
+    for _, p in peers.iterrows():
+        is_self = str(p["ticker"]) == self_ticker
+        score = p.get("total_score")
+        score_cls = _class_of(float(score))["cls"] if pd.notna(score) else "f"
+        ret_12m = p.get("ret_12m")
+        ret_str = fmt_percent(float(ret_12m), 1) if pd.notna(ret_12m) else "–"
+        ret_cls = "ms-up" if (pd.notna(ret_12m) and float(ret_12m) >= 0) else "ms-down"
+
+        name_cell: list = [str(p.get("name") or "—")]
+        if is_self:
+            name_cell.append(html.Span("aktuell", className="ms-peer-self-tag"))
+
+        rows.append(
+            html.Tr(
+                [
+                    html.Td(
+                        html.A(str(p["ticker"]),
+                               href=f"/einzelanalyse?ticker={p['ticker']}",
+                               className="ms-peer-tk"),
+                    ),
+                    html.Td(name_cell),
+                    html.Td(_hm(p.get("value_score")),    className="is-num"),
+                    html.Td(_hm(p.get("quality_score")),  className="is-num"),
+                    html.Td(_hm(p.get("growth_score")),   className="is-num"),
+                    html.Td(_hm(p.get("momentum_score")), className="is-num"),
+                    html.Td(_hm(p.get("lowvol_score")),   className="is-num"),
+                    html.Td(
+                        html.Span(
+                            fmt_de(float(score), 1) if pd.notna(score) else "–",
+                            className=f"ms-score-pill is-{score_cls}",
+                        ),
+                        className="is-num",
+                    ),
+                    html.Td(ret_str,
+                            className=f"is-num {ret_cls}",
+                            style={"fontWeight": 600}),
+                ],
+                className="is-self" if is_self else "",
+            )
+        )
+
+    return html.Div(
+        html.Table(
+            [
+                html.Thead(
+                    html.Tr([
+                        html.Th("Ticker"),
+                        html.Th("Name"),
+                        html.Th("Value",    className="is-num"),
+                        html.Th("Quality",  className="is-num"),
+                        html.Th("Growth",   className="is-num"),
+                        html.Th("Momentum", className="is-num"),
+                        html.Th("Low Vol",  className="is-num"),
+                        html.Th("Score",    className="is-num"),
+                        html.Th("12M",      className="is-num"),
+                    ])
+                ),
+                html.Tbody(rows),
+            ],
+            className="ms-peer-table",
+        ),
+        className="ms-toptable-wrap",
     )
 
 
 def _comparables_controls() -> html.Div:
-    """Toggle: ähnliches Profil (Distanz) vs. Top-Score in der Industrie."""
     return html.Div(
         dbc.RadioItems(
             id="ea-comparables-mode",
@@ -336,9 +718,11 @@ def _comparables_controls() -> html.Div:
             input_class_name="btn-check",
             label_class_name="btn btn-sm btn-outline-secondary",
         ),
-        className="mb-3",
+        className="mb-2",
     )
 
+
+# ── Callbacks ──────────────────────────────────────────────────────────────
 
 @callback(
     Output("ea-ticker", "value"),
@@ -346,13 +730,7 @@ def _comparables_controls() -> html.Div:
     prevent_initial_call=True,
 )
 def _sync_ticker_from_url(search: str | None):
-    """Ticker-Dropdown bei URL-Query-Wechsel nachziehen (Deep-Link).
-
-    Beim Klick auf eine Peer-Karte wechselt ``dcc.Location.search`` clientseitig
-    auf ``?ticker=XYZ``. Da der Pfadname gleich bleibt, ruft Dash das Layout
-    nicht erneut auf — wir aktualisieren darum die Dropdown-Auswahl manuell,
-    was den bestehenden ``_render``-Callback auslöst.
-    """
+    """Ticker-Dropdown bei URL-Query-Wechsel nachziehen (Deep-Link)."""
     from urllib.parse import parse_qs
 
     if not search:
@@ -369,108 +747,77 @@ def _render(ticker: str | None):
     if not ticker or STATE.scored.empty:
         return dbc.Alert("Keine Daten verfügbar.", color="info")
 
-    row = STATE.scored.loc[STATE.scored["ticker"] == ticker]
+    df = STATE.scored
+    row = df.loc[df["ticker"] == ticker]
     if row.empty:
         return dbc.Alert(f"Ticker {ticker} nicht gefunden.", color="warning")
     r = row.iloc[0]
 
-    score = r.get("total_score")
-    score_display = fmt_de(score, 1) if pd.notna(score) else "-"
-    classification = r.get("classification") or ""
-
-    meta: list[str] = []
-    if r.get("sector"):
-        meta.append(str(r["sector"]))
-    if r.get("industry"):
-        meta.append(str(r["industry"]))
-    if r.get("region"):
-        meta.append(str(r["region"]))
-    if pd.notna(r.get("market_cap")):
-        meta.append(f"Market Cap {fmt_market_cap(r['market_cap'])}")
-
-    header = quote_header(
-        ticker=str(r["ticker"]),
-        name=str(r.get("name") or ""),
-        meta=meta,
-        score_value=score_display,
-        score_label=classification or "Gesamt-Score",
+    ranks = _ranks(df, r)
+    industry_label = (
+        str(r.get("industry") or "").split("·")[-1].strip()
+        if r.get("industry") else (r.get("sector") or "")
     )
 
-    factors = {
-        "Value": r.get("value_score"),
-        "Quality": r.get("quality_score"),
-        "Growth": r.get("growth_score"),
-        "Momentum": r.get("momentum_score"),
-        "Low Vol": r.get("lowvol_score"),
-    }
-
-    radar = go.Figure(
-        go.Scatterpolar(
-            r=[0 if pd.isna(v) else float(v) for v in factors.values()],
-            theta=list(factors.keys()),
-            fill="toself",
-            name=str(r["ticker"]),
-            line=dict(color="#0B3D91"),
-            fillcolor="rgba(11,61,145,0.18)",
+    indicator_cards: list = []
+    pair_a, pair_b = [], []
+    for i, grp in enumerate(INDICATOR_GROUPS):
+        card = _indicator_table_card(df, ticker, grp)
+        if i % 2 == 0: pair_a.append(card)
+        else:          pair_b.append(card)
+    # Render zweispaltig, ein „letztes" einsames Card-Element bekommt einen
+    # eigenen Spalten-Wrapper, damit das Grid sauber bleibt.
+    indicator_rows = []
+    for a, b in zip(pair_a, pair_b):
+        indicator_rows.append(html.Div([a, b], className="ms-row ms-r-2"))
+    if len(pair_a) > len(pair_b):
+        indicator_rows.append(
+            html.Div([pair_a[-1], html.Div()], className="ms-row ms-r-2"),
         )
-    )
-    radar.update_layout(
-        template=MS_LIGHT,
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-        showlegend=False,
-        height=320,
-        margin=dict(l=16, r=16, t=8, b=8),
-    )
-
-    factor_card = dbc.Card(
-        [
-            dbc.CardHeader("Faktor-Breakdown"),
-            dbc.CardBody(factor_breakdown(factors)),
-        ]
-    )
-
-    cards = []
-    for factor, pairs in INDICATOR_GROUPS.items():
-        cards.append(
-            dbc.Col(
-                dbc.Card(
-                    [
-                        dbc.CardHeader(factor),
-                        dbc.CardBody(_kv_table(pairs, r)),
-                    ],
-                    className="mb-3 h-100",
-                ),
-                md=6,
-            )
-        )
-
-    sections: list = [header]
-    rueckblick = _rueckblick(r)
-    if rueckblick is not None:
-        sections.append(rueckblick)
-    sections.append(_filter_badges(r))
-
-    comparables_block = [
-        section_header("Comparables"),
-        _comparables_controls(),
-        html.Div(id="ea-comparables"),
-    ]
 
     return html.Div(
-        sections + [
-            section_header("Faktor-Profil"),
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dcc.Graph(figure=radar, config={"displayModeBar": False}),
-                        md=6,
-                    ),
-                    dbc.Col(factor_card, md=6),
-                ]
+        [
+            _hero_block(r, ranks),
+            _verdict_block(r),
+            _strengths_concerns(df, ticker),
+            _factor_decomposition(r),
+            html.Div(
+                [_price_block(r), _returns_block(r)],
+                className="ms-row ms-r-2",
             ),
-            section_header("Kennzahlen"),
-            dbc.Row(cards),
-        ] + comparables_block
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("Kennzahlen", className="ms-eyebrow"),
+                            html.H2("Indikatoren mit Perzentil-Rang"),
+                        ]
+                    ),
+                    html.Div(
+                        f"Referenz: {STATE.settings.percentile_mode}",
+                        className="ms-meta",
+                    ),
+                ],
+                className="ms-dash-section",
+            ),
+            *indicator_rows,
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("Comparables", className="ms-eyebrow"),
+                            html.H2(f"Peer-Vergleich · {industry_label}" if industry_label else "Peer-Vergleich"),
+                        ]
+                    ),
+                    html.Div(
+                        _comparables_controls(),
+                        className="ms-meta",
+                    ),
+                ],
+                className="ms-dash-section",
+            ),
+            html.Div(id="ea-comparables"),
+        ]
     )
 
 
@@ -480,18 +827,46 @@ def _render(ticker: str | None):
     Input("ea-comparables-mode", "value"),
 )
 def _render_comparables(ticker: str | None, mode: str | None):
-    empty = dbc.Alert("Keine Comparables verfügbar.", color="light", className="mb-0")
     if not ticker or STATE.scored.empty:
-        return empty
-    peers = compute_peers(STATE.scored, ticker, n=6, mode=mode or "similar")
-    if peers.empty:
-        return empty
-    return dbc.Row(
-        [
-            dbc.Col(_peer_card(peer), xs=12, sm=6, md=4, lg=2, className="mb-3")
-            for _, peer in peers.iterrows()
-        ],
-        className="ms-peer-row",
+        return html.Div("Keine Comparables verfügbar.",
+                        className="ms-tt-muted",
+                        style={"padding": "16px"})
+    return _peer_heatmap(STATE.scored, ticker, mode or "similar")
+
+
+@callback(
+    Output("ea-pdf-download", "data"),
+    Output("ea-pdf-error", "children"),
+    Input("ea-export-pdf", "n_clicks"),
+    State("ea-ticker", "value"),
+    prevent_initial_call=True,
+)
+def _export_factsheet_pdf(n_clicks: int | None, ticker: str | None):
+    """Editorial-Factsheet (A4, 1 Seite) für den gewählten Ticker erzeugen."""
+    if not n_clicks or not ticker:
+        raise PreventUpdate
+    if STATE.scored.empty:
+        return no_update, "Keine Daten geladen — bitte erst CSV importieren."
+
+    try:
+        from app.core.factsheet_pdf import (
+            FactsheetRenderError,
+            render_editorial_factsheet,
+        )
+    except Exception as exc:  # pragma: no cover — import-time issues
+        return no_update, f"PDF-Modul nicht verfügbar: {exc!s}"
+
+    try:
+        pdf_bytes = render_editorial_factsheet(ticker, STATE.scored, STATE.settings)
+    except FactsheetRenderError as exc:
+        return no_update, str(exc)
+    except ValueError as exc:
+        return no_update, str(exc)
+
+    filename = f"factsheet_{ticker}_{date.today():%Y%m%d}.pdf"
+    return (
+        dcc.send_bytes(lambda buf: buf.write(pdf_bytes), filename=filename),
+        "",
     )
 
 

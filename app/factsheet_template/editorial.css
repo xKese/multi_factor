@@ -1,0 +1,508 @@
+/* Editorial-Variante des Aktien-Factsheets — A4 Hochformat (210 × 297 mm).
+   Style-Werte 1:1 aus variation-editorial.jsx übernommen. */
+
+@font-face {
+  font-family: "Inter";
+  font-weight: 400;
+  font-style: normal;
+  src: local("Inter Regular"), local("Inter"),
+       url("../fonts/Inter-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 500;
+  font-style: normal;
+  src: local("Inter Medium"),
+       url("../fonts/Inter-Medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 600;
+  font-style: normal;
+  src: local("Inter SemiBold"),
+       url("../fonts/Inter-SemiBold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 700;
+  font-style: normal;
+  src: local("Inter Bold"),
+       url("../fonts/Inter-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Source Serif 4";
+  font-weight: 400;
+  font-style: normal;
+  src: local("Source Serif 4"), local("Source Serif Pro"),
+       url("../fonts/SourceSerif4-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Source Serif 4";
+  font-weight: 400;
+  font-style: italic;
+  src: local("Source Serif 4 Italic"), local("Source Serif Pro Italic"),
+       url("../fonts/SourceSerif4-Italic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Source Serif 4";
+  font-weight: 600;
+  font-style: normal;
+  src: local("Source Serif 4 SemiBold"), local("Source Serif Pro SemiBold"),
+       url("../fonts/SourceSerif4-SemiBold.ttf") format("truetype");
+}
+
+@page {
+  size: 794px 1123px;
+  margin: 0;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #fafaf7;
+  width: 794px;
+  height: 1123px;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Inter", "DejaVu Sans", "Helvetica Neue", sans-serif;
+  font-size: 9px;
+  color: #1a1a1a;
+  line-height: 1.45;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.fs-page {
+  width: 794px;
+  height: 1123px;
+  background: #fafaf7;
+  color: #1a1a1a;
+  padding: 44px 48px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+.fs-page--dense { padding: 32px 38px 28px; gap: 11px; }
+
+/* --- Top bar --- */
+.fs-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #737067;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1a1a1a;
+}
+.fs-brand { font-weight: 600; color: #1a1a1a; }
+
+/* --- Header --- */
+.fs-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: end;
+}
+.fs-ticker {
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.fs-name {
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-size: 16px;
+  font-weight: 400;
+  font-style: italic;
+  color: #3d3a32;
+  margin-top: 6px;
+}
+.fs-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 9px;
+  color: #737067;
+  margin-top: 10px;
+}
+.fs-meta-item { display: flex; gap: 5px; }
+.fs-meta-label { color: #a39e92; }
+
+.fs-score-card {
+  min-width: 120px;
+  text-align: right;
+}
+.fs-score-num {
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-size: 56px;
+  line-height: 0.95;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.fs-score-out-of {
+  color: #a39e92;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.fs-score-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: #737067;
+  margin-top: 4px;
+}
+.fs-class-badge {
+  display: inline-block;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  color: #fff;
+  margin-top: 6px;
+}
+
+/* --- Thesis --- */
+.fs-thesis-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: start;
+  padding-top: 12px;
+  border-top: 1px solid #e5e2d9;
+}
+.fs-thesis-label {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #a39e92;
+  padding-top: 3px;
+}
+.fs-thesis {
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: #1a1a1a;
+  font-weight: 400;
+}
+
+/* --- Quote grid --- */
+.fs-quote-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  border: 1px solid #1a1a1a;
+}
+.fs-quote-cell {
+  padding: 10px 12px;
+  border-right: 1px solid #e5e2d9;
+  overflow: hidden;
+}
+.fs-quote-cell:last-child { border-right: none; }
+.fs-quote-label {
+  font-size: 7.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #737067;
+  margin-bottom: 3px;
+}
+.fs-quote-value {
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-quote-value--up { color: #1b5e3a; }
+.fs-quote-value--down { color: #9c2a20; }
+.fs-quote-value--neutral { color: #3d3a32; }
+.fs-quote-sub {
+  font-size: 8px;
+  color: #737067;
+  margin-top: 1px;
+}
+.fs-rank-total { color: #a39e92; font-size: 10px; }
+
+/* --- 52W range bar --- */
+.fs-range-bar {
+  position: relative;
+  height: 6px;
+  background: #efece4;
+  margin: 8px 0 4px;
+}
+.fs-range-marker {
+  position: absolute;
+  top: -2px;
+  width: 6px;
+  height: 10px;
+  background: #d97757;
+}
+.fs-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 7.5px;
+  color: #737067;
+}
+
+/* --- Section title --- */
+.fs-section-title {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: #737067;
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #1a1a1a;
+}
+.fs-section-title--mt { margin-top: 14px; }
+
+/* --- Body grid --- */
+.fs-body-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* --- Factor bars --- */
+.fs-factor-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fs-factor-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 36px;
+  gap: 8px;
+  align-items: center;
+}
+.fs-factor-label { font-size: 9.5px; font-weight: 500; }
+.fs-factor-weight { font-size: 8px; color: #a39e92; }
+.fs-factor-bar-outer {
+  height: 10px;
+  background: #efece4;
+  position: relative;
+}
+.fs-factor-bar-inner { height: 100%; }
+.fs-factor-score {
+  text-align: right;
+  font-size: 10.5px;
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-weight: 600;
+}
+
+/* --- Filter & signals --- */
+.fs-badges-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fs-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  /* Spec: ``border: 0.5px solid``. WeasyPrint rendert sub-pixel Borders
+     unzuverlässig (Background-Clip-Mismatch erzeugt einen sichtbaren
+     "Doppel-Rahmen"). 1px ist marginal sichtbarer, aber sauber. */
+  border-width: 1px;
+  border-style: solid;
+  /* Verhindert, dass mehrteilige Werte ("8 / 9", "Altman Z") wrappen — die
+     Spec hat das im Browser nicht nötig, in WeasyPrint mit Inter-Metrik
+     manchmal doch. */
+  white-space: nowrap;
+}
+.fs-badge--up { background: #e8f1ec; color: #1b5e3a; border-color: #1b5e3a; }
+.fs-badge--down { background: #f7e9e7; color: #9c2a20; border-color: #9c2a20; }
+.fs-badge--warn { background: #faf3e0; color: #8a6914; border-color: #b08a1f; }
+.fs-badge--info { background: #eaf0f7; color: #1a3d72; border-color: #1a3d72; }
+.fs-badge--neutral { background: #f0eee8; color: #3d3a32; border-color: #737067; }
+.fs-badge-label { text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; }
+.fs-badge-value { font-weight: 600; }
+
+.fs-inline-block { margin-top: 10px; }
+.fs-inline-label {
+  font-size: 8px;
+  color: #737067;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.fs-sma-signal {
+  font-weight: 700;
+  font-size: 11px;
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  color: #1a1a1a;
+}
+.fs-sma-signal--up { color: #1b5e3a; }
+.fs-sma-signal--down { color: #9c2a20; }
+.fs-sma-meta {
+  font-size: 8px;
+  color: #737067;
+  margin-top: 2px;
+}
+
+/* --- Rückblick --- */
+.fs-ret-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 4px;
+}
+.fs-ret-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+.fs-ret-value {
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fs-ret-value--up { color: #1b5e3a; }
+.fs-ret-value--down { color: #9c2a20; }
+.fs-ret-value--na { color: #a39e92; }
+.fs-ret-label {
+  font-size: 7.5px;
+  color: #737067;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* --- Indicators --- */
+.fs-indicator-grid {
+  display: grid;
+  /* minmax(0, 1fr) statt blossem 1fr — verhindert, dass eine Spalte mit
+     langen Labels (z.B. "Forward EPS-Wachstum") die anderen verschiebt. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.fs-indicator-block { margin-bottom: 10px; }
+.fs-indicator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 5px;
+}
+.fs-indicator-title {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.fs-indicator-weight { font-size: 8px; color: #a39e92; }
+.fs-indicator-line {
+  display: grid;
+  /* Spec: "1fr auto 36px". Das ``1fr`` allein expandiert in CSS Grid auf
+     die Min-Content-Breite seines Inhalts (impliziter ``minmax(auto, 1fr)``)
+     — bei langen Labels wie "Forward EPS-Wachstum" sprengt es die Spalte.
+     ``minmax(0, 1fr)`` zwingt den Track, bis 0 schrumpfen zu dürfen, damit
+     ``auto`` für den Wert und ``36px`` für die Bar ihre Platz-Garantien
+     behalten. Effekt: Bar liegt bei jeder Zeile rechtsbündig auf identischer
+     X-Achse; Wert hat seine intrinsic content-Breite; Label wird per
+     ``ellipsis`` sauber gekürzt. */
+  grid-template-columns: minmax(0, 1fr) auto 36px;
+  gap: 6px;
+  align-items: center;
+  padding: 2.5px 0;
+  border-bottom: 1px dotted #e5e2d9;
+}
+.fs-indicator-label {
+  color: #3d3a32;
+  font-size: 8.5px;
+  /* Spec hat keine wrap-Regel. Multi-Word-Labels ("Operative Marge",
+     "Forward EPS-Wachstum") brechen an Leerzeichen.
+     ``word-break: keep-all`` verbietet word-internal Breaks (wie früher
+     "Bruttomar" / "ge").
+     ``min-width: 0`` zusammen mit ``overflow: hidden`` zwingt zu lange
+     Einzelwörter ("Bruttomarge", "Dividendenrendite") sauber zu clippen,
+     statt das Layout zu sprengen und in die Wert-Spalte einzudringen. */
+  line-height: 1.15;
+  word-break: keep-all;
+  min-width: 0;
+  overflow: hidden;
+}
+.fs-indicator-value {
+  font-weight: 500;
+  text-align: right;
+  font-size: 8.5px;
+  white-space: nowrap;
+}
+.fs-pct-track {
+  height: 6px;
+  background: #efece4;
+  position: relative;
+}
+.fs-pct-fill { height: 100%; }
+
+/* --- Peers --- */
+.fs-peers-wrap { margin-top: auto; }
+.fs-peer-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.fs-peer-card {
+  border: 1px solid #1a1a1a;
+  padding: 8px 10px;
+}
+.fs-peer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+.fs-peer-ticker { font-weight: 700; font-size: 11px; letter-spacing: 0.02em; }
+.fs-peer-score {
+  font-family: "Source Serif 4", "Source Serif Pro", "DejaVu Serif", Georgia, serif;
+  font-size: 13px;
+  font-weight: 600;
+}
+.fs-peer-name {
+  font-size: 8px;
+  color: #737067;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-peer-meta {
+  font-size: 8px;
+  margin-top: 3px;
+  display: flex;
+  justify-content: space-between;
+}
+.fs-peer-class { color: #737067; }
+.fs-peer-ret--up { color: #1b5e3a; font-weight: 600; }
+.fs-peer-ret--down { color: #9c2a20; font-weight: 600; }
+.fs-peer-ret--na { color: #a39e92; font-weight: 600; }
+
+/* --- Footer --- */
+.fs-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 7.5px;
+  color: #a39e92;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding-top: 6px;
+  border-top: 1px solid #e5e2d9;
+}

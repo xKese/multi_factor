@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>Factsheet · {{ ticker }}</title>
+  <link rel="stylesheet" href="editorial.css" />
+</head>
+<body>
+  <div class="fs-page{% if dense %} fs-page--dense{% endif %}">
+
+    <!-- Top bar -->
+    <div class="fs-topbar">
+      <span class="fs-brand">Meeder &amp; Seifer · Multi-Faktor-Modell</span>
+      <span>Stand {{ generated_on }} · Editorial</span>
+    </div>
+
+    <!-- Header -->
+    <div class="fs-header">
+      <div>
+        <div class="fs-ticker">{{ ticker }}</div>
+        <div class="fs-name">{{ name }}</div>
+        <div class="fs-meta-row">
+          {% if sector %}<span class="fs-meta-item"><span class="fs-meta-label">Sektor</span> {{ sector }}</span>{% endif %}
+          {% if industry %}<span class="fs-meta-item"><span class="fs-meta-label">Industrie</span> {{ industry }}</span>{% endif %}
+          {% if region %}<span class="fs-meta-item"><span class="fs-meta-label">Region</span> {{ region }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="fs-score-card">
+        <div class="fs-score-num">{{ total_score }}<span class="fs-score-out-of"> / 100</span></div>
+        <div class="fs-score-label">Gesamt-Score</div>
+        <div class="fs-class-badge" style="background: {{ accent_color }};">{{ classification }}</div>
+      </div>
+    </div>
+
+    <!-- Thesis -->
+    <div class="fs-thesis-row">
+      <div class="fs-thesis-label">These</div>
+      <div class="fs-thesis">{{ thesis }}</div>
+    </div>
+
+    <!-- Quote grid -->
+    <div class="fs-quote-grid">
+      <div class="fs-quote-cell">
+        <div class="fs-quote-label">Kurs</div>
+        <div class="fs-quote-value">{{ last_price }}</div>
+        <div class="fs-quote-sub">USD</div>
+      </div>
+      <div class="fs-quote-cell">
+        <div class="fs-quote-label">Marktkap.</div>
+        <div class="fs-quote-value">{{ market_cap }}</div>
+        <div class="fs-quote-sub">USD</div>
+      </div>
+      <div class="fs-quote-cell">
+        <div class="fs-quote-label">52W Range</div>
+        <div class="fs-range-bar">
+          {% if range_pct is not none %}
+          <div class="fs-range-marker" style="left: calc({{ range_pct }}% - 3px);"></div>
+          {% endif %}
+        </div>
+        <div class="fs-range-labels">
+          <span>{{ range_low }}</span>
+          <span>{{ range_high }}</span>
+        </div>
+      </div>
+      <div class="fs-quote-cell">
+        <div class="fs-quote-label">Beta</div>
+        <div class="fs-quote-value">{{ beta }}</div>
+        <div class="fs-quote-sub">Vol. 1J {{ volatility_1y }}</div>
+      </div>
+      <div class="fs-quote-cell">
+        <div class="fs-quote-label">Empfehlung</div>
+        <div class="fs-quote-value fs-quote-value--{{ recommendation_tone }}">{{ recommendation }}</div>
+        <div class="fs-quote-sub">Filter {{ filter_ok }}</div>
+      </div>
+      <div class="fs-quote-cell">
+        <div class="fs-quote-label">Sektor-Rang</div>
+        <div class="fs-quote-value">
+          {{ sector_rank }}
+          {% if sector_total %}<span class="fs-rank-total">/ {{ sector_total }}</span>{% endif %}
+        </div>
+        <div class="fs-quote-sub">
+          {% if industry_rank and industry_total %}Industrie {{ industry_rank }}/{{ industry_total }}{% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Body grid: factors+filters | indicators -->
+    <div class="fs-body-grid">
+      <div>
+        <div class="fs-section-title">Faktor-Profil</div>
+        <div class="fs-factor-bars">
+          {% for f in factors %}
+          <div class="fs-factor-row">
+            <div>
+              <div class="fs-factor-label">{{ f.label }}</div>
+              <div class="fs-factor-weight">Gewicht {{ f.weight }} %</div>
+            </div>
+            <div class="fs-factor-bar-outer">
+              <div class="fs-factor-bar-inner" style="width: {{ f.score_pct }}%; background: {{ f.color }};"></div>
+            </div>
+            <div class="fs-factor-score">{{ f.score_text }}</div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="fs-section-title fs-section-title--mt">Filter &amp; Signale</div>
+        <div class="fs-badges-row">
+          {% for b in filter_badges %}
+          <span class="fs-badge fs-badge--{{ b.tone }}">
+            <span class="fs-badge-label">{{ b.label }}</span>
+            <span class="fs-badge-value">{{ b.value }}</span>
+          </span>
+          {% endfor %}
+        </div>
+
+        <div class="fs-inline-block">
+          <div class="fs-inline-label">SMA-Signal</div>
+          <div class="fs-sma-signal fs-sma-signal--{{ sma_tone }}">{{ sma_signal }}</div>
+          <div class="fs-sma-meta">SMA-50 {{ sma_50 }} · SMA-200 {{ sma_200 }}</div>
+        </div>
+
+        <div class="fs-inline-block">
+          <div class="fs-inline-label">Rückblicksfenster</div>
+          <div class="fs-ret-grid">
+            {% for r in returns %}
+            <div class="fs-ret-col">
+              <div class="fs-ret-value fs-ret-value--{{ r.tone }}">{{ r.value }}</div>
+              <div class="fs-ret-label">{{ r.label }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="fs-section-title">Kennzahlen</div>
+        <div class="fs-indicator-grid">
+          {% for g in indicator_groups %}
+          <div class="fs-indicator-block">
+            <div class="fs-indicator-header">
+              <span class="fs-indicator-title">{{ g.name }}</span>
+              <span class="fs-indicator-weight">{{ g.weight }} %</span>
+            </div>
+            {% for it in g.rows %}
+            <div class="fs-indicator-line">
+              <span class="fs-indicator-label">{{ it.label }}</span>
+              <span class="fs-indicator-value">{{ it.value }}</span>
+              <div class="fs-pct-track">
+                <div class="fs-pct-fill" style="width: {{ it.pct }}%; background: {{ g.color }};"></div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    {% if peers %}
+    <div class="fs-peers-wrap">
+      <div class="fs-section-title">Comparables</div>
+      <div class="fs-peer-row">
+        {% for p in peers %}
+        <div class="fs-peer-card">
+          <div class="fs-peer-head">
+            <span class="fs-peer-ticker">{{ p.ticker }}</span>
+            <span class="fs-peer-score">{{ p.score }}</span>
+          </div>
+          <div class="fs-peer-name">{{ p.name }}</div>
+          <div class="fs-peer-meta">
+            <span class="fs-peer-class">{{ p.classification }}</span>
+            <span class="fs-peer-ret--{{ p.ret_tone }}">{{ p.ret_12m }} 12M</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="fs-footer">
+      <span>Quelle Koyfin · M&amp;S Multi-Faktor-Modell</span>
+      <span>Vertraulich · Nur für interne Verwendung</span>
+    </div>
+
+  </div>
+</body>
+</html>
