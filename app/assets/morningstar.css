@@ -2721,3 +2721,12 @@ hr { border-color: var(--ms-border); opacity: 1; }
   justify-content: center;
   margin: 12px 0 4px;
 }
+
+/* NEU-Badge in Tabellenzellen (Momentum-Monitor) */
+.ms-tt-badge {
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}

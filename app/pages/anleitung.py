@@ -29,6 +29,10 @@ Risk: `Beta`, `Volatility 1Y`, `52W High/Low`
 Piotroski-Rohdaten: `Net Income`, `CFO`, `Total Assets`, `Total Debt`, `Current Assets`, `Current Liabilities`, `Shares Out`, `Revenue`, `COGS` (je aktuell und Vorjahr)
 Technisch: `SMA-50`, `SMA-200`, `Export Date`
 
+Optional: `SMA (20D)` — kann an beliebiger Stelle ergänzt werden (der Import
+erkennt die Spalte am Namen). Aktiviert im Momentum-Monitor die
+Kurzfrist-Spalten der Watchlist (SMA-20, Gap 20/50).
+
 4. CSV exportieren und im Tab **Daten-Import** hochladen.
 
 ## Scoring-Logik
@@ -52,11 +56,29 @@ Technisch: `SMA-50`, `SMA-200`, `Export Date`
 8. Gross Margin steigend
 9. Asset Turnover steigend
 
-## SMA-Signale
+## Momentum-Monitor (SMA-Signale)
+
+Signale (zustandsbasiert):
 
 - **GOLDEN CROSS**: Kurs > SMA-200 **und** SMA-50 > SMA-200
 - **DEATH CROSS**: Kurs < SMA-200 **und** SMA-50 < SMA-200
 - sonst: Kurs ≷ SMA-200
+
+Trend-Phasen (wie „lebendig" ist das Signal):
+
+- **Frisch**: |SMA-50 − SMA-200| ≤ 3 % — das Cross liegt nahe
+- **Etabliert**: Abstand größer, Trend intakt
+- **Ermüdet**: Kurs kreuzt die SMA-50 gegen den Trend oder der
+  1M-Return dreht (> 2 % gegenläufig)
+- **Neutral**: Kurs und SMA-50 auf verschiedenen Seiten der SMA-200
+
+Events aus der Import-Historie: Jeder CSV-Import speichert die Signal-Zustände
+je Aktie. Daraus entstehen **NEU**-Badges (Signalwechsel seit dem letzten
+Import) und das Signal-Alter („seit N Tagen"). Die Historie baut sich ab dem
+zweiten Import auf.
+
+**12-1-Momentum** = Return 12M − Return 1M (letzter Monat ausgeklammert,
+klassische Momentum-Definition); Ranking inkl. Abstand zum 52-Wochen-Hoch.
 
 ## Factor Timing
 

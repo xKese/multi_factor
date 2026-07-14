@@ -12,7 +12,7 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 |------------------|-------------------------------------------------|
 | Dashboard        | Übersicht mit KPIs, Top-Ranking                 |
 | Einzelanalyse    | Ticker-Detailansicht                            |
-| SMA_Signale      | Signal-Monitor (Golden/Death Cross)             |
+| SMA_Signale      | Momentum-Monitor (Trend-Phasen, Cross-Events, 12-1) |
 | M&S Portfolio    | Firmenportfolio                                 |
 | Mein Portfolio   | Persönliches Portfolio                          |
 | Factor_Timing    | Taktische Faktor-Allokation mit Makro-Regime    |
@@ -33,6 +33,9 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 - **Empfehlung**: STRONG BUY / BUY / HOLD / SELL
 - **Piotroski F-Score** (9 Kriterien, 0 – 9 Punkte)
 - **SMA-50/SMA-200-Signal**: Golden Cross, Death Cross, Kurs ≷ SMA-200
+- **Momentum-Monitor**: Trend-Phasen (frisch/etabliert/ermüdet), Signalwechsel
+  seit letztem Import (Signal-Historie je Aktie), 12-1-Momentum-Ranking,
+  optional SMA-20 aus erweitertem Export
 
 ## Installation & Start
 
@@ -47,9 +50,10 @@ das Dashboard zeigt eine Hinweis-Meldung.
 ## Daten hochladen
 
 1. Browser auf <http://127.0.0.1:8050/daten-import>
-2. Koyfin-CSV-Export (57 Spalten, siehe `app/core/schema.py`) per Drag & Drop
+2. Koyfin-CSV-Export (57 Spalten, siehe `app/core/schema.py`; optional
+   zusätzlich `SMA (20D)` an beliebiger Position) per Drag & Drop
    oder Klick auswählen
-3. Nach erfolgreichem Import werden Dashboard, Einzelanalyse, SMA-Signale,
+3. Nach erfolgreichem Import werden Dashboard, Einzelanalyse, Momentum-Monitor,
    Portfolios und Perzentil-Hilfe automatisch befüllt
 
 ### CSV-Format

@@ -51,6 +51,19 @@ def test_full_pipeline():
         ["STRONG BUY", "BUY", "HOLD", "SELL", "Filter nicht bestanden", "-"]
     ).all()
 
+    # Momentum-Monitor-Spalten.
+    for col in ["sma_gap", "mom_12_1", "dist_52w_high", "sma_20_distance", "trend_phase"]:
+        assert col in scored.columns, col
+
+    row = scored.dropna(subset=["ret_1m", "ret_12m"]).iloc[0]
+    assert abs(row["mom_12_1"] - (row["ret_12m"] - row["ret_1m"])) < 1e-9
+
+    from app.core.momentum import PHASE_NONE, TREND_PHASES
+
+    assert scored["trend_phase"].isin([*TREND_PHASES, PHASE_NONE]).all()
+    # Fixture ohne sma_20-Spalte → Distanz komplett NaN.
+    assert scored["sma_20_distance"].isna().all()
+
 
 if __name__ == "__main__":
     test_full_pipeline()

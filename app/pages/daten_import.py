@@ -5,34 +5,29 @@ from __future__ import annotations
 import base64
 import io
 import logging
-from datetime import date, datetime
+from datetime import datetime
 
 import dash_bootstrap_components as dbc
-import pandas as pd
 from dash import Input, Output, callback, dcc, html, register_page
 
+from app.core import signal_events
 from app.core.data_loader import load_koyfin_csv
-from app.core.persistence import save_sector_score_history, save_universe
+from app.core.momentum import classify_momentum
+from app.core.persistence import (
+    save_sector_score_history,
+    save_signal_history,
+    save_universe,
+)
 from app.core.sector_momentum import aggregate_sectors, aggregates_to_history_records
+from app.core.signal_events import snapshot_date_from_universe
 from app.core.state import STATE
 from app.pages.common import page_title
 from app.ui import fmt_de, section_header
 
 log = logging.getLogger(__name__)
 
-
-def _snapshot_date_from_universe(df: pd.DataFrame) -> date:
-    """Liefert das Snapshot-Datum für die Score-History.
-
-    Bevorzugt das Maximum von ``export_date`` aus dem Universum (Koyfin liefert
-    je Zeile ein Datum mit). Bei fehlendem oder unparsbarem Wert: heutiges
-    Datum.
-    """
-    if "export_date" in df.columns:
-        parsed = pd.to_datetime(df["export_date"], errors="coerce").dropna()
-        if not parsed.empty:
-            return parsed.max().date()
-    return date.today()
+# Rückwärtskompatibler Alias (Single Source liegt in signal_events).
+_snapshot_date_from_universe = snapshot_date_from_universe
 
 
 def _persist_sector_score_history() -> None:
@@ -56,13 +51,51 @@ def _persist_sector_score_history() -> None:
         log.warning("Sektor-Score-Historie konnte nicht gespeichert werden: %s", exc)
 
 
+def _persist_signal_history() -> None:
+    """Persistiert die SMA-Signal-Zustände je Aktie als Snapshot.
+
+    Grundlage für die Event-Erkennung des Momentum-Monitors („NEU seit
+    Import", Signal-Alter). Fehler werden geloggt, aber nicht propagiert.
+    """
+    df = STATE.scored
+    if df is None or df.empty:
+        return
+    try:
+        frame = df.dropna(subset=["ticker"]).drop_duplicates("ticker").copy()
+        frame["momentum"] = frame.apply(
+            lambda r: classify_momentum(
+                r.get("last_price"), r.get("sma_50"), r.get("sma_200")
+            ),
+            axis=1,
+        )
+        cols = [
+            "ticker",
+            "momentum",
+            "trend_phase",
+            "last_price",
+            "sma_20",
+            "sma_50",
+            "sma_200",
+            "ret_1m",
+            "mom_12_1",
+            "dist_52w_high",
+            "total_score",
+        ]
+        frame = frame[[c for c in cols if c in frame.columns]]
+        save_signal_history(frame, snapshot_date_from_universe(df))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Signal-Historie konnte nicht gespeichert werden: %s", exc)
+    finally:
+        signal_events.clear_cache()
+
+
 def layout(**_) -> html.Div:
     return html.Div(
         [
             page_title(
                 "Daten-Import",
-                "Koyfin-CSV-Export mit 57 Spalten (siehe Anleitung). Die ersten "
-                "zwei Zeilen werden übersprungen.",
+                "Koyfin-CSV-Export mit 57 Spalten (+ optional SMA-20, siehe "
+                "Anleitung). Die ersten zwei Zeilen werden übersprungen.",
             ),
             dcc.Upload(
                 id="upload-csv",
@@ -115,6 +148,7 @@ def _handle(contents: str | None, filename: str | None):
                     )
                 )
             _persist_sector_score_history()
+            _persist_signal_history()
             status = html.Div(alerts)
         except Exception as exc:  # noqa: BLE001
             status = dbc.Alert(f"Fehler: {exc}", color="danger")

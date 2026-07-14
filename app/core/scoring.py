@@ -21,6 +21,7 @@ from .momentum import (
     MOMENTUM_NONE,
     MOMENTUM_UP,
     classify_momentum,
+    classify_trend_phase,
 )
 from .piotroski import compute_piotroski
 
@@ -257,6 +258,33 @@ def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
         (df["sma_50"] > 0) & df["last_price"].notna(),
         (df["last_price"] - df["sma_50"]) / df["sma_50"],
         np.nan,
+    )
+
+    # Momentum-Monitor: SMA-Gap, 12-1-Momentum, 52W-Hoch-Distanz, Phase.
+    df["sma_gap"] = np.where(
+        (df["sma_200"] > 0) & df["sma_50"].notna(),
+        (df["sma_50"] - df["sma_200"]) / df["sma_200"],
+        np.nan,
+    )
+    df["mom_12_1"] = df["ret_12m"] - df["ret_1m"]
+    df["dist_52w_high"] = np.where(
+        (df["high_52w"] > 0) & df["last_price"].notna(),
+        df["last_price"] / df["high_52w"] - 1,
+        np.nan,
+    )
+    if "sma_20" in df.columns:
+        df["sma_20_distance"] = np.where(
+            (df["sma_20"] > 0) & df["last_price"].notna(),
+            (df["last_price"] - df["sma_20"]) / df["sma_20"],
+            np.nan,
+        )
+    else:
+        df["sma_20_distance"] = np.nan
+    df["trend_phase"] = df.apply(
+        lambda r: classify_trend_phase(
+            r.get("last_price"), r.get("sma_50"), r.get("sma_200"), r.get("ret_1m")
+        ),
+        axis=1,
     )
 
     return df
