@@ -13,8 +13,7 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 | Dashboard        | Übersicht mit KPIs, Top-Ranking                 |
 | Einzelanalyse    | Ticker-Detailansicht                            |
 | SMA_Signale      | Momentum-Monitor (Trend-Phasen, Cross-Events, 12-1) |
-| M&S Portfolio    | Firmenportfolio                                 |
-| Mein Portfolio   | Persönliches Portfolio                          |
+| M&S Portfolio    | Portfolio-Monitor: Koyfin-Watchlist-Upload, Handlungs-Flags, Vergleich zum Universum |
 | Factor_Timing    | Taktische Faktor-Allokation mit Makro-Regime    |
 | Daten_Import     | CSV-Upload (Koyfin-Export, einziger Input)      |
 | Berechnungen     | automatisch (Scoring-Engine)                    |
@@ -54,7 +53,10 @@ das Dashboard zeigt eine Hinweis-Meldung.
    zusätzlich `SMA (20D)` an beliebiger Position) per Drag & Drop
    oder Klick auswählen
 3. Nach erfolgreichem Import werden Dashboard, Einzelanalyse, Momentum-Monitor,
-   Portfolios und Perzentil-Hilfe automatisch befüllt
+   M&S Portfolio und Perzentil-Hilfe automatisch befüllt
+4. Das M&S-Portfolio selbst wird auf der Portfolio-Seite als
+   Koyfin-Watchlist-CSV hochgeladen (nur Ticker-Spalte nötig) und in der
+   Datenbank gespeichert
 
 ### CSV-Format
 

@@ -16,7 +16,7 @@ NAV_ORDER = {
     "Einzelanalyse": 1,
     "Momentum-Monitor": 2,
     "Sektor-Momentum": 3,
-    "Portfolios": 4,
+    "M&S Portfolio": 4,
     "Factor Timing": 5,
     "Daten-Import": 6,
     "Einstellungen": 7,

@@ -98,7 +98,6 @@ PHASE_OPTIONS = [
 PORTFOLIO_OPTIONS = [
     {"label": "Gesamt", "value": "all"},
     {"label": "M&S", "value": "ms"},
-    {"label": "Mein", "value": "my"},
 ]
 
 # Trend-Phase → Score-Pill-Ton; Neutral wird als gedämpfter Text gerendert.
@@ -212,8 +211,6 @@ def _has_sma20(df: pd.DataFrame) -> bool:
 def _apply_portfolio_lens(df: pd.DataFrame, lens: str) -> pd.DataFrame:
     if lens == "ms":
         return df[df["ticker"].isin(STATE.ms_portfolio)]
-    if lens == "my":
-        return df[df["ticker"].isin(STATE.my_portfolio)]
     return df
 
 

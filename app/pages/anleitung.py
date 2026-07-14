@@ -80,6 +80,24 @@ zweiten Import auf.
 **12-1-Momentum** = Return 12M − Return 1M (letzter Monat ausgeklammert,
 klassische Momentum-Definition); Ranking inkl. Abstand zum 52-Wochen-Hoch.
 
+## M&S Portfolio
+
+Das Portfolio wird als **Koyfin-Watchlist-CSV** auf der Portfolio-Seite
+hochgeladen — es genügt eine Ticker-Spalte (Header `Ticker`; Gruppen-Zeilen
+wie "Watch" werden ignoriert, Duplikate entfernt). Der Upload wird in der
+Datenbank gespeichert und übersteht Neustarts; die Portfolio-Linse auf dem
+Momentum-Monitor nutzt automatisch die hochgeladene Liste.
+
+Die Seite überträgt die Modell-Kennzahlen auf den Bestand:
+
+- **Handlungs-Flags** je Position: SELL, Filter nicht bestanden, Death Cross,
+  unter SMA-200, ermüdete Trend-Phase, frischer Signalwechsel (NEU) —
+  sortiert nach Dringlichkeit
+- **Portfolio vs. Universum**: Ø-Score, Faktor-Profil und
+  Empfehlungs-Verteilung im Vergleich
+- **Positions-Tabelle** mit Scores, Signalen, Phasen und Links zur
+  Einzelanalyse
+
 ## Factor Timing
 
 Makro-, Bewertungs- und Sentiment-Signale ergeben ein Regime
