@@ -28,6 +28,7 @@ _META_TABLE = "koyfin_meta"
 _SECTOR_SNAPSHOT_TABLE = "sector_momentum_snapshots"
 _SECTOR_SCORE_HISTORY_TABLE = "sector_score_history"
 _SIGNAL_HISTORY_TABLE = "universe_signal_history"
+_MS_PORTFOLIO_TABLE = "ms_portfolio"
 _SETTINGS_TABLE = "app_settings"
 _FACTOR_TIMING_TABLE = "factor_timing_inputs"
 
@@ -436,6 +437,82 @@ def load_sector_score_history(limit_snapshots: int = 12) -> pd.DataFrame:
         return empty
     if not df.empty:
         df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
+    return df
+
+
+def _ensure_ms_portfolio_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_MS_PORTFOLIO_TABLE} ("
+            "position INTEGER PRIMARY KEY, "
+            "ticker TEXT NOT NULL, "
+            "name TEXT, "
+            "imported_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        )
+    )
+
+
+def save_ms_portfolio(df: pd.DataFrame) -> int:
+    """Ersetzt den Inhalt von ``ms_portfolio`` durch ``df`` (Spalten
+    ``ticker``, optional ``name``; Position = Zeilenreihenfolge). Raised bei
+    DB-Problemen — der Aufrufer zeigt eine UI-Warnung. Liefert Zeilenzahl.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    if df is None or df.empty:
+        return 0
+
+    rows = [
+        {
+            "position": i,
+            "ticker": str(r["ticker"]),
+            "name": str(r.get("name") or "") or None,
+        }
+        for i, (_, r) in enumerate(df.iterrows())
+        if isinstance(r.get("ticker"), str) and r.get("ticker")
+    ]
+    if not rows:
+        return 0
+
+    with engine.begin() as conn:
+        _ensure_ms_portfolio_table(conn)
+        conn.execute(text(f"DELETE FROM {_MS_PORTFOLIO_TABLE}"))
+        conn.execute(
+            text(
+                f"INSERT INTO {_MS_PORTFOLIO_TABLE} (position, ticker, name) "
+                "VALUES (:position, :ticker, :name)"
+            ),
+            rows,
+        )
+    return len(rows)
+
+
+def load_ms_portfolio() -> pd.DataFrame | None:
+    """Lädt das M&S-Portfolio (Spalten ``ticker, name, imported_at``,
+    sortiert nach Position). ``None`` bei fehlender Tabelle/DB. Raised nie.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_ms_portfolio_table(conn)
+            df = pd.read_sql(
+                text(
+                    f"SELECT ticker, name, imported_at FROM {_MS_PORTFOLIO_TABLE} "
+                    "ORDER BY position ASC"
+                ),
+                conn,
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden des M&S-Portfolios fehlgeschlagen: %s", exc)
+        return None
+    if df.empty:
+        return None
+    df["name"] = df["name"].fillna("")
     return df
 
 

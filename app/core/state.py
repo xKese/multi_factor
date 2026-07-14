@@ -1,4 +1,4 @@
-"""Prozess-lokaler In-Memory-Store für Universum, Settings und Portfolios."""
+"""Prozess-lokaler In-Memory-Store für Universum, Settings und M&S-Portfolio."""
 
 from __future__ import annotations
 
@@ -16,15 +16,17 @@ class AppState:
     settings: Settings = field(default_factory=Settings)
     raw: pd.DataFrame = field(default_factory=pd.DataFrame)
     scored: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Fallback-Liste, solange kein Portfolio hochgeladen/persistiert wurde.
+    # Gepflegt wird das Portfolio über den Koyfin-Watchlist-Upload auf
+    # /portfolios (→ set_ms_portfolio + save_ms_portfolio).
     ms_portfolio: list[str] = field(
         default_factory=lambda: [
             "AIR", "ALV", "GOOGL", "AMZN", "AAPL", "SAN", "BRKB", "DHR",
             "AIR.PA", "NVDA", "MSFT",
         ]
     )
-    my_portfolio: list[str] = field(
-        default_factory=lambda: ["ASML", "ATI", "AER", "ALV", "GOOGL", "AMZN", "AAPL"]
-    )
+    ms_portfolio_names: dict[str, str] = field(default_factory=dict)
+    ms_portfolio_imported_at: object | None = None
     _lock: Lock = field(default_factory=Lock, repr=False)
 
     def recompute(self) -> None:
@@ -38,12 +40,36 @@ class AppState:
         self.raw = df
         self.recompute()
 
+    def set_ms_portfolio(self, df: pd.DataFrame, imported_at=None) -> None:
+        """Ersetzt das M&S-Portfolio aus einem Upload-/DB-Frame.
+
+        ``df`` braucht ``ticker`` (+ optional ``name``, ``imported_at``).
+        Kein Recompute nötig — ``scored`` ist portfoliounabhängig.
+        """
+        self.ms_portfolio = [str(t) for t in df["ticker"].tolist()]
+        names = (
+            df["name"].fillna("")
+            if "name" in df.columns
+            else pd.Series("", index=df.index)
+        )
+        self.ms_portfolio_names = {
+            str(t): str(n) for t, n in zip(df["ticker"], names)
+        }
+        if imported_at is not None:
+            self.ms_portfolio_imported_at = imported_at
+        elif "imported_at" in df.columns and len(df):
+            self.ms_portfolio_imported_at = df["imported_at"].iloc[0]
+
     def load_from_db(self) -> bool:
-        from .persistence import load_settings, load_universe
+        from .persistence import load_ms_portfolio, load_settings, load_universe
 
         stored_settings = load_settings()
         if stored_settings is not None:
             self.settings = stored_settings
+
+        portfolio = load_ms_portfolio()
+        if portfolio is not None and not portfolio.empty:
+            self.set_ms_portfolio(portfolio)
 
         df = load_universe()
         if df is None or df.empty:

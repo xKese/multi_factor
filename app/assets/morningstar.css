@@ -2730,3 +2730,19 @@ hr { border-color: var(--ms-border); opacity: 1; }
   font-weight: 600;
   letter-spacing: 0.06em;
 }
+
+/* M&S-Portfolio: Faktor-Duo-Balken (Portfolio vs. Universum) + Bar-Labels */
+.ms-fc-bar-wrap.is-duo {
+  gap: 4px;
+  padding: 0 6px;
+}
+.ms-fc-bar-wrap.is-duo .ms-fc-bar { width: 50%; }
+.ms-fc-bar.is-uni { background: var(--ms-border-strong); }
+.ms-pf-bar-lbl {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  margin: 10px 0 4px;
+}
+.ms-pf-bar-lbl:first-of-type { margin-top: 2px; }
