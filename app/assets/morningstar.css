@@ -2675,3 +2675,49 @@ hr { border-color: var(--ms-border); opacity: 1; }
 /* Legacy-Akkordeon: dezenter Abstand */
 .ms-sm-legacy { margin-top: 24px; }
 .ms-sm-legacy .accordion-button { font-weight: 600; }
+
+/* ---- SMA-Signal-Monitor --------------------------------------------------- */
+.ms-sma-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-end;
+  margin: 4px 0 16px;
+}
+.ms-sma-filter-lbl {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  margin-bottom: 4px;
+}
+.ms-sma-sect {
+  display: grid;
+  grid-template-columns: 170px 1fr 44px;
+  gap: 12px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--ms-border);
+}
+.ms-sma-sect:last-child { border-bottom: 0; }
+.ms-sma-sect .ms-rec-bar { height: 18px; }
+.ms-sma-sect .ms-rec-seg { font-size: 10px; }
+.ms-sma-sect-nm {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ms-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-sma-sect-n {
+  font-size: 11px;
+  color: var(--ms-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.ms-sma-more {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 4px;
+}
