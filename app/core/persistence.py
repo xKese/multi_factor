@@ -1,8 +1,14 @@
-"""PostgreSQL-Persistenz für das importierte Koyfin-Universum.
+"""Datenbank-Persistenz für das importierte Koyfin-Universum.
 
 Speichert die Rohdaten genau so, wie ``load_koyfin_csv`` sie liefert, und lädt
 sie beim App-Start zurück in ``STATE``. Fehler sind „fail-open": Engine-Bau
 und Load dürfen nicht raisen, damit die App auch ohne DB startet.
+
+Default ist eine lokale SQLite-Datei (``data/multifactor.db``); über die
+Umgebungsvariable ``DATABASE_URL`` kann alternativ z. B. PostgreSQL genutzt
+werden. Das SQL ist auf den gemeinsamen Dialekt beider Datenbanken beschränkt
+(``CURRENT_TIMESTAMP`` statt ``now()``, ``TEXT`` statt ``JSONB``,
+``ON CONFLICT … DO UPDATE`` gibt es in beiden).
 """
 
 from __future__ import annotations
@@ -15,14 +21,14 @@ from datetime import date
 
 import pandas as pd
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 from .config import Settings
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_URL = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
+_DEFAULT_URL = "sqlite:///data/multifactor.db"
 _UNIVERSE_TABLE = "koyfin_universe"
 _META_TABLE = "koyfin_meta"
 _SECTOR_SNAPSHOT_TABLE = "sector_momentum_snapshots"
@@ -33,7 +39,7 @@ _SETTINGS_TABLE = "app_settings"
 _FACTOR_TIMING_TABLE = "factor_timing_inputs"
 
 # Vollständige Liste der Eingabefelder der Factor-Timing-Seite (Makro-,
-# Sentiment- und Faktor-Momentum-Werte). Wird beim Persistieren als JSONB
+# Sentiment- und Faktor-Momentum-Werte). Wird beim Persistieren als JSON-Text
 # abgelegt; unbekannte Keys werden beim Laden ignoriert, fehlende kehren als
 # ``None`` zurück (Aufrufer mergt mit Defaults).
 _FACTOR_TIMING_FIELDS: tuple[str, ...] = (
@@ -85,7 +91,17 @@ def get_engine() -> Engine | None:
     _engine_tried = True
     url = os.getenv("DATABASE_URL", _DEFAULT_URL)
     try:
-        _engine = create_engine(url, pool_pre_ping=True, future=True)
+        kwargs: dict = {"pool_pre_ping": True, "future": True}
+        parsed = make_url(url)
+        if parsed.get_backend_name() == "sqlite":
+            # Dash bedient Callbacks aus mehreren Threads; Verbindungen aus
+            # dem Pool dürfen daher nicht an ihren Erzeuger-Thread gebunden
+            # sein.
+            kwargs["connect_args"] = {"check_same_thread": False}
+            if parsed.database and parsed.database != ":memory:":
+                db_dir = os.path.dirname(os.path.abspath(parsed.database))
+                os.makedirs(db_dir, exist_ok=True)
+        _engine = create_engine(url, **kwargs)
     except Exception as exc:  # noqa: BLE001
         log.warning("Konnte SQLAlchemy-Engine nicht erstellen: %s", exc)
         _engine = None
@@ -106,7 +122,7 @@ def save_universe(df: pd.DataFrame) -> None:
         conn.execute(
             text(
                 f"CREATE TABLE IF NOT EXISTS {_META_TABLE} ("
-                "imported_at TIMESTAMPTZ NOT NULL, "
+                "imported_at TIMESTAMP NOT NULL, "
                 "row_count INTEGER NOT NULL)"
             )
         )
@@ -114,7 +130,7 @@ def save_universe(df: pd.DataFrame) -> None:
         conn.execute(
             text(
                 f"INSERT INTO {_META_TABLE} (imported_at, row_count) "
-                "VALUES (now(), :n)"
+                "VALUES (CURRENT_TIMESTAMP, :n)"
             ),
             {"n": len(df)},
         )
@@ -150,7 +166,7 @@ def _ensure_sector_snapshot_table(conn) -> None:
             'sma_50 DOUBLE PRECISION, '
             'sma_200 DOUBLE PRECISION, '
             'momentum TEXT NOT NULL, '
-            'imported_at TIMESTAMPTZ NOT NULL DEFAULT now(), '
+            'imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, '
             'PRIMARY KEY (snapshot_date, ticker))'
         )
     )
@@ -193,7 +209,7 @@ def save_sector_snapshot(df: pd.DataFrame, snapshot_date: date) -> int:
                 'sma_50 = EXCLUDED.sma_50, '
                 'sma_200 = EXCLUDED.sma_200, '
                 'momentum = EXCLUDED.momentum, '
-                'imported_at = now()'
+                'imported_at = CURRENT_TIMESTAMP'
             ),
             rows,
         )
@@ -305,7 +321,7 @@ def _ensure_sector_score_history_table(conn) -> None:
             "sma50_dist DOUBLE PRECISION, "
             "breadth_sma200 INTEGER, "
             "n INTEGER, "
-            "imported_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "PRIMARY KEY (snapshot_date, level, key))"
         )
     )
@@ -378,7 +394,7 @@ def save_sector_score_history(
                 "sma50_dist = EXCLUDED.sma50_dist, "
                 "breadth_sma200 = EXCLUDED.breadth_sma200, "
                 "n = EXCLUDED.n, "
-                "imported_at = now()"
+                "imported_at = CURRENT_TIMESTAMP"
             ),
             rows,
         )
@@ -447,7 +463,7 @@ def _ensure_ms_portfolio_table(conn) -> None:
             "position INTEGER PRIMARY KEY, "
             "ticker TEXT NOT NULL, "
             "name TEXT, "
-            "imported_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            "imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
     )
 
@@ -546,7 +562,7 @@ def _ensure_signal_history_table(conn) -> None:
             "mom_12_1 DOUBLE PRECISION, "
             "dist_52w_high DOUBLE PRECISION, "
             "total_score DOUBLE PRECISION, "
-            "imported_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "PRIMARY KEY (snapshot_date, ticker))"
         )
     )
@@ -605,7 +621,7 @@ def save_signal_history(df: pd.DataFrame, snapshot_date: date) -> int:
                 f"VALUES (:snapshot_date, :ticker, "
                 f"{', '.join(':' + c for c in _SIGNAL_HISTORY_COLS)}) "
                 "ON CONFLICT (snapshot_date, ticker) DO UPDATE SET "
-                f"{update_cols}, imported_at = now()"
+                f"{update_cols}, imported_at = CURRENT_TIMESTAMP"
             ),
             rows,
         )
@@ -677,8 +693,8 @@ def _ensure_settings_table(conn) -> None:
         text(
             f"CREATE TABLE IF NOT EXISTS {_SETTINGS_TABLE} ("
             "id INTEGER PRIMARY KEY, "
-            "data JSONB NOT NULL, "
-            "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            "data TEXT NOT NULL, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
     )
 
@@ -699,7 +715,7 @@ def save_settings(settings: Settings) -> None:
         conn.execute(
             text(
                 f"INSERT INTO {_SETTINGS_TABLE} (id, data, updated_at) "
-                "VALUES (1, CAST(:data AS JSONB), now()) "
+                "VALUES (1, :data, CURRENT_TIMESTAMP) "
                 "ON CONFLICT (id) DO UPDATE SET "
                 "data = EXCLUDED.data, updated_at = EXCLUDED.updated_at"
             ),
@@ -712,8 +728,8 @@ def _ensure_factor_timing_table(conn) -> None:
         text(
             f"CREATE TABLE IF NOT EXISTS {_FACTOR_TIMING_TABLE} ("
             "id INTEGER PRIMARY KEY, "
-            "data JSONB NOT NULL, "
-            "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            "data TEXT NOT NULL, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
     )
 
@@ -751,7 +767,7 @@ def save_factor_timing_inputs(values: dict) -> None:
         conn.execute(
             text(
                 f"INSERT INTO {_FACTOR_TIMING_TABLE} (id, data, updated_at) "
-                "VALUES (1, CAST(:data AS JSONB), now()) "
+                "VALUES (1, :data, CURRENT_TIMESTAMP) "
                 "ON CONFLICT (id) DO UPDATE SET "
                 "data = EXCLUDED.data, updated_at = EXCLUDED.updated_at"
             ),

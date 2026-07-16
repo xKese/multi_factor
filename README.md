@@ -46,6 +46,35 @@ python -m app.main
 App läuft auf <http://127.0.0.1:8050>. Beim Start ist kein Universum geladen —
 das Dashboard zeigt eine Hinweis-Meldung.
 
+Importierte Daten und Einstellungen werden standardmäßig in einer lokalen
+SQLite-Datei gespeichert (`data/multifactor.db`, wird automatisch angelegt).
+Alternativ kann über die Umgebungsvariable `DATABASE_URL` eine andere
+Datenbank gesetzt werden, z. B. PostgreSQL
+(`postgresql://user:pass@host/dbname`).
+
+Hinweis: Der PDF-Factsheet-Export (WeasyPrint) benötigt die Systembibliotheken
+Pango, Cairo und GDK-Pixbuf. Fehlen sie, läuft die App trotzdem — nur der
+PDF-Export schlägt fehl.
+
+## Docker
+
+Vollständig lokaler Betrieb inklusive SQLite-Persistenz und aller
+WeasyPrint-Abhängigkeiten:
+
+```bash
+docker compose up --build
+```
+
+App läuft auf <http://localhost:5000>. Die SQLite-Datenbank liegt im
+Docker-Volume `appdata` und überlebt Container-Neustarts.
+
+Ohne Compose:
+
+```bash
+docker build -t multi-factor .
+docker run -p 5000:5000 -v multi-factor-data:/srv/app/data multi-factor
+```
+
 ## Daten hochladen
 
 1. Browser auf <http://127.0.0.1:8050/daten-import>
