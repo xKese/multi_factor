@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .config import Settings
+from .config import NEGATIVE_IS_INVALID, Settings
 from .momentum import (
     MOMENTUM_DEATH,
     MOMENTUM_DOWN,
@@ -68,6 +68,15 @@ INDICATOR_TO_COLUMN: dict[str, str] = {
 }
 
 
+def _clean_series(df: pd.DataFrame, column: str) -> pd.Series:
+    """Maskiert fachlich ungültige negative Werte (z. B. negativer P/E durch
+    Verlust) auf NaN, damit sie kein Perzentil erhalten."""
+    series = df[column]
+    if column in NEGATIVE_IS_INVALID:
+        series = series.where(series > 0)
+    return series
+
+
 def _percentile_rank(series: pd.Series) -> pd.Series:
     """Excel PERCENTRANK.INC – linear interpoliert, NaN bleibt NaN."""
     return series.rank(pct=True, method="average", na_option="keep")
@@ -94,7 +103,7 @@ def _indicator_percentile(
 ) -> pd.Series:
     """Perzentil-Rang gemäß Modus (mit Industrie→Sektor→Global-Fallback)."""
 
-    series = df[column]
+    series = _clean_series(df, column)
     mode = settings.percentile_mode
 
     if mode == "Global":
@@ -130,7 +139,7 @@ def _factor_score(
         column = INDICATOR_TO_COLUMN[indicator]
         if column not in df.columns:
             continue
-        values = df[column]
+        values = _clean_series(df, column)
         pct = _indicator_percentile(df, column, settings)
         mask = values.notna()
         score_num = score_num + pct.fillna(0) * weight * mask

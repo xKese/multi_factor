@@ -30,6 +30,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.core.config import Settings
 from app.core.indicators import INDICATOR_GROUPS, IndicatorGroup
+from app.core.scoring import _clean_series
 from app.core.peers import compute_peers
 from app.ui.formatters import (
     fmt_de,
@@ -163,7 +164,9 @@ def compute_indicator_percentiles(
     for it in group.items:
         if it.key not in df.columns:
             continue
-        ranks = df[it.key].rank(pct=True, method="average", na_option="keep")
+        ranks = _clean_series(df, it.key).rank(
+            pct=True, method="average", na_option="keep"
+        )
         if it.lower_better:
             ranks = 1 - ranks
         out[it.key] = ranks * 100.0
