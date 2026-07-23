@@ -241,6 +241,12 @@ def build_run_payload(
         "deep_thinker": deep,
         "research_depth": int(getattr(settings, "agents_depth", 1) or 1),
     }
+    # Env-Override des Service (TRADINGAGENTS_LLM_BACKEND_URL) respektieren:
+    # ohne backend_url im Payload fiele build_run() serverseitig auf die
+    # Provider-Standard-URL zurück (die Browser-UI sendet den Wert genauso mit).
+    backend_url = (defaults.get("backend_url") or "").strip()
+    if backend_url:
+        payload["backend_url"] = backend_url
     if factor_context:
         payload["factor_context"] = factor_context
     return payload, None
