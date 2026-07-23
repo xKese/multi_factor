@@ -100,12 +100,29 @@ def get_models(provider: str) -> dict | None:
         return None
 
 
+# Erfolgs-Cache der Symbol-Suche: Tipp-Sequenzen im Autocomplete ("merc",
+# "merce", …) treffen den Service je Begriff nur einmal — Alpha Vantage ist
+# rate-limitiert. Fehler werden nicht gecacht.
+_SEARCH_CACHE: dict[str, tuple[float, list[dict], str | None]] = {}
+_SEARCH_CACHE_LOCK = threading.Lock()
+_SEARCH_CACHE_TTL = 600.0
+_SEARCH_CACHE_MAX = 256
+
+
 def symbol_search(query: str) -> tuple[list[dict], str | None]:
     """Symbol-Suche des Service (liefert Yahoo-Dialekt-Symbole).
 
     Rückgabe ``(results, note)``; ``note`` ist eine deutsche Hinweismeldung
     des Service (z. B. fehlender Alpha-Vantage-Key) oder ``None``.
+    Erfolgreiche Antworten werden für kurze Zeit gecacht.
     """
+    key = (query or "").strip().lower()
+    now = time.time()
+    with _SEARCH_CACHE_LOCK:
+        cached = _SEARCH_CACHE.get(key)
+        if cached and now - cached[0] < _SEARCH_CACHE_TTL:
+            return list(cached[1]), cached[2]
+
     try:
         resp = requests.get(
             f"{base_url()}/api/symbol-search",
@@ -115,12 +132,17 @@ def symbol_search(query: str) -> tuple[list[dict], str | None]:
         resp.raise_for_status()
         data = resp.json()
         note = data.get("note") or None
-        return list(data.get("results") or []), (
-            note.get("text") if isinstance(note, dict) else note
-        )
+        note_text = note.get("text") if isinstance(note, dict) else note
+        results = list(data.get("results") or [])
     except Exception as exc:  # noqa: BLE001
         log.info("Symbol-Suche fehlgeschlagen: %s", exc)
         return [], "TradingAgents-Service nicht erreichbar."
+
+    with _SEARCH_CACHE_LOCK:
+        if len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX:
+            _SEARCH_CACHE.clear()
+        _SEARCH_CACHE[key] = (now, results, note_text)
+    return list(results), note_text
 
 
 # --------------------------------------------------------------------------- #
