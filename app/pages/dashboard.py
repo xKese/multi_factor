@@ -462,9 +462,33 @@ def _classification_short(class_str: str) -> str:
     return f"{code.strip()} – {label.strip()}"
 
 
+_AGENT_RATING_CLASS = {
+    "Buy": "buy",
+    "Overweight": "buy",
+    "Hold": "hold",
+    "Underweight": "sell",
+    "Sell": "sell",
+}
+
+
 def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html.Div:
     src = df if not active_sector else df[df["sector"] == active_sector]
     src = src.dropna(subset=["total_score"]).sort_values("total_score", ascending=False).head(n)
+
+    # Neueste Agenten-Bewertung je Ticker (leer bei DB-Fehler / ohne Analysen).
+    agent_ratings: dict[str, str] = {}
+    try:
+        from app.core.persistence import load_agent_ratings
+
+        ratings_df = load_agent_ratings()
+        if not ratings_df.empty:
+            agent_ratings = {
+                str(t): str(rating)
+                for t, rating in ratings_df[["ticker", "rating"]].itertuples(index=False)
+                if isinstance(rating, str) and rating
+            }
+    except Exception:  # noqa: BLE001 — Spalte ist rein additiv
+        pass
 
     rows = []
     for _, r in src.iterrows():
@@ -514,6 +538,19 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
                     html.Td(
                         html.Span(rec_short, className=f"ms-tt-rec is-{rec_cls}"),
                     ),
+                    html.Td(
+                        html.Span(
+                            agent_ratings.get(str(r["ticker"]), "–"),
+                            className=(
+                                "ms-tt-rec is-"
+                                + _AGENT_RATING_CLASS.get(
+                                    agent_ratings.get(str(r["ticker"]), ""), "fail"
+                                )
+                            )
+                            if str(r["ticker"]) in agent_ratings
+                            else "ms-tt-muted",
+                        ),
+                    ),
                 ]
             )
         )
@@ -532,6 +569,7 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
                             html.Th("Faktor-Profil"),
                             html.Th("12M", className="is-num"),
                             html.Th("Empfehlung"),
+                            html.Th("Agenten"),
                         ]
                     )
                 ),

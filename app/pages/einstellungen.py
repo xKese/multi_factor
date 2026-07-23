@@ -8,6 +8,7 @@ import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, callback, ctx, html, register_page
 from dash.exceptions import PreventUpdate
 
+from app.core import agents_client
 from app.core.config import Settings
 from app.core.persistence import (
     delete_sector_snapshot,
@@ -153,6 +154,136 @@ def _indicator_table(title: str, weights: dict[str, float], prefix: str) -> dbc.
     )
 
 
+def _agents_card() -> dbc.Card:
+    """Karte „Agenten-Tiefenanalyse“: Service-Status + Provider/Modelle/Tiefe."""
+    import os
+
+    s = STATE.settings
+    url = os.getenv("TRADINGAGENTS_URL", "http://localhost:8000")
+    catalog = agents_client.get_catalog()
+
+    if catalog is None:
+        status = html.Span("nicht erreichbar", className="text-danger")
+        provider_options = []
+    else:
+        status = html.Span("verbunden", className="text-success")
+        provider_options = [
+            {"label": p.get("label") or p.get("key"), "value": p.get("key")}
+            for p in (catalog.get("providers") or [])
+            if p.get("key")
+        ]
+
+    depth_options = (
+        [
+            {"label": d.get("label"), "value": d.get("value")}
+            for d in (catalog.get("depths") or [])
+        ]
+        if catalog
+        else [
+            {"label": "Shallow (1)", "value": 1},
+            {"label": "Medium (3)", "value": 3},
+            {"label": "Deep (5)", "value": 5},
+        ]
+    )
+
+    def _model_row(label: str, input_id: str, value: str) -> dbc.Row:
+        return dbc.Row(
+            [
+                dbc.Col(html.Label(label), md=5),
+                dbc.Col(
+                    dbc.Input(id=input_id, type="text", value=value,
+                              placeholder="Service-Default"),
+                    md=7,
+                ),
+            ],
+            className="mb-2",
+        )
+
+    return dbc.Card(
+        [
+            dbc.CardHeader("Agenten-Tiefenanalyse (TradingAgents)"),
+            dbc.CardBody(
+                [
+                    html.Div(
+                        [
+                            html.Span("Service: ", className="fw-bold"),
+                            html.Code(url),
+                            html.Span(" — "),
+                            status,
+                            html.Span(
+                                " (Konfiguration über Umgebungsvariable "
+                                "TRADINGAGENTS_URL)",
+                                className="ms-tt-muted small",
+                            ),
+                        ],
+                        className="mb-3",
+                    ),
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("LLM-Provider"), md=5),
+                            dbc.Col(
+                                dbc.Select(
+                                    id="agents-provider",
+                                    options=provider_options,
+                                    value=s.agents_provider or None,
+                                    placeholder="Service-Default",
+                                )
+                                if provider_options
+                                else dbc.Input(
+                                    id="agents-provider",
+                                    type="text",
+                                    value=s.agents_provider,
+                                    placeholder="z. B. anthropic (Service down — Freitext)",
+                                ),
+                                md=7,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    _model_row(
+                        "Quick-Modell (Analysten)",
+                        "agents-quick-model",
+                        s.agents_quick_model,
+                    ),
+                    _model_row(
+                        "Deep-Modell (Manager)",
+                        "agents-deep-model",
+                        s.agents_deep_model,
+                    ),
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("Analysetiefe"), md=5),
+                            dbc.Col(
+                                dbc.Select(
+                                    id="agents-depth",
+                                    options=depth_options,
+                                    value=s.agents_depth,
+                                ),
+                                md=7,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    html.Div(
+                        "Leere Felder verwenden die Defaults des Service "
+                        "(Katalog/Umgebung). API-Keys werden im "
+                        "TradingAgents-Service konfiguriert, nicht hier.",
+                        className="ms-tt-muted small mb-2",
+                    ),
+                    dbc.Button(
+                        "Agenten-Einstellungen speichern",
+                        id="save-agents-settings",
+                        color="dark",
+                        size="sm",
+                    ),
+                    html.Div(id="agents-settings-status", className="mt-2 small"),
+                ]
+            ),
+        ],
+        className="mb-3",
+    )
+
+
 def layout(**_) -> html.Div:
     s = STATE.settings
     factor_rows = [
@@ -286,6 +417,7 @@ def layout(**_) -> html.Div:
                 className="mb-3",
             ),
             indicator_cards,
+            _agents_card(),
             _snapshot_card(),
             html.Div(
                 [
@@ -471,6 +603,36 @@ def _delete_snapshot(n_clicks_list):
         )
 
     return _snapshot_list(), alert
+
+
+@callback(
+    Output("agents-settings-status", "children"),
+    Input("save-agents-settings", "n_clicks"),
+    State("agents-provider", "value"),
+    State("agents-quick-model", "value"),
+    State("agents-deep-model", "value"),
+    State("agents-depth", "value"),
+    prevent_initial_call=True,
+)
+def _save_agents(n_clicks, provider, quick, deep, depth):
+    if not n_clicks:
+        raise PreventUpdate
+    s = STATE.settings
+    s.agents_provider = (provider or "").strip()
+    s.agents_quick_model = (quick or "").strip()
+    s.agents_deep_model = (deep or "").strip()
+    try:
+        s.agents_depth = int(depth) if depth else 1
+    except (TypeError, ValueError):
+        s.agents_depth = 1
+    try:
+        save_settings(s)
+    except Exception as exc:  # noqa: BLE001 — DB down: Einstellungen nur im Speicher
+        return html.Span(
+            f"Gespeichert (nur für diese Sitzung — DB nicht erreichbar: {exc})",
+            className="text-warning",
+        )
+    return html.Span("Agenten-Einstellungen gespeichert.", className="text-success")
 
 
 register_page(__name__, path="/einstellungen", name="Einstellungen", layout=layout)

@@ -91,6 +91,13 @@ class Settings:
     min_stocks_per_industry: int = 5
     percentile_mode: PercentileMode = "Industrie"
 
+    # Agenten-Tiefenanalyse (TradingAgents-Service). Leere Strings bedeuten:
+    # die Defaults des Service-Katalogs (form_defaults) verwenden.
+    agents_provider: str = ""
+    agents_quick_model: str = ""
+    agents_deep_model: str = ""
+    agents_depth: int = 1
+
     INVERT_LOW_IS_BETTER: set[str] = field(
         default_factory=lambda: {
             "pb",

@@ -16,9 +16,20 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from datetime import date
 
-from dash import Input, Output, State, callback, dcc, html, no_update, register_page
+from dash import (
+    Input,
+    Output,
+    State,
+    callback,
+    callback_context,
+    dcc,
+    html,
+    no_update,
+    register_page,
+)
 from dash.exceptions import PreventUpdate
 
+from app.core import agents_client, persistence, ticker_mapping
 from app.core.indicators import INDICATOR_GROUPS
 from app.core.peers import compute_peers
 from app.core.scoring import _indicator_percentile
@@ -30,6 +41,7 @@ from app.ui import (
     fmt_market_cap,
     fmt_percent,
 )
+from app.ui.agent_report import progress_checklist, result_view
 
 
 # ── Score → Klassifikation (gespiegelt aus dashboard.py / data.js) ─────────
@@ -94,7 +106,57 @@ def layout(ticker: str = "", **_) -> html.Div:
             dcc.Download(id="ea-pdf-download"),
             html.Div(id="ea-pdf-error", className="text-danger small mb-2"),
             html.Div(id="ea-content"),
+            dcc.Interval(id="ea-agent-poll", interval=2500, disabled=True),
+            _mapping_modal(),
         ]
+    )
+
+
+def _mapping_modal() -> dbc.Modal:
+    """Modal zur Bestätigung des Yahoo-Tickers vor der ersten Tiefenanalyse."""
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Börsen-Ticker bestätigen")),
+            dbc.ModalBody(
+                [
+                    html.P(
+                        "Der Koyfin-Ticker enthält keine Börsen-Endung. Für die "
+                        "Agenten-Analyse (yfinance/Alpha Vantage) wird das "
+                        "Yahoo-Format benötigt (z. B. MBG.F für Frankfurt). "
+                        "Bitte den passenden Titel auswählen oder manuell "
+                        "eingeben:",
+                        className="small",
+                    ),
+                    html.Div(id="ea-agent-mapping-note", className="small text-warning"),
+                    dbc.RadioItems(id="ea-agent-mapping-choice", options=[]),
+                    dbc.Input(
+                        id="ea-agent-mapping-custom",
+                        placeholder="… oder Yahoo-Ticker manuell eingeben (z. B. MBG.DE)",
+                        type="text",
+                        className="mt-2",
+                    ),
+                ]
+            ),
+            dbc.ModalFooter(
+                [
+                    dbc.Button(
+                        "Abbrechen",
+                        id="ea-agent-mapping-cancel",
+                        color="secondary",
+                        outline=True,
+                        n_clicks=0,
+                    ),
+                    dbc.Button(
+                        "Bestätigen & Analyse starten",
+                        id="ea-agent-mapping-confirm",
+                        color="dark",
+                        n_clicks=0,
+                    ),
+                ]
+            ),
+        ],
+        id="ea-agent-mapping-modal",
+        is_open=False,
     )
 
 
@@ -817,8 +879,226 @@ def _render(ticker: str | None):
                 className="ms-dash-section",
             ),
             html.Div(id="ea-comparables"),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("Tiefenanalyse", className="ms-eyebrow"),
+                            html.H2("Agenten-Tiefenanalyse"),
+                        ]
+                    ),
+                    html.Div(
+                        "LLM-Agenten (TradingAgents)",
+                        className="ms-meta",
+                    ),
+                ],
+                className="ms-dash-section",
+            ),
+            html.Div(id="ea-agent-section"),
         ]
     )
+
+
+# ── Agenten-Tiefenanalyse ──────────────────────────────────────────────────
+
+def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
+    """Aktuellen Zustand des Agenten-Abschnitts rendern.
+
+    Rückgabe ``(inhalt, poll_disabled)``.
+    """
+    job = agents_client.get_status(ticker)
+    if job and job.get("status") == "running":
+        return progress_checklist(job), False
+
+    children: list = []
+    if job and job.get("status") == "error":
+        children.append(
+            dbc.Alert(
+                f"Analyse fehlgeschlagen: {job.get('error') or 'Unbekannter Fehler'}",
+                color="danger",
+                className="small",
+            )
+        )
+
+    analysis = persistence.load_agent_analysis(ticker)
+    service_ok = agents_client.service_available()
+
+    if analysis:
+        current = None
+        if not STATE.scored.empty:
+            row = STATE.scored.loc[STATE.scored["ticker"] == ticker]
+            if not row.empty:
+                current = row.iloc[0].get("total_score")
+        children.append(result_view(analysis, current_score=current))
+        button_label = "Neu analysieren"
+    else:
+        children.append(
+            html.P(
+                "Die LLM-Agenten von TradingAgents führen eine tiefgehende "
+                "Analyse durch (Markt, Sentiment, News, Fundamentals, "
+                "Bull/Bear-Debatte, Risiko) und liefern ein Rating samt "
+                "Begründung. Der Quant-Score dieser Seite wird den Agenten "
+                "als Vorab-Rating mitgegeben.",
+                className="small ms-tt-muted",
+            )
+        )
+        button_label = "Tiefenanalyse starten"
+
+    children.append(
+        html.Div(
+            [
+                dbc.Button(
+                    button_label,
+                    id="ea-agent-start",
+                    color="dark",
+                    size="sm",
+                    n_clicks=0,
+                    disabled=not service_ok,
+                ),
+                html.Span(
+                    ""
+                    if service_ok
+                    else " TradingAgents-Service nicht erreichbar "
+                    "(TRADINGAGENTS_URL prüfen).",
+                    className="small text-warning ms-2",
+                ),
+            ],
+            className="mt-3",
+        )
+    )
+    return html.Div(children, className="ms-card p-3"), True
+
+
+def _start_agent_run(ticker: str, agents_ticker: str) -> tuple[bool, str]:
+    """Faktor-Kontext bauen und den Hintergrund-Lauf starten."""
+    factor_context = None
+    in_universe = False
+    if not STATE.scored.empty:
+        row = STATE.scored.loc[STATE.scored["ticker"] == ticker]
+        if not row.empty:
+            factor_context = agents_client.build_factor_context(row.iloc[0])
+            in_universe = True
+    return agents_client.start_analysis(
+        ticker,
+        agents_ticker,
+        STATE.settings,
+        factor_context=factor_context,
+        in_universe=in_universe,
+    )
+
+
+@callback(
+    Output("ea-agent-section", "children"),
+    Output("ea-agent-poll", "disabled"),
+    Input("ea-ticker", "value"),
+    Input("ea-agent-poll", "n_intervals"),
+)
+def _agent_section(ticker: str | None, _n):
+    if not ticker:
+        return html.Div(), True
+    return _agent_section_view(ticker)
+
+
+@callback(
+    Output("ea-agent-section", "children", allow_duplicate=True),
+    Output("ea-agent-poll", "disabled", allow_duplicate=True),
+    Output("ea-agent-mapping-modal", "is_open"),
+    Output("ea-agent-mapping-choice", "options"),
+    Output("ea-agent-mapping-choice", "value"),
+    Output("ea-agent-mapping-note", "children"),
+    Input("ea-agent-start", "n_clicks"),
+    State("ea-ticker", "value"),
+    prevent_initial_call=True,
+)
+def _agent_start(n_clicks: int | None, ticker: str | None):
+    if not n_clicks or not ticker:
+        raise PreventUpdate
+
+    row = None
+    if not STATE.scored.empty:
+        rows = STATE.scored.loc[STATE.scored["ticker"] == ticker]
+        if not rows.empty:
+            row = rows.iloc[0]
+
+    region = row.get("region") if row is not None else None
+    resolved = ticker_mapping.resolve(ticker, region)
+
+    if resolved is None:
+        # Kein sicheres Mapping — Symbol-Suche befragen, Nutzer bestätigen lassen.
+        name = str(row.get("name") or "") if row is not None else ""
+        query = name or ticker
+        results, note = agents_client.symbol_search(query)
+        if not results and name:
+            results, note = agents_client.symbol_search(ticker)
+        ranked = ticker_mapping.rank_suggestions(results, name=name, region=region)
+        options = [
+            {
+                "label": f"{r.get('symbol')} — {r.get('name') or '?'}"
+                + (f" ({r.get('region')})" if r.get("region") else ""),
+                "value": r.get("symbol"),
+            }
+            for r in ranked[:8]
+            if r.get("symbol")
+        ]
+        default = options[0]["value"] if options else None
+        return (
+            no_update,
+            no_update,
+            True,
+            options,
+            default,
+            note or ("Keine Vorschläge gefunden — bitte manuell eingeben."
+                     if not options else ""),
+        )
+
+    ok, msg = _start_agent_run(ticker, resolved)
+    if not ok:
+        content = html.Div(
+            [dbc.Alert(msg, color="warning", className="small")]
+        )
+        return content, True, False, no_update, no_update, ""
+    view, poll_disabled = _agent_section_view(ticker)
+    return view, poll_disabled, False, no_update, no_update, ""
+
+
+@callback(
+    Output("ea-agent-section", "children", allow_duplicate=True),
+    Output("ea-agent-poll", "disabled", allow_duplicate=True),
+    Output("ea-agent-mapping-modal", "is_open", allow_duplicate=True),
+    Output("ea-agent-mapping-note", "children", allow_duplicate=True),
+    Input("ea-agent-mapping-confirm", "n_clicks"),
+    Input("ea-agent-mapping-cancel", "n_clicks"),
+    State("ea-agent-mapping-choice", "value"),
+    State("ea-agent-mapping-custom", "value"),
+    State("ea-ticker", "value"),
+    prevent_initial_call=True,
+)
+def _agent_mapping_confirm(n_confirm, n_cancel, choice, custom, ticker):
+    trigger = callback_context.triggered_id
+    if trigger == "ea-agent-mapping-cancel":
+        return no_update, no_update, False, ""
+    if not ticker:
+        raise PreventUpdate
+
+    agents_ticker = (custom or "").strip().upper() or (choice or "").strip().upper()
+    if not agents_ticker:
+        return no_update, no_update, True, "Bitte einen Ticker wählen oder eingeben."
+
+    try:
+        persistence.save_ticker_mapping(ticker, agents_ticker, confirmed=True)
+    except Exception:  # noqa: BLE001 — Mapping nur im Speicher ist auch ok
+        pass
+
+    ok, msg = _start_agent_run(ticker, agents_ticker)
+    if not ok:
+        return (
+            html.Div([dbc.Alert(msg, color="warning", className="small")]),
+            True,
+            False,
+            "",
+        )
+    view, poll_disabled = _agent_section_view(ticker)
+    return view, poll_disabled, False, ""
 
 
 @callback(
