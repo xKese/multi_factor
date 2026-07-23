@@ -97,6 +97,8 @@ class Settings:
     agents_quick_model: str = ""
     agents_deep_model: str = ""
     agents_depth: int = 1
+    # Sprache der Agenten-Reports (Wire-Wert des Service, z. B. "German").
+    agents_language: str = "German"
 
     INVERT_LOW_IS_BETTER: set[str] = field(
         default_factory=lambda: {

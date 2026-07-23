@@ -247,6 +247,11 @@ def build_run_payload(
     backend_url = (defaults.get("backend_url") or "").strip()
     if backend_url:
         payload["backend_url"] = backend_url
+    # Sprache der Agenten-Reports (Service-Default ist English; die App
+    # sendet standardmäßig German — einstellbar unter „Einstellungen“).
+    language = (getattr(settings, "agents_language", "") or "").strip()
+    if language:
+        payload["output_language"] = language
     if factor_context:
         payload["factor_context"] = factor_context
     return payload, None
