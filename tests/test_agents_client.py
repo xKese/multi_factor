@@ -215,6 +215,36 @@ def test_run_job_connection_drop_recovers_from_archive(monkeypatch):
     assert saved["rating"] == "Hold"
 
 
+def test_current_agent_prefers_in_progress():
+    job = {
+        "agent_states": {
+            "Market Analyst": "completed",
+            "Bull Researcher": "in_progress",
+        },
+        "stage": "Bull Researcher (in_progress)",
+    }
+    assert agents_client.current_agent(job) == "Bull Researcher"
+    # Ohne in_progress-Agent fällt die Anzeige auf die Stufe zurück.
+    assert (
+        agents_client.current_agent({"stage": "Starte Analyse …"})
+        == "Starte Analyse …"
+    )
+    assert agents_client.current_agent({}) is None
+
+
+def test_list_jobs_snapshot_newest_first():
+    agents_client._set_job("AAA", status="done", started_at=100.0)
+    agents_client._set_job("BBB", status="running", started_at=200.0)
+
+    jobs = agents_client.list_jobs()
+    assert list(jobs) == ["BBB", "AAA"]
+    assert jobs["BBB"]["status"] == "running"
+
+    # Snapshot ist entkoppelt: Mutation ändert die Registry nicht.
+    jobs["BBB"]["status"] = "mutiert"
+    assert agents_client.get_status("BBB")["status"] == "running"
+
+
 def test_start_analysis_refuses_concurrent_runs(monkeypatch):
     agents_client._set_job("AAA", status="running")
 

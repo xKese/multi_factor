@@ -5,7 +5,16 @@ from __future__ import annotations
 import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import ClientsideFunction, Input, Output, callback, clientside_callback, dcc, html
+from dash import (
+    ClientsideFunction,
+    Input,
+    Output,
+    State,
+    callback,
+    clientside_callback,
+    dcc,
+    html,
+)
 
 from app.core.state import STATE
 from app.ui import command_palette_layout, fmt_de, register_plotly_templates
@@ -71,6 +80,7 @@ def _header() -> html.Header:
             html.Nav(links, className="ms-nav", id="ms-nav"),
             html.Div(
                 [
+                    html.Div(id="ms-agent-status"),
                     html.Div(id="ms-data-status", className="ms-data-status"),
                     html.Button(
                         [
@@ -128,6 +138,8 @@ def create_app() -> dash.Dash:
         [
             dcc.Location(id="ms-location"),
             dcc.Store(id="ms-theme-store", storage_type="local"),
+            dcc.Store(id="ms-agent-fp"),
+            dcc.Interval(id="ms-agent-poll", interval=4000),
             _header(),
             html.Main(dash.page_container, className="ms-page"),
             command_palette_layout(),
@@ -181,6 +193,73 @@ def create_app() -> dash.Dash:
         Output("ms-cmdk", "data-ready"),
         Input("ms-cmdk-data", "data"),
     )
+
+    # Agenten-Status-Chip in der Kopfzeile: auf jeder Seite sichtbar, zeigt
+    # laufende Tiefenanalysen samt aktuell arbeitendem Agenten (Klick führt
+    # zur Agenten-Analyse-Seite). Fingerprint-Gate verhindert DOM-Churn.
+    @callback(
+        Output("ms-agent-status", "children"),
+        Output("ms-agent-fp", "data"),
+        Input("ms-agent-poll", "n_intervals"),
+        Input("ms-location", "pathname"),
+        State("ms-agent-fp", "data"),
+    )
+    def _agent_status_chip(_n, _path, prev_fp):
+        from dash import no_update
+
+        from app.core import agents_client
+
+        jobs = agents_client.list_jobs()
+        running = {t: j for t, j in jobs.items() if j.get("status") == "running"}
+
+        if running:
+            ticker, job = next(iter(running.items()))
+            agent = agents_client.current_agent(job)
+            label = f"{ticker} · {agent}" if agent else f"{ticker} · Analyse läuft"
+            fp = f"run|{ticker}|{agent}"
+            if fp == prev_fp:
+                return no_update, no_update
+            return (
+                dcc.Link(
+                    [
+                        html.Span(className="ms-agent-chip-dot"),
+                        html.Span(label, className="ms-agent-chip-label"),
+                    ],
+                    href="/agenten-analyse",
+                    className="ms-agent-chip is-running",
+                    title="Agenten-Tiefenanalyse läuft — Klick für Details",
+                ),
+                fp,
+            )
+
+        # Nichts läuft: jüngsten Abschluss der Sitzung dezent anzeigen.
+        if jobs:
+            ticker, job = next(iter(jobs.items()))
+            ok = job.get("status") == "done"
+            icon, tone = ("✓", "is-done") if ok else ("⚠", "is-error")
+            fp = f"idle|{ticker}|{job.get('status')}"
+            if fp == prev_fp:
+                return no_update, no_update
+            return (
+                dcc.Link(
+                    [
+                        html.Span(icon, className="ms-agent-chip-icon"),
+                        html.Span(ticker, className="ms-agent-chip-label"),
+                    ],
+                    href="/agenten-analyse",
+                    className=f"ms-agent-chip {tone}",
+                    title=(
+                        "Letzte Tiefenanalyse abgeschlossen — Klick für Details"
+                        if ok
+                        else "Letzte Tiefenanalyse fehlgeschlagen — Klick für Details"
+                    ),
+                ),
+                fp,
+            )
+
+        if prev_fp == "none":
+            return no_update, no_update
+        return html.Div(), "none"
 
     # Datenstatus-Chip: wird bei jedem Seitenwechsel aktualisiert.
     @callback(
