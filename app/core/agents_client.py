@@ -261,6 +261,16 @@ def get_status(ticker: str) -> dict | None:
         return dict(job) if job else None
 
 
+def current_agent(job: dict) -> str | None:
+    """Name des gerade arbeitenden Agenten eines Jobs (oder Stufen-Text)."""
+    states = job.get("agent_states") or {}
+    for name, status in states.items():
+        if status == "in_progress":
+            return name
+    stage = job.get("stage")
+    return str(stage) if stage else None
+
+
 def list_jobs() -> dict[str, dict]:
     """Snapshot aller Jobs dieser Prozess-Session (Ticker → Job-Dict).
 

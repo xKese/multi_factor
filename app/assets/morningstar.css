@@ -280,6 +280,49 @@ hr { border-color: var(--ms-border); opacity: 1; }
   font-weight: 500;
 }
 
+/* Agenten-Status-Chip (Kopfzeile): zeigt laufende Tiefenanalysen global an. */
+.ms-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--ms-sp-3);
+  height: 32px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-r-card);
+  background: var(--ms-surface);
+  color: var(--ms-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ms-agent-chip:hover {
+  border-color: var(--ms-border-strong);
+  text-decoration: none;
+  color: var(--ms-text);
+}
+.ms-agent-chip.is-done .ms-agent-chip-icon { color: var(--ms-up, #1a7f37); }
+.ms-agent-chip.is-error .ms-agent-chip-icon { color: var(--ms-down, #b42318); }
+.ms-agent-chip.is-done,
+.ms-agent-chip.is-error {
+  font-weight: 500;
+  color: var(--ms-text-muted);
+}
+.ms-agent-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ms-up, #1a7f37);
+  animation: ms-agent-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ms-agent-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-agent-chip-dot { animation: none; }
+}
+
 .ms-theme-toggle {
   background: transparent;
   border: 1px solid var(--ms-border);

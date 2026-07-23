@@ -86,21 +86,6 @@ def layout(**_) -> html.Div:
                 ],
                 className="ms-card p-3 mb-3",
             ),
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Div("Live", className="ms-eyebrow"),
-                            html.H2("Laufende & aktuelle Analysen"),
-                        ]
-                    ),
-                    html.Div(
-                        "Alle Läufe dieser Sitzung, egal wo gestartet",
-                        className="ms-meta",
-                    ),
-                ],
-                className="ms-dash-section",
-            ),
             dcc.Store(id="aa-jobs-fp"),
             dcc.Interval(id="aa-poll", interval=3000, disabled=False),
             html.Div(id="aa-status", className="mb-4"),
@@ -213,15 +198,11 @@ def _job_card(ticker: str, job: dict) -> html.Div:
 
 
 def _status_panel(jobs: dict[str, dict]) -> html.Div:
+    # Ohne Läufe bleibt der Bereich unsichtbar — der globale Status lebt im
+    # Kopfzeilen-Chip (app/main.py); hier erscheinen Karten nur bei Bedarf
+    # (laufende Jobs dieser Sitzung sowie deren Ergebnisse/Fehler).
     if not jobs:
-        return html.Div(
-            "In dieser Sitzung wurden noch keine Analysen gestartet. "
-            "Läufe aus der Einzelanalyse erscheinen hier ebenfalls. "
-            "(Nach einem Neustart der App ist diese Live-Ansicht leer — "
-            "abgeschlossene Analysen stehen dauerhaft im Verlauf unten.)",
-            className="ms-tt-muted",
-            style={"padding": "16px"},
-        )
+        return html.Div()
     return html.Div([_job_card(t, j) for t, j in jobs.items()])
 
 
