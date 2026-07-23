@@ -15,6 +15,8 @@ def test_us_ticker_passes_through(monkeypatch):
     assert ticker_mapping.resolve("AAPL", region="Americas") == "AAPL"
     assert ticker_mapping.resolve("AAPL", region="North America") == "AAPL"
     assert ticker_mapping.resolve("AAPL", region="US") == "AAPL"
+    # Koyfins Sammelregion: US-Hinweis gewinnt gegen den Kanada-Substring.
+    assert ticker_mapping.resolve("GOOGL", region="United States and Canada") == "GOOGL"
 
 
 def test_unknown_region_passes_through_optimistically(monkeypatch):
@@ -45,6 +47,7 @@ def test_non_us_ticker_needs_confirmation(monkeypatch):
 
 def test_classify_region():
     assert ticker_mapping.classify_region("United States of America") == "us"
+    assert ticker_mapping.classify_region("United States and Canada") == "us"
     assert ticker_mapping.classify_region("AMERICAS") == "us"
     assert ticker_mapping.classify_region("us") == "us"
     assert ticker_mapping.classify_region("Germany") == "non_us"

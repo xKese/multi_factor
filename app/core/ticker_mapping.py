@@ -20,10 +20,10 @@ from . import persistence
 
 # Substring-Hinweise für die Regions-Klassifikation. Koyfin-Exporte sind in
 # den Bezeichnungen nicht einheitlich ("US", "United States", "United States
-# of America", "Americas", …), daher Substring- statt Exakt-Match.
-#
-# Nicht-US wird VOR US geprüft: "Canada" braucht z. B. trotz Nordamerika einen
-# Yahoo-Suffix (.TO), darf also nicht über "america"-Hinweise als US gelten.
+# of America", "United States and Canada", "Americas", …), daher Substring-
+# statt Exakt-Match. US wird VOR Nicht-US geprüft (siehe classify_region) —
+# ein reines "Canada" (ohne US-Hinweis) bleibt non_us, da TSX-Titel den
+# Yahoo-Suffix .TO brauchen.
 _NON_US_HINTS = (
     "europe", "europa",
     "germany", "deutschland",
@@ -85,14 +85,20 @@ _TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,15}$")
 
 
 def classify_region(region) -> str:
-    """Klassifiziert den Koyfin-Regionswert: ``"us"``, ``"non_us"``, ``"unknown"``."""
+    """Klassifiziert den Koyfin-Regionswert: ``"us"``, ``"non_us"``, ``"unknown"``.
+
+    US-Hinweise werden VOR den Nicht-US-Hinweisen geprüft: Koyfin fasst
+    Regionen zusammen ("United States and Canada"), und dort dominiert die
+    US-Interpretation — die Ticker sind in dieser Sammelregion überwiegend
+    US-Listings ohne Suffix. Ein reines "Canada" bleibt non_us (.TO-Suffix).
+    """
     if not isinstance(region, str) or not region.strip():
         return "unknown"
     value = region.strip().lower()
-    if any(hint in value for hint in _NON_US_HINTS):
-        return "non_us"
     if value in _US_EXACT or any(hint in value for hint in _US_HINTS):
         return "us"
+    if any(hint in value for hint in _NON_US_HINTS):
+        return "non_us"
     return "unknown"
 
 
