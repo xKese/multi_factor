@@ -1,15 +1,18 @@
-"""Agenten-Analyse — Ad-hoc-Tiefenanalyse für beliebige Ticker.
+"""Agenten-Analyse — Ad-hoc-Tiefenanalyse und globale Status-Übersicht.
 
 Erlaubt TradingAgents-Analysen auch für Titel, die NICHT im Koyfin-Universum
-der Multi-Faktor-Bewertung enthalten sind. Die Symbol-Suche des Service
-liefert direkt Yahoo-Dialekt-Ticker (inkl. europäischer Börsen-Suffixe wie
-``MBG.F``), sodass kein manuelles Mapping nötig ist. Ohne Quant-Score wird
-kein Faktor-Kontext mitgegeben — die Agenten analysieren „blind“.
+der Multi-Faktor-Bewertung enthalten sind, und zeigt zusätzlich den Status
+ALLER Läufe dieser Sitzung — unabhängig davon, ob sie hier oder in der
+Einzelanalyse gestartet wurden (die Job-Registry in ``agents_client`` ist
+prozess-global). Wie in der TradingAgents-WebUI ist live sichtbar, welcher
+Agent gerade arbeitet.
 
 Darunter: Verlauf aller gespeicherten Agenten-Analysen (Universum + Ad-hoc).
 """
 
 from __future__ import annotations
+
+import json
 
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -83,8 +86,23 @@ def layout(**_) -> html.Div:
                 ],
                 className="ms-card p-3 mb-3",
             ),
-            dcc.Store(id="aa-active-ticker"),
-            dcc.Interval(id="aa-poll", interval=2500, disabled=True),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("Live", className="ms-eyebrow"),
+                            html.H2("Laufende & aktuelle Analysen"),
+                        ]
+                    ),
+                    html.Div(
+                        "Alle Läufe dieser Sitzung, egal wo gestartet",
+                        className="ms-meta",
+                    ),
+                ],
+                className="ms-dash-section",
+            ),
+            dcc.Store(id="aa-jobs-fp"),
+            dcc.Interval(id="aa-poll", interval=3000, disabled=False),
             html.Div(id="aa-status", className="mb-4"),
             html.Div(
                 [
@@ -133,12 +151,100 @@ def _search(_clicks, _submit, query: str | None):
     return options, default, note or ""
 
 
-# ── Start & Fortschritt ────────────────────────────────────────────────────
+# ── Globale Status-Übersicht ───────────────────────────────────────────────
+
+def _jobs_fingerprint(jobs: dict[str, dict]) -> str:
+    """Kompakter Zustands-Fingerprint: nur bei Änderung wird neu gerendert."""
+    return json.dumps(
+        [
+            [
+                t,
+                j.get("status"),
+                j.get("stage"),
+                sorted((j.get("agent_states") or {}).items()),
+            ]
+            for t, j in jobs.items()
+        ],
+        ensure_ascii=False,
+    )
+
+
+def _job_card(ticker: str, job: dict) -> html.Div:
+    agents_ticker = job.get("agents_ticker")
+    title_bits: list = [html.Strong(ticker)]
+    if agents_ticker and agents_ticker != ticker:
+        title_bits.append(
+            html.Span(f" → {agents_ticker}", className="ms-tt-muted small")
+        )
+
+    status = job.get("status")
+    if status == "running":
+        body: list = [progress_checklist(job)]
+    elif status == "error":
+        body = [
+            dbc.Alert(
+                f"Analyse fehlgeschlagen: {job.get('error') or 'Unbekannter Fehler'}",
+                color="danger",
+                className="small mb-0",
+            )
+        ]
+    else:  # done
+        analysis = persistence.load_agent_analysis(ticker)
+        if analysis:
+            body = [result_view(analysis)]
+        else:
+            body = [
+                html.Div(
+                    [
+                        rating_badge(None),
+                        html.Span(
+                            " Abgeschlossen, aber kein gespeichertes Ergebnis "
+                            "gefunden.",
+                            className="small ms-2",
+                        ),
+                    ]
+                )
+            ]
+
+    return html.Div(
+        [html.Div(title_bits, className="mb-2"), *body],
+        className="ms-card p-3 mb-3",
+    )
+
+
+def _status_panel(jobs: dict[str, dict]) -> html.Div:
+    if not jobs:
+        return html.Div(
+            "In dieser Sitzung wurden noch keine Analysen gestartet. "
+            "Läufe aus der Einzelanalyse erscheinen hier ebenfalls. "
+            "(Nach einem Neustart der App ist diese Live-Ansicht leer — "
+            "abgeschlossene Analysen stehen dauerhaft im Verlauf unten.)",
+            className="ms-tt-muted",
+            style={"padding": "16px"},
+        )
+    return html.Div([_job_card(t, j) for t, j in jobs.items()])
+
 
 @callback(
     Output("aa-status", "children"),
-    Output("aa-poll", "disabled"),
-    Output("aa-active-ticker", "data"),
+    Output("aa-jobs-fp", "data"),
+    Input("aa-poll", "n_intervals"),
+    State("aa-jobs-fp", "data"),
+)
+def _poll(_n, prev_fp):
+    jobs = agents_client.list_jobs()
+    fp = _jobs_fingerprint(jobs)
+    if fp == prev_fp:
+        return no_update, no_update
+    return _status_panel(jobs), fp
+
+
+# ── Start ──────────────────────────────────────────────────────────────────
+
+@callback(
+    Output("aa-status", "children", allow_duplicate=True),
+    Output("aa-jobs-fp", "data", allow_duplicate=True),
+    Output("aa-search-note", "children", allow_duplicate=True),
     Input("aa-start", "n_clicks"),
     State("aa-symbol-choice", "value"),
     State("aa-query", "value"),
@@ -150,13 +256,9 @@ def _start(n_clicks, choice, query):
     ticker = (choice or "").strip().upper() or (query or "").strip().upper()
     if not ticker:
         return (
-            dbc.Alert(
-                "Bitte einen Titel suchen/auswählen oder einen Ticker eingeben.",
-                color="warning",
-                className="small",
-            ),
-            True,
             no_update,
+            no_update,
+            "Bitte einen Titel suchen/auswählen oder einen Ticker eingeben.",
         )
 
     # Titel aus dem Universum bekommen ihren Quant-Score als Vorab-Rating mit.
@@ -176,51 +278,10 @@ def _start(n_clicks, choice, query):
         in_universe=in_universe,
     )
     if not ok:
-        return dbc.Alert(msg, color="warning", className="small"), True, no_update
-    job = agents_client.get_status(ticker) or {}
-    return (
-        html.Div(progress_checklist(job), className="ms-card p-3"),
-        False,
-        ticker,
-    )
+        return no_update, no_update, msg
 
-
-@callback(
-    Output("aa-status", "children", allow_duplicate=True),
-    Output("aa-poll", "disabled", allow_duplicate=True),
-    Input("aa-poll", "n_intervals"),
-    State("aa-active-ticker", "data"),
-    prevent_initial_call=True,
-)
-def _poll(_n, ticker):
-    if not ticker:
-        return no_update, True
-    job = agents_client.get_status(ticker)
-    if job is None:
-        return no_update, True
-    if job.get("status") == "running":
-        return html.Div(progress_checklist(job), className="ms-card p-3"), False
-    if job.get("status") == "error":
-        return (
-            dbc.Alert(
-                f"Analyse fehlgeschlagen: {job.get('error') or 'Unbekannter Fehler'}",
-                color="danger",
-                className="small",
-            ),
-            True,
-        )
-    analysis = persistence.load_agent_analysis(ticker)
-    if analysis is None:
-        return (
-            dbc.Alert(
-                "Analyse abgeschlossen, aber kein gespeichertes Ergebnis "
-                "gefunden.",
-                color="warning",
-                className="small",
-            ),
-            True,
-        )
-    return html.Div(result_view(analysis), className="ms-card p-3"), True
+    jobs = agents_client.list_jobs()
+    return _status_panel(jobs), _jobs_fingerprint(jobs), ""
 
 
 # ── Verlauf ────────────────────────────────────────────────────────────────
@@ -293,13 +354,10 @@ def _history_table(df: pd.DataFrame) -> html.Div:
     )
 
 
-@callback(
-    Output("aa-history", "children"),
-    Input("aa-poll", "disabled"),
-    Input("aa-start", "n_clicks"),
-)
-def _history(_disabled, _n):
-    # Läuft initial und nach jedem Start/Abschluss (Poll-Umschaltung).
+@callback(Output("aa-history", "children"), Input("aa-jobs-fp", "data"))
+def _history(_fp):
+    # Rendert initial und immer dann neu, wenn sich der Job-Zustand ändert
+    # (Start, Agenten-Fortschritt, Abschluss) — Abschlüsse landen im Verlauf.
     return _history_table(persistence.list_agent_analyses())
 
 

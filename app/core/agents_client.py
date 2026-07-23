@@ -261,6 +261,20 @@ def get_status(ticker: str) -> dict | None:
         return dict(job) if job else None
 
 
+def list_jobs() -> dict[str, dict]:
+    """Snapshot aller Jobs dieser Prozess-Session (Ticker → Job-Dict).
+
+    Grundlage der globalen Status-Übersicht auf der Agenten-Analyse-Seite:
+    zeigt laufende, fehlgeschlagene und abgeschlossene Läufe unabhängig
+    davon, von welcher Seite sie gestartet wurden. Neueste zuerst.
+    """
+    with _JOBS_LOCK:
+        jobs = {t: dict(j) for t, j in _JOBS.items()}
+    return dict(
+        sorted(jobs.items(), key=lambda kv: kv[1].get("started_at") or 0, reverse=True)
+    )
+
+
 def _set_job(ticker: str, **updates) -> None:
     with _JOBS_LOCK:
         _JOBS.setdefault(ticker, {}).update(updates)

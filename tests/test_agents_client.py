@@ -215,6 +215,19 @@ def test_run_job_connection_drop_recovers_from_archive(monkeypatch):
     assert saved["rating"] == "Hold"
 
 
+def test_list_jobs_snapshot_newest_first():
+    agents_client._set_job("AAA", status="done", started_at=100.0)
+    agents_client._set_job("BBB", status="running", started_at=200.0)
+
+    jobs = agents_client.list_jobs()
+    assert list(jobs) == ["BBB", "AAA"]
+    assert jobs["BBB"]["status"] == "running"
+
+    # Snapshot ist entkoppelt: Mutation ändert die Registry nicht.
+    jobs["BBB"]["status"] = "mutiert"
+    assert agents_client.get_status("BBB")["status"] == "running"
+
+
 def test_start_analysis_refuses_concurrent_runs(monkeypatch):
     agents_client._set_job("AAA", status="running")
 
