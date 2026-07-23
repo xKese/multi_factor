@@ -78,6 +78,7 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "agents_deep_model",
     "agents_depth",
     "agents_language",
+    "agents_temperature",
 )
 
 _engine: Engine | None = None

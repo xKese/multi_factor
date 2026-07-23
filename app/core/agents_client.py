@@ -252,6 +252,13 @@ def build_run_payload(
     language = (getattr(settings, "agents_language", "") or "").strip()
     if language:
         payload["output_language"] = language
+    # Temperatur: App-Default 0 (deterministisch); None hieße Service-Default.
+    temperature = getattr(settings, "agents_temperature", 0.0)
+    if temperature is not None:
+        try:
+            payload["temperature"] = max(0.0, min(2.0, float(temperature)))
+        except (TypeError, ValueError):
+            pass
     if factor_context:
         payload["factor_context"] = factor_context
     return payload, None

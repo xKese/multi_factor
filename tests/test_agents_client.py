@@ -348,3 +348,33 @@ def test_build_run_payload_sends_output_language(monkeypatch):
     s2.agents_language = ""
     payload3, _ = agents_client.build_run_payload("AAPL", None, s2)
     assert "output_language" not in payload3
+
+
+def test_build_run_payload_sends_temperature(monkeypatch):
+    monkeypatch.setattr(
+        agents_client,
+        "get_catalog",
+        lambda force=False: {
+            "defaults": {
+                "llm_provider": "ollama",
+                "quick_think_llm": "m",
+                "deep_think_llm": "m",
+            }
+        },
+    )
+    # App-Default: Temperatur 0 (deterministisch).
+    payload, err = agents_client.build_run_payload("AAPL", None, Settings())
+    assert err is None
+    assert payload["temperature"] == 0.0
+
+    # Einstellungs-Override wird durchgereicht und auf [0, 2] begrenzt.
+    s = Settings()
+    s.agents_temperature = 0.7
+    assert agents_client.build_run_payload("AAPL", None, s)[0]["temperature"] == 0.7
+    s.agents_temperature = 9
+    assert agents_client.build_run_payload("AAPL", None, s)[0]["temperature"] == 2.0
+
+    # None hieße: Feld weglassen, Service-Default greift.
+    s2 = Settings()
+    s2.agents_temperature = None
+    assert "temperature" not in agents_client.build_run_payload("AAPL", None, s2)[0]
