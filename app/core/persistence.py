@@ -37,6 +37,8 @@ _SIGNAL_HISTORY_TABLE = "universe_signal_history"
 _MS_PORTFOLIO_TABLE = "ms_portfolio"
 _SETTINGS_TABLE = "app_settings"
 _FACTOR_TIMING_TABLE = "factor_timing_inputs"
+_AGENT_ANALYSES_TABLE = "agent_analyses"
+_TICKER_MAPPINGS_TABLE = "ticker_mappings"
 
 # Vollständige Liste der Eingabefelder der Factor-Timing-Seite (Makro-,
 # Sentiment- und Faktor-Momentum-Werte). Wird beim Persistieren als JSON-Text
@@ -71,6 +73,10 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "min_market_cap",
     "min_stocks_per_industry",
     "percentile_mode",
+    "agents_provider",
+    "agents_quick_model",
+    "agents_deep_model",
+    "agents_depth",
 )
 
 _engine: Engine | None = None
@@ -822,6 +828,262 @@ def load_factor_timing_inputs() -> dict | None:
         except (TypeError, ValueError):
             out[key] = None
     return out
+
+
+def _ensure_agent_analyses_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_AGENT_ANALYSES_TABLE} ("
+            "ticker TEXT NOT NULL, "
+            "run_id TEXT NOT NULL, "
+            "agents_ticker TEXT, "
+            "in_universe INTEGER, "
+            "analysis_date DATE, "
+            "rating TEXT, "
+            "executive_summary TEXT, "
+            "reports_json TEXT, "
+            "factor_context_json TEXT, "
+            "provider TEXT, "
+            "total_score DOUBLE PRECISION, "
+            "classification TEXT, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "PRIMARY KEY (ticker, run_id))"
+        )
+    )
+    conn.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS idx_aa_ticker ON "
+            f"{_AGENT_ANALYSES_TABLE}(ticker)"
+        )
+    )
+
+
+_AGENT_ANALYSIS_COLS: tuple[str, ...] = (
+    "agents_ticker",
+    "in_universe",
+    "analysis_date",
+    "rating",
+    "executive_summary",
+    "reports_json",
+    "factor_context_json",
+    "provider",
+    "total_score",
+    "classification",
+)
+
+
+def save_agent_analysis(record: dict) -> None:
+    """UPSERT einer abgeschlossenen Agenten-Tiefenanalyse.
+
+    ``record`` braucht mindestens ``ticker`` und ``run_id``; ``reports`` und
+    ``factor_context`` dürfen als Dicts übergeben werden und werden hier als
+    JSON-Text abgelegt. Raised bei DB-Problemen — der Aufrufer zeigt eine
+    UI-Warnung.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+
+    row: dict = {
+        "ticker": str(record["ticker"]),
+        "run_id": str(record["run_id"]),
+    }
+    payload = dict(record)
+    if isinstance(payload.get("reports"), dict):
+        payload["reports_json"] = json.dumps(payload.pop("reports"), ensure_ascii=False)
+    if isinstance(payload.get("factor_context"), dict):
+        payload["factor_context_json"] = json.dumps(
+            payload.pop("factor_context"), ensure_ascii=False
+        )
+    for c in _AGENT_ANALYSIS_COLS:
+        val = payload.get(c)
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            row[c] = None
+        elif c == "total_score":
+            try:
+                row[c] = float(val)
+            except (TypeError, ValueError):
+                row[c] = None
+        elif c == "in_universe":
+            row[c] = 1 if val else 0
+        else:
+            row[c] = str(val)
+
+    update_cols = ", ".join(f"{c} = EXCLUDED.{c}" for c in _AGENT_ANALYSIS_COLS)
+    with engine.begin() as conn:
+        _ensure_agent_analyses_table(conn)
+        conn.execute(
+            text(
+                f"INSERT INTO {_AGENT_ANALYSES_TABLE} "
+                f"(ticker, run_id, {', '.join(_AGENT_ANALYSIS_COLS)}) "
+                f"VALUES (:ticker, :run_id, "
+                f"{', '.join(':' + c for c in _AGENT_ANALYSIS_COLS)}) "
+                "ON CONFLICT (ticker, run_id) DO UPDATE SET "
+                f"{update_cols}, created_at = CURRENT_TIMESTAMP"
+            ),
+            [row],
+        )
+
+
+def _decode_agent_row(row) -> dict:
+    d = dict(row._mapping)
+    for src, dst in (("reports_json", "reports"), ("factor_context_json", "factor_context")):
+        raw = d.get(src)
+        d[dst] = None
+        if isinstance(raw, str) and raw:
+            try:
+                d[dst] = json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+    return d
+
+
+def load_agent_analysis(ticker: str) -> dict | None:
+    """Neueste gespeicherte Agenten-Analyse für einen Ticker (JSON dekodiert)
+    oder ``None``. Raised nie."""
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_agent_analyses_table(conn)
+            row = conn.execute(
+                text(
+                    f"SELECT * FROM {_AGENT_ANALYSES_TABLE} "
+                    "WHERE ticker = :t ORDER BY created_at DESC, run_id DESC LIMIT 1"
+                ),
+                {"t": str(ticker)},
+            ).fetchone()
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Agenten-Analyse fehlgeschlagen: %s", exc)
+        return None
+    if row is None:
+        return None
+    return _decode_agent_row(row)
+
+
+def load_agent_ratings() -> pd.DataFrame:
+    """Neueste Agenten-Bewertung je Ticker als DataFrame
+    (``ticker, rating, created_at``). Leer bei DB-Fehlern. Raised nie."""
+
+    empty = pd.DataFrame(columns=["ticker", "rating", "created_at"])
+    engine = get_engine()
+    if engine is None:
+        return empty
+    try:
+        with engine.begin() as conn:
+            _ensure_agent_analyses_table(conn)
+            df = pd.read_sql(
+                text(
+                    "SELECT a.ticker, a.rating, a.created_at "
+                    f"FROM {_AGENT_ANALYSES_TABLE} a "
+                    "JOIN ("
+                    "  SELECT ticker, MAX(created_at) AS max_created "
+                    f"  FROM {_AGENT_ANALYSES_TABLE} GROUP BY ticker"
+                    ") m ON a.ticker = m.ticker AND a.created_at = m.max_created"
+                ),
+                conn,
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Agenten-Bewertungen fehlgeschlagen: %s", exc)
+        return empty
+    return df.drop_duplicates(subset=["ticker"], keep="last")
+
+
+def list_agent_analyses(limit: int = 100) -> pd.DataFrame:
+    """Alle gespeicherten Agenten-Analysen (neueste zuerst, ohne Reports).
+    Leer bei DB-Fehlern. Raised nie."""
+
+    cols = [
+        "ticker",
+        "run_id",
+        "agents_ticker",
+        "in_universe",
+        "rating",
+        "provider",
+        "total_score",
+        "classification",
+        "created_at",
+    ]
+    empty = pd.DataFrame(columns=cols)
+    engine = get_engine()
+    if engine is None:
+        return empty
+    try:
+        with engine.begin() as conn:
+            _ensure_agent_analyses_table(conn)
+            return pd.read_sql(
+                text(
+                    f"SELECT {', '.join(cols)} FROM {_AGENT_ANALYSES_TABLE} "
+                    "ORDER BY created_at DESC, run_id DESC LIMIT :n"
+                ),
+                conn,
+                params={"n": int(limit)},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Auflisten der Agenten-Analysen fehlgeschlagen: %s", exc)
+        return empty
+
+
+def _ensure_ticker_mappings_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_TICKER_MAPPINGS_TABLE} ("
+            "source_ticker TEXT PRIMARY KEY, "
+            "agents_ticker TEXT NOT NULL, "
+            "confirmed_by_user INTEGER NOT NULL DEFAULT 0, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
+
+
+def save_ticker_mapping(
+    source_ticker: str, agents_ticker: str, confirmed: bool = True
+) -> None:
+    """UPSERT eines Koyfin→Yahoo-Ticker-Mappings. Raised bei DB-Problemen."""
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+
+    with engine.begin() as conn:
+        _ensure_ticker_mappings_table(conn)
+        conn.execute(
+            text(
+                f"INSERT INTO {_TICKER_MAPPINGS_TABLE} "
+                "(source_ticker, agents_ticker, confirmed_by_user, updated_at) "
+                "VALUES (:s, :a, :c, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (source_ticker) DO UPDATE SET "
+                "agents_ticker = EXCLUDED.agents_ticker, "
+                "confirmed_by_user = EXCLUDED.confirmed_by_user, "
+                "updated_at = CURRENT_TIMESTAMP"
+            ),
+            {"s": str(source_ticker), "a": str(agents_ticker), "c": 1 if confirmed else 0},
+        )
+
+
+def load_ticker_mapping(source_ticker: str) -> str | None:
+    """Gespeichertes Mapping für einen Koyfin-Ticker oder ``None``. Raised nie."""
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_ticker_mappings_table(conn)
+            row = conn.execute(
+                text(
+                    f"SELECT agents_ticker FROM {_TICKER_MAPPINGS_TABLE} "
+                    "WHERE source_ticker = :s"
+                ),
+                {"s": str(source_ticker)},
+            ).fetchone()
+    except SQLAlchemyError as exc:
+        log.warning("Laden des Ticker-Mappings fehlgeschlagen: %s", exc)
+        return None
+    return row[0] if row else None
 
 
 def load_settings() -> Settings | None:

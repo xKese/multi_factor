@@ -21,6 +21,7 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 | Einstellungen    | Editierbare Gewichte/Filter                     |
 | Perzentil_Hilfe  | automatisch aus Universum                       |
 | Anleitung        | Bedienungsanleitung                             |
+| —                | Agenten-Analyse: LLM-Tiefenanalyse via TradingAgents (siehe unten) |
 
 ## Scoring-Logik
 
@@ -75,6 +76,57 @@ docker build -t multi-factor .
 docker run -p 5000:5000 -v multi-factor-data:/srv/app/data multi-factor
 ```
 
+## Agenten-Tiefenanalyse (TradingAgents-Integration)
+
+Die App kann pro Titel eine tiefgehende LLM-Agenten-Analyse
+([TradingAgents](https://github.com/xKese/TradingAgents)) starten: Markt-,
+Sentiment-, News- und Fundamental-Analysten, Bull/Bear-Debatte, Risiko-Runde
+und ein finales Rating (Buy/Overweight/Hold/Underweight/Sell). Der
+Quant-Score dieser App wird den Agenten dabei als **Vorab-Rating**
+mitgegeben (Prior, den die Agenten bestätigen oder widerlegen).
+
+- **Einzelanalyse** → Abschnitt „Agenten-Tiefenanalyse“: Analyse für den
+  gewählten Titel starten; Ergebnis wird in der Datenbank gespeichert und
+  beim nächsten Besuch wieder angezeigt.
+- **Agenten-Analyse** (`/agenten-analyse`): Ad-hoc-Analyse für beliebige
+  Ticker — auch außerhalb des Koyfin-Universums — inkl. Symbol-Suche und
+  Verlauf aller gespeicherten Analysen.
+- **Dashboard**: Spalte „Agenten“ zeigt das jeweils neueste Agenten-Rating.
+- **Einstellungen** → Karte „Agenten-Tiefenanalyse“: LLM-Provider, Modelle
+  und Analysetiefe.
+
+**Ticker-Zuordnung:** Koyfin-Ticker haben keine Börsen-Endung (z. B. `MBG`),
+yfinance/Alpha Vantage brauchen aber das Yahoo-Format (`MBG.F`). US-Titel
+werden automatisch aufgelöst; für europäische Titel öffnet sich vor der
+ersten Analyse ein Bestätigungs-Dialog mit Vorschlägen aus der Symbol-Suche.
+Bestätigte Zuordnungen werden gespeichert (Tabelle `ticker_mappings`).
+
+### Kombinierter Start mit Docker
+
+Beide Repos als Geschwister-Verzeichnisse auschecken und die LLM-API-Keys in
+`../TradingAgents/.env` hinterlegen, dann:
+
+```bash
+docker compose -f docker-compose.combined.yml up --build
+```
+
+Multi-Faktor-UI auf <http://localhost:5000>; der TradingAgents-Service läuft
+intern auf `tradingagents-web:8000` (bewusst nicht nach außen veröffentlicht —
+die Web-UI hat keine Authentifizierung).
+
+### Lokale Entwicklung ohne Docker
+
+```bash
+# Terminal 1 — TradingAgents-Service (API-Keys in der Umgebung/.env)
+cd ../TradingAgents && tradingagents serve --port 8000 --no-browser
+
+# Terminal 2 — Multi-Faktor-App
+cd multi_factor && TRADINGAGENTS_URL=http://localhost:8000 python -m app.main
+```
+
+Ohne erreichbaren Service bleibt die App voll funktionsfähig — nur die
+Agenten-Funktionen sind deaktiviert (Hinweis in der UI).
+
 ## Daten hochladen
 
 1. Browser auf <http://127.0.0.1:8050/daten-import>
@@ -97,7 +149,9 @@ docker run -p 5000:5000 -v multi-factor-data:/srv/app/data multi-factor
 ## Tests
 
 ```bash
-python -m tests.test_scoring
+python -m tests.test_scoring        # Smoke-Test Scoring
+python -m pytest tests -q           # komplette Suite (inkl. Agenten-Client,
+                                    # Ticker-Mapping, Agenten-Persistenz)
 ```
 
 Smoke-Test gegen `tests/fixtures/koyfin_sample.csv` (10 synthetische Tickers).

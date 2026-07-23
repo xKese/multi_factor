@@ -14,14 +14,15 @@ from app.ui import command_palette_layout, fmt_de, register_plotly_templates
 NAV_ORDER = {
     "Dashboard": 0,
     "Einzelanalyse": 1,
-    "Momentum-Monitor": 2,
-    "Sektor-Momentum": 3,
-    "M&S Portfolio": 4,
-    "Factor Timing": 5,
-    "Daten-Import": 6,
-    "Einstellungen": 7,
-    "Perzentil-Hilfe": 8,
-    "Anleitung": 9,
+    "Agenten-Analyse": 2,
+    "Momentum-Monitor": 3,
+    "Sektor-Momentum": 4,
+    "M&S Portfolio": 5,
+    "Factor Timing": 6,
+    "Daten-Import": 7,
+    "Einstellungen": 8,
+    "Perzentil-Hilfe": 9,
+    "Anleitung": 10,
 }
 
 
@@ -110,6 +111,7 @@ def create_app() -> dash.Dash:
 
     # Seitenmodule erst nach App-Instanziierung importieren.
     from app.pages import (  # noqa: F401
+        agenten_analyse,
         anleitung,
         dashboard,
         daten_import,

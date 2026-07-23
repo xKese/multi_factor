@@ -1,0 +1,44 @@
+# Kombinierter Stack: Multi-Faktor-App (Haupt-UI, Port 5000) + TradingAgents
+# als Agenten-Analyse-Service (Port intern 8000).
+#
+# Voraussetzung: beide Repos liegen als Geschwister-Verzeichnisse nebeneinander:
+#   <basis>/multi_factor/       (dieses Repo)
+#   <basis>/TradingAgents/      (mit .env für die LLM-API-Keys)
+#
+# Start:  docker compose -f docker-compose.combined.yml up --build
+# Danach: http://localhost:5000  (Multi-Faktor-UI mit Agenten-Tiefenanalyse)
+#
+# Die eigene TradingAgents-Web-UI wird standardmäßig NICHT nach außen
+# veröffentlicht (kein Auth!) — die Dash-App erreicht sie über das interne
+# Netz. Zum Freischalten TRADINGAGENTS_WEB_PORT setzen und den ports-Block
+# unten einkommentieren.
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - TRADINGAGENTS_URL=http://tradingagents-web:8000
+    volumes:
+      - appdata:/srv/app/data
+    depends_on:
+      - tradingagents-web
+    restart: unless-stopped
+
+  tradingagents-web:
+    build: ../TradingAgents
+    env_file:
+      - ../TradingAgents/.env
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000", "--no-browser"]
+    # ports:
+    #   - "${TRADINGAGENTS_WEB_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - tradingagents_data:/home/appuser/.tradingagents
+    restart: unless-stopped
+
+volumes:
+  appdata:
+  tradingagents_data:
