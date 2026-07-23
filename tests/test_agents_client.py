@@ -266,3 +266,25 @@ def test_build_run_payload_uses_settings_over_defaults(monkeypatch):
     assert err2 is None
     assert payload2["llm_provider"] == "ollama"
     assert "factor_context" not in payload2
+    # Kein backend_url im Katalog → Feld weglassen (Server nimmt Provider-Default).
+    assert "backend_url" not in payload2
+
+
+def test_build_run_payload_forwards_backend_url(monkeypatch):
+    # Spiegelt die Browser-UI: die env-bewusste defaults.backend_url des
+    # Service (TRADINGAGENTS_LLM_BACKEND_URL) wird in den Payload übernommen.
+    monkeypatch.setattr(
+        agents_client,
+        "get_catalog",
+        lambda force=False: {
+            "defaults": {
+                "llm_provider": "openai_compatible",
+                "quick_think_llm": "m",
+                "deep_think_llm": "m",
+                "backend_url": "http://host.docker.internal:1234/v1",
+            }
+        },
+    )
+    payload, err = agents_client.build_run_payload("AAPL", None, Settings())
+    assert err is None
+    assert payload["backend_url"] == "http://host.docker.internal:1234/v1"

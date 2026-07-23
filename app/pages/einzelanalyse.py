@@ -944,6 +944,7 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
         )
         button_label = "Tiefenanalyse starten"
 
+    effective = ticker_mapping.resolve(ticker) or ticker
     children.append(
         html.Div(
             [
@@ -954,6 +955,17 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
                     size="sm",
                     n_clicks=0,
                     disabled=not service_ok,
+                ),
+                dbc.Button(
+                    f"Börsen-Ticker ändern … ({effective})",
+                    id="ea-agent-mapping-open",
+                    color="secondary",
+                    outline=True,
+                    size="sm",
+                    n_clicks=0,
+                    className="ms-2",
+                    disabled=not service_ok,
+                    title="Yahoo-Ticker für die Agenten-Analyse prüfen/korrigieren",
                 ),
                 html.Span(
                     ""
@@ -999,6 +1011,42 @@ def _agent_section(ticker: str | None, _n):
     return _agent_section_view(ticker)
 
 
+def _universe_row(ticker: str):
+    if not STATE.scored.empty:
+        rows = STATE.scored.loc[STATE.scored["ticker"] == ticker]
+        if not rows.empty:
+            return rows.iloc[0]
+    return None
+
+
+def _mapping_modal_content(ticker: str, row) -> tuple[list, str | None, str]:
+    """Vorschlagsliste für das Mapping-Modal bauen.
+
+    Rückgabe ``(options, default, note)`` aus der Symbol-Suche des Service,
+    gerankt nach Namens-/Regionsähnlichkeit.
+    """
+    name = str(row.get("name") or "") if row is not None else ""
+    region = row.get("region") if row is not None else None
+    query = name or ticker
+    results, note = agents_client.symbol_search(query)
+    if not results and name:
+        results, note = agents_client.symbol_search(ticker)
+    ranked = ticker_mapping.rank_suggestions(results, name=name, region=region)
+    options = [
+        {
+            "label": f"{r.get('symbol')} — {r.get('name') or '?'}"
+            + (f" ({r.get('region')})" if r.get("region") else ""),
+            "value": r.get("symbol"),
+        }
+        for r in ranked[:8]
+        if r.get("symbol")
+    ]
+    default = options[0]["value"] if options else None
+    if not note and not options:
+        note = "Keine Vorschläge gefunden — bitte manuell eingeben."
+    return options, default, note or ""
+
+
 @callback(
     Output("ea-agent-section", "children", allow_duplicate=True),
     Output("ea-agent-poll", "disabled", allow_duplicate=True),
@@ -1014,42 +1062,14 @@ def _agent_start(n_clicks: int | None, ticker: str | None):
     if not n_clicks or not ticker:
         raise PreventUpdate
 
-    row = None
-    if not STATE.scored.empty:
-        rows = STATE.scored.loc[STATE.scored["ticker"] == ticker]
-        if not rows.empty:
-            row = rows.iloc[0]
-
+    row = _universe_row(ticker)
     region = row.get("region") if row is not None else None
     resolved = ticker_mapping.resolve(ticker, region)
 
     if resolved is None:
-        # Kein sicheres Mapping — Symbol-Suche befragen, Nutzer bestätigen lassen.
-        name = str(row.get("name") or "") if row is not None else ""
-        query = name or ticker
-        results, note = agents_client.symbol_search(query)
-        if not results and name:
-            results, note = agents_client.symbol_search(ticker)
-        ranked = ticker_mapping.rank_suggestions(results, name=name, region=region)
-        options = [
-            {
-                "label": f"{r.get('symbol')} — {r.get('name') or '?'}"
-                + (f" ({r.get('region')})" if r.get("region") else ""),
-                "value": r.get("symbol"),
-            }
-            for r in ranked[:8]
-            if r.get("symbol")
-        ]
-        default = options[0]["value"] if options else None
-        return (
-            no_update,
-            no_update,
-            True,
-            options,
-            default,
-            note or ("Keine Vorschläge gefunden — bitte manuell eingeben."
-                     if not options else ""),
-        )
+        # Titel braucht mutmaßlich eine Börsen-Endung — Nutzer bestätigen lassen.
+        options, default, note = _mapping_modal_content(ticker, row)
+        return no_update, no_update, True, options, default, note
 
     ok, msg = _start_agent_run(ticker, resolved)
     if not ok:
@@ -1059,6 +1079,29 @@ def _agent_start(n_clicks: int | None, ticker: str | None):
         return content, True, False, no_update, no_update, ""
     view, poll_disabled = _agent_section_view(ticker)
     return view, poll_disabled, False, no_update, no_update, ""
+
+
+@callback(
+    Output("ea-agent-mapping-modal", "is_open", allow_duplicate=True),
+    Output("ea-agent-mapping-choice", "options", allow_duplicate=True),
+    Output("ea-agent-mapping-choice", "value", allow_duplicate=True),
+    Output("ea-agent-mapping-note", "children", allow_duplicate=True),
+    Input("ea-agent-mapping-open", "n_clicks"),
+    State("ea-ticker", "value"),
+    prevent_initial_call=True,
+)
+def _agent_mapping_open(n_clicks: int | None, ticker: str | None):
+    """Escape-Hatch: Mapping-Modal manuell öffnen (auch für US-Titel),
+    um eine automatische Zuordnung zu prüfen oder zu korrigieren."""
+    if not n_clicks or not ticker:
+        raise PreventUpdate
+    row = _universe_row(ticker)
+    options, default, note = _mapping_modal_content(ticker, row)
+    effective = ticker_mapping.resolve(
+        ticker, row.get("region") if row is not None else None
+    )
+    hint = f"Aktuell verwendeter Yahoo-Ticker: {effective or ticker}."
+    return True, options, default, f"{hint} {note}".strip()
 
 
 @callback(

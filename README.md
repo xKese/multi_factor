@@ -97,9 +97,13 @@ mitgegeben (Prior, den die Agenten bestätigen oder widerlegen).
 
 **Ticker-Zuordnung:** Koyfin-Ticker haben keine Börsen-Endung (z. B. `MBG`),
 yfinance/Alpha Vantage brauchen aber das Yahoo-Format (`MBG.F`). US-Titel
-werden automatisch aufgelöst; für europäische Titel öffnet sich vor der
-ersten Analyse ein Bestätigungs-Dialog mit Vorschlägen aus der Symbol-Suche.
-Bestätigte Zuordnungen werden gespeichert (Tabelle `ticker_mappings`).
+(und Titel mit unbekannter Region) starten direkt mit unverändertem Ticker —
+Koyfin- und yfinance-Ticker sind bei US-Aktien in der Regel identisch. Nur
+bei klar nicht-US-Titeln (Europa/Asien/Kanada) öffnet sich vor der ersten
+Analyse ein Bestätigungs-Dialog mit Vorschlägen aus der Symbol-Suche. Über
+„Börsen-Ticker ändern …“ in der Einzelanalyse lässt sich die Zuordnung
+jederzeit prüfen und korrigieren. Bestätigte Zuordnungen werden gespeichert
+(Tabelle `ticker_mappings`).
 
 ### Kombinierter Start mit Docker
 

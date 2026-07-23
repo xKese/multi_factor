@@ -18,13 +18,56 @@ import re
 
 from . import persistence
 
-# Regionen, deren Koyfin-Ticker ohne Suffix direkt Yahoo-kompatibel sind.
-_NO_SUFFIX_REGIONS = {
+# Substring-Hinweise für die Regions-Klassifikation. Koyfin-Exporte sind in
+# den Bezeichnungen nicht einheitlich ("US", "United States", "United States
+# of America", "Americas", …), daher Substring- statt Exakt-Match.
+#
+# Nicht-US wird VOR US geprüft: "Canada" braucht z. B. trotz Nordamerika einen
+# Yahoo-Suffix (.TO), darf also nicht über "america"-Hinweise als US gelten.
+_NON_US_HINTS = (
+    "europe", "europa",
+    "germany", "deutschland",
+    "france", "frankreich",
+    "italy", "italien",
+    "spain", "spanien",
+    "netherlands", "niederlande",
+    "switzerland", "schweiz",
+    "austria", "österreich",
+    "belgium", "belgien",
+    "sweden", "schweden",
+    "norway", "norwegen",
+    "denmark", "dänemark",
+    "finland", "finnland",
+    "portugal",
+    "ireland", "irland",
+    "united kingdom", "großbritannien", "britain",
+    "poland", "polen",
+    "asia", "asien",
+    "japan",
+    "china",
+    "hong kong", "hongkong",
+    "korea",
+    "taiwan",
+    "india", "indien",
+    "singapore", "singapur",
+    "australia", "australien",
+    "canada", "kanada",
+    "brazil", "brasilien",
+    "mexico", "mexiko",
+    "emerging",
+)
+
+_US_HINTS = (
     "united states",
     "usa",
-    "us",
     "vereinigte staaten",
-}
+    "north america",
+    "nordamerika",
+    "americas",
+    "amerika",
+)
+
+_US_EXACT = {"us", "u.s.", "u.s.a."}
 
 # Bekannte US-Aktienklassen, die Koyfin ohne Trennzeichen exportiert und
 # Yahoo mit Bindestrich führt.
@@ -41,15 +84,26 @@ _SHARE_CLASS_MAP = {
 _TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,15}$")
 
 
-def is_us_region(region) -> bool:
-    return isinstance(region, str) and region.strip().lower() in _NO_SUFFIX_REGIONS
+def classify_region(region) -> str:
+    """Klassifiziert den Koyfin-Regionswert: ``"us"``, ``"non_us"``, ``"unknown"``."""
+    if not isinstance(region, str) or not region.strip():
+        return "unknown"
+    value = region.strip().lower()
+    if any(hint in value for hint in _NON_US_HINTS):
+        return "non_us"
+    if value in _US_EXACT or any(hint in value for hint in _US_HINTS):
+        return "us"
+    return "unknown"
 
 
 def resolve(ticker: str, region=None) -> str | None:
     """Löst einen Koyfin-Ticker in den Yahoo-Dialekt auf, oder ``None``.
 
-    ``None`` heißt: keine sichere automatische Auflösung möglich — der
-    Aufrufer muss den Nutzer über die Symbol-Suche bestätigen lassen.
+    ``None`` heißt: der Titel braucht mutmaßlich eine Börsen-Endung — der
+    Aufrufer muss den Nutzer über die Symbol-Suche bestätigen lassen. US- und
+    unbekannte Regionen werden optimistisch durchgereicht, weil Koyfin-Ticker
+    bei US-Titeln in der Regel identisch mit den yfinance-Tickern sind; eine
+    Fehlzuordnung lässt sich über das Mapping-Modal jederzeit korrigieren.
     """
     if not isinstance(ticker, str) or not ticker.strip():
         return None
@@ -66,10 +120,10 @@ def resolve(ticker: str, region=None) -> str | None:
     if "." in t or "-" in t:
         return t
 
-    if is_us_region(region):
-        return _SHARE_CLASS_MAP.get(t, t)
+    if classify_region(region) == "non_us":
+        return None
 
-    return None
+    return _SHARE_CLASS_MAP.get(t, t)
 
 
 def rank_suggestions(results: list[dict], name=None, region=None) -> list[dict]:
