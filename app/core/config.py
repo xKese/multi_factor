@@ -7,6 +7,15 @@ from typing import Literal
 
 PercentileMode = Literal["Global", "Sektor", "Industrie"]
 
+# Kennzahlen, bei denen ein negativer Wert nur durch einen negativen Nenner
+# entsteht (Verlust, negatives EBITDA, negatives Eigenkapital) und daher
+# nicht "günstig" bedeutet. Solche Werte werden vor dem Perzentil-Ranking
+# auf NaN maskiert, damit sie nach der Inversion kein Top-Perzentil erhalten.
+# ``ps`` kann nicht negativ werden, negatives ``beta`` ist legitim.
+NEGATIVE_IS_INVALID: frozenset[str] = frozenset(
+    {"pe", "pfcf", "peg", "ev_ebitda", "pb", "debt_equity"}
+)
+
 
 @dataclass
 class Settings:
