@@ -154,6 +154,23 @@ def _indicator_table(title: str, weights: dict[str, float], prefix: str) -> dbc.
     )
 
 
+# Sprachen der Agenten-Reports: Wire-Werte des TradingAgents-Service
+# (Freitext-Feld ``output_language``), Auswahl gespiegelt aus dessen CLI.
+AGENT_LANGUAGES: tuple[tuple[str, str], ...] = (
+    ("Deutsch", "German"),
+    ("Englisch", "English"),
+    ("Französisch", "French"),
+    ("Spanisch", "Spanish"),
+    ("Portugiesisch", "Portuguese"),
+    ("Chinesisch", "Chinese"),
+    ("Japanisch", "Japanese"),
+    ("Koreanisch", "Korean"),
+    ("Hindi", "Hindi"),
+    ("Arabisch", "Arabic"),
+    ("Russisch", "Russian"),
+)
+
+
 def _agents_card() -> dbc.Card:
     """Karte „Agenten-Tiefenanalyse“: Service-Status + Provider/Modelle/Tiefe."""
     import os
@@ -258,6 +275,33 @@ def _agents_card() -> dbc.Card:
                                     id="agents-depth",
                                     options=depth_options,
                                     value=s.agents_depth,
+                                ),
+                                md=7,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("Sprache der Analyse"), md=5),
+                            dbc.Col(
+                                dbc.Select(
+                                    id="agents-language",
+                                    options=[
+                                        {"label": label, "value": value}
+                                        for label, value in AGENT_LANGUAGES
+                                    ]
+                                    + (
+                                        # Frei gespeicherte Sprache (z. B. via DB)
+                                        # bleibt wählbar, auch wenn nicht gelistet.
+                                        [{"label": s.agents_language,
+                                          "value": s.agents_language}]
+                                        if s.agents_language
+                                        and s.agents_language
+                                        not in {v for _, v in AGENT_LANGUAGES}
+                                        else []
+                                    ),
+                                    value=s.agents_language or "German",
                                 ),
                                 md=7,
                             ),
@@ -612,15 +656,17 @@ def _delete_snapshot(n_clicks_list):
     State("agents-quick-model", "value"),
     State("agents-deep-model", "value"),
     State("agents-depth", "value"),
+    State("agents-language", "value"),
     prevent_initial_call=True,
 )
-def _save_agents(n_clicks, provider, quick, deep, depth):
+def _save_agents(n_clicks, provider, quick, deep, depth, language):
     if not n_clicks:
         raise PreventUpdate
     s = STATE.settings
     s.agents_provider = (provider or "").strip()
     s.agents_quick_model = (quick or "").strip()
     s.agents_deep_model = (deep or "").strip()
+    s.agents_language = (language or "").strip() or "German"
     try:
         s.agents_depth = int(depth) if depth else 1
     except (TypeError, ValueError):

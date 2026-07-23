@@ -318,3 +318,33 @@ def test_build_run_payload_forwards_backend_url(monkeypatch):
     payload, err = agents_client.build_run_payload("AAPL", None, Settings())
     assert err is None
     assert payload["backend_url"] == "http://host.docker.internal:1234/v1"
+
+
+def test_build_run_payload_sends_output_language(monkeypatch):
+    monkeypatch.setattr(
+        agents_client,
+        "get_catalog",
+        lambda force=False: {
+            "defaults": {
+                "llm_provider": "ollama",
+                "quick_think_llm": "m",
+                "deep_think_llm": "m",
+            }
+        },
+    )
+    # Default der App: deutsche Reports.
+    payload, err = agents_client.build_run_payload("AAPL", None, Settings())
+    assert err is None
+    assert payload["output_language"] == "German"
+
+    # In den Einstellungen gewählte Sprache wird durchgereicht.
+    s = Settings()
+    s.agents_language = "English"
+    payload2, _ = agents_client.build_run_payload("AAPL", None, s)
+    assert payload2["output_language"] == "English"
+
+    # Leerer Wert: Feld weglassen, der Service-Default (English) greift.
+    s2 = Settings()
+    s2.agents_language = ""
+    payload3, _ = agents_client.build_run_payload("AAPL", None, s2)
+    assert "output_language" not in payload3
