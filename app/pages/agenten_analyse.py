@@ -19,7 +19,7 @@ import pandas as pd
 from dash import Input, Output, State, callback, dcc, html, no_update, register_page
 from dash.exceptions import PreventUpdate
 
-from app.core import agents_client, persistence
+from app.core import agents_client, persistence, ticker_mapping
 from app.core.state import STATE
 from app.ui.agent_report import progress_checklist, rating_badge, result_view
 
@@ -51,28 +51,20 @@ def layout(**_) -> html.Div:
                         className="small ms-tt-muted",
                     ),
                     html.Div(
-                        [
-                            dbc.Input(
-                                id="aa-query",
-                                placeholder="Name oder Ticker (z. B. Mercedes, MBG.F, AAPL) …",
-                                type="text",
-                                debounce=True,
-                                style={"maxWidth": "420px"},
+                        dcc.Dropdown(
+                            id="aa-symbol",
+                            options=[],
+                            placeholder=(
+                                "Name oder Ticker tippen (z. B. Mercedes, "
+                                "MBG.F, AAPL) …"
                             ),
-                            dbc.Button(
-                                "Suchen",
-                                id="aa-search",
-                                color="dark",
-                                outline=True,
-                                size="sm",
-                                n_clicks=0,
-                                className="ms-2",
-                            ),
-                        ],
-                        className="d-flex align-items-center mb-2",
+                            searchable=True,
+                            clearable=True,
+                        ),
+                        style={"maxWidth": "480px"},
+                        className="mb-1",
                     ),
                     html.Div(id="aa-search-note", className="small text-warning mb-1"),
-                    dbc.RadioItems(id="aa-symbol-choice", options=[]),
                     html.Div(
                         dbc.Button(
                             "Tiefenanalyse starten",
@@ -105,22 +97,18 @@ def layout(**_) -> html.Div:
     )
 
 
-# ── Suche ──────────────────────────────────────────────────────────────────
+# ── Live-Symbol-Suche (Autocomplete, analog TradingAgents-WebUI) ──────────
 
-@callback(
-    Output("aa-symbol-choice", "options"),
-    Output("aa-symbol-choice", "value"),
-    Output("aa-search-note", "children"),
-    Input("aa-search", "n_clicks"),
-    Input("aa-query", "n_submit"),
-    State("aa-query", "value"),
-    prevent_initial_call=True,
-)
-def _search(_clicks, _submit, query: str | None):
-    term = (query or "").strip()
-    if len(term) < 2:
-        return [], None, "Bitte mindestens 2 Zeichen eingeben."
-    results, note = agents_client.symbol_search(term)
+def _symbol_options(
+    results: list[dict], term: str, current: str | None = None
+) -> list[dict]:
+    """Dropdown-Optionen aus Symbol-Such-Treffern bauen.
+
+    Sieht der Suchbegriff selbst wie ein Ticker aus, bleibt er als erste
+    Option direkt wählbar (Freitext-Fallback ohne AV-Key/Treffer). Eine
+    bereits getroffene Auswahl bleibt erhalten, sonst verwirft Dash sie
+    beim Options-Wechsel.
+    """
     options = [
         {
             "label": f"{r.get('symbol')} — {r.get('name') or '?'}"
@@ -130,10 +118,44 @@ def _search(_clicks, _submit, query: str | None):
         for r in results[:10]
         if r.get("symbol")
     ]
-    default = options[0]["value"] if options else None
-    if not options and not note:
-        note = "Keine Treffer — der Ticker kann trotzdem direkt eingegeben werden."
-    return options, default, note or ""
+
+    seen = {o["value"] for o in options}
+    upper = (term or "").strip().upper()
+    # Tickertypisch: kurz (<= 6 Zeichen) oder mit Börsen-Suffix/Klassen-
+    # Trenner — Firmennamen wie "MERCEDES" sollen keine Pseudo-Option werden.
+    ticker_like = bool(ticker_mapping._TICKER_RE.match(upper)) and (
+        len(upper) <= 6 or "." in upper or "-" in upper
+    )
+    if upper and upper not in seen and ticker_like:
+        options.insert(
+            0, {"label": f"{upper} — direkt übernehmen", "value": upper}
+        )
+        seen.add(upper)
+
+    if current and current not in seen:
+        options.append({"label": current, "value": current})
+    return options
+
+
+@callback(
+    Output("aa-symbol", "options"),
+    Output("aa-search-note", "children"),
+    Input("aa-symbol", "search_value"),
+    State("aa-symbol", "value"),
+    prevent_initial_call=True,
+)
+def _search(search_value: str | None, current: str | None):
+    term = (search_value or "").strip()
+    if len(term) < 3:
+        raise PreventUpdate
+    results, note = agents_client.symbol_search(term)
+    options = _symbol_options(results, term, current)
+    if not results and not note:
+        note = (
+            "Keine Treffer — tickerartige Eingaben können direkt "
+            "übernommen werden."
+        )
+    return options, note or ""
 
 
 # ── Globale Status-Übersicht ───────────────────────────────────────────────
@@ -227,19 +249,18 @@ def _poll(_n, prev_fp):
     Output("aa-jobs-fp", "data", allow_duplicate=True),
     Output("aa-search-note", "children", allow_duplicate=True),
     Input("aa-start", "n_clicks"),
-    State("aa-symbol-choice", "value"),
-    State("aa-query", "value"),
+    State("aa-symbol", "value"),
     prevent_initial_call=True,
 )
-def _start(n_clicks, choice, query):
+def _start(n_clicks, symbol):
     if not n_clicks:
         raise PreventUpdate
-    ticker = (choice or "").strip().upper() or (query or "").strip().upper()
+    ticker = (symbol or "").strip().upper()
     if not ticker:
         return (
             no_update,
             no_update,
-            "Bitte einen Titel suchen/auswählen oder einen Ticker eingeben.",
+            "Bitte einen Titel per Suche auswählen.",
         )
 
     # Titel aus dem Universum bekommen ihren Quant-Score als Vorab-Rating mit.

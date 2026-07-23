@@ -13,10 +13,12 @@ from app.core.config import Settings
 @pytest.fixture(autouse=True)
 def _clean_registry(monkeypatch):
     agents_client._JOBS.clear()
+    agents_client._SEARCH_CACHE.clear()
     monkeypatch.setattr(agents_client, "_catalog_cache", None)
     monkeypatch.setattr(agents_client, "_catalog_failed_at", None)
     yield
     agents_client._JOBS.clear()
+    agents_client._SEARCH_CACHE.clear()
 
 
 def _scored_row() -> dict:
@@ -213,6 +215,42 @@ def test_run_job_connection_drop_recovers_from_archive(monkeypatch):
     assert job["status"] == "done"
     assert job["run_id"] == "MBG.F_29990101_000000"
     assert saved["rating"] == "Hold"
+
+
+def test_symbol_search_caches_successful_lookups(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"results": [{"symbol": "MBG.F", "name": "Mercedes"}], "note": None}
+
+    def _get(url, **kwargs):
+        calls.append(kwargs.get("params", {}).get("q"))
+        return _Resp()
+
+    monkeypatch.setattr(agents_client.requests, "get", _get)
+
+    r1, note1 = agents_client.symbol_search("mercedes")
+    r2, _ = agents_client.symbol_search("Mercedes")  # Groß-/Klein → gleicher Key
+    assert r1 == r2 == [{"symbol": "MBG.F", "name": "Mercedes"}]
+    assert note1 is None
+    assert len(calls) == 1  # zweiter Aufruf kommt aus dem Cache
+
+    # Fehler werden nicht gecacht: Service down → jeder Aufruf versucht es neu.
+    def _down(url, **kwargs):
+        calls.append("down")
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(agents_client.requests, "get", _down)
+    results, note = agents_client.symbol_search("apple")
+    assert results == [] and "nicht erreichbar" in note
+    agents_client.symbol_search("apple")
+    assert calls.count("down") == 2
 
 
 def test_current_agent_prefers_in_progress():
