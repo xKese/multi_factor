@@ -99,6 +99,9 @@ class Settings:
     agents_depth: int = 1
     # Sprache der Agenten-Reports (Wire-Wert des Service, z. B. "German").
     agents_language: str = "German"
+    # Sampling-Temperatur der Agenten-LLMs (0–2). Default 0: maximal
+    # deterministisch/konservativ — für Analyse-Reproduzierbarkeit erwünscht.
+    agents_temperature: float = 0.0
 
     INVERT_LOW_IS_BETTER: set[str] = field(
         default_factory=lambda: {

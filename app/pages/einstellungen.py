@@ -283,6 +283,23 @@ def _agents_card() -> dbc.Card:
                     ),
                     dbc.Row(
                         [
+                            dbc.Col(html.Label("Temperatur (0 = deterministisch)"), md=5),
+                            dbc.Col(
+                                dbc.Input(
+                                    id="agents-temperature",
+                                    type="number",
+                                    value=s.agents_temperature,
+                                    min=0,
+                                    max=2,
+                                    step=0.1,
+                                ),
+                                md=7,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
                             dbc.Col(html.Label("Sprache der Analyse"), md=5),
                             dbc.Col(
                                 dbc.Select(
@@ -657,9 +674,10 @@ def _delete_snapshot(n_clicks_list):
     State("agents-deep-model", "value"),
     State("agents-depth", "value"),
     State("agents-language", "value"),
+    State("agents-temperature", "value"),
     prevent_initial_call=True,
 )
-def _save_agents(n_clicks, provider, quick, deep, depth, language):
+def _save_agents(n_clicks, provider, quick, deep, depth, language, temperature):
     if not n_clicks:
         raise PreventUpdate
     s = STATE.settings
@@ -671,6 +689,10 @@ def _save_agents(n_clicks, provider, quick, deep, depth, language):
         s.agents_depth = int(depth) if depth else 1
     except (TypeError, ValueError):
         s.agents_depth = 1
+    try:
+        s.agents_temperature = max(0.0, min(2.0, float(temperature)))
+    except (TypeError, ValueError):
+        s.agents_temperature = 0.0
     try:
         save_settings(s)
     except Exception as exc:  # noqa: BLE001 — DB down: Einstellungen nur im Speicher
