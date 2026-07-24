@@ -104,6 +104,14 @@ def _header() -> html.Header:
     )
 
 
+def _read_modal_layout():
+    """Lese-Modal der Agenten-Berichte — global, damit es auf jeder Seite
+    statisch im DOM existiert (kein Render-Race, vgl. ea-agent-section)."""
+    from app.ui.agent_report import read_modal
+
+    return read_modal()
+
+
 def create_app() -> dash.Dash:
     register_plotly_templates()
     STATE.load_from_db()
@@ -143,6 +151,7 @@ def create_app() -> dash.Dash:
             _header(),
             html.Main(dash.page_container, className="ms-page"),
             command_palette_layout(),
+            _read_modal_layout(),
         ],
         className="ms-app",
     )

@@ -102,6 +102,63 @@ def test_result_view_renders_hero_and_cards():
     assert "Marktanalyse" in view and "Vollständig lesen" in view
 
 
+def test_modal_sections_filters_and_orders():
+    reports = {
+        "news_report": "News-Inhalt.",
+        "market_report": "Markt-Inhalt.",
+        "bull_history": "   ",  # leer → gefiltert
+    }
+    sections = ar.modal_sections(reports)
+    assert [k for k, _, _ in sections] == ["market_report", "news_report"]
+    assert sections[0][1] == "Marktanalyse"
+    assert ar.modal_sections(None) == []
+
+
+def test_read_modal_content_head_and_nav():
+    analysis = {
+        "ticker": "SAP",
+        "reports": {
+            "market_report": "Markt.",
+            "news_report": "News.",
+            "final_trade_decision": "Entscheidung.",
+        },
+    }
+    head, body, foot = ar._read_modal_content(analysis, "news_report")
+    head_s, foot_s = str(head), str(foot)
+    assert "SAP · Bericht 2 von 3 · News Analyst" in head_s
+    assert "'News'" in head_s  # Serif-Titel
+    assert "‹ Marktanalyse" in foot_s
+    assert "Risiko & Entscheidung ›" in foot_s
+    assert foot_s.count("ms-agent-read-dot") >= 3
+    assert foot_s.count("is-active") == 1
+    assert "News." in str(body)
+
+    # Am Listenanfang ist der Zurück-Link unsichtbar.
+    _, _, foot_first = ar._read_modal_content(analysis, "market_report")
+    assert "visibility" in str(foot_first)
+
+
+def test_shifted_key_bounds():
+    reports = {"market_report": "a", "news_report": "b"}
+    assert ar._shifted_key(reports, "market_report", 1) == "news_report"
+    assert ar._shifted_key(reports, "market_report", -1) == "market_report"
+    assert ar._shifted_key(reports, "news_report", 1) == "news_report"
+    assert ar._shifted_key(reports, "unbekannt", 1) == "market_report"
+    assert ar._shifted_key({}, "x", 1) == "x"
+
+
+def test_result_view_links_open_modal():
+    analysis = {
+        "ticker": "SAP",
+        "rating": "Buy",
+        "reports": {"market_report": "Inhalt."},
+    }
+    view = str(ar.result_view(analysis))
+    assert "agent-read" in view  # Pattern-ID statt Inline-Collapse
+    assert "Vollständig lesen" in view
+    assert "Details" not in view
+
+
 def test_progress_checklist_renders_pipeline():
     job = {
         "agents_ticker": "SAP.DE",
