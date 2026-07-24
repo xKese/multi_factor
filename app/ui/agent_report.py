@@ -14,8 +14,12 @@ from __future__ import annotations
 
 import re
 
+import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import dcc, html
+from dash import ALL, Input, Output, State, callback, ctx, dcc, html
+from dash.exceptions import PreventUpdate
+
+from app.core import persistence
 
 # Reihenfolge, deutsche Titel und Agentenrollen der Report-Sektionen.
 REPORT_SECTIONS: tuple[tuple[str, str, str], ...] = (
@@ -484,7 +488,9 @@ def result_view(analysis: dict, current_score=None) -> html.Div:
         className="ms-agent-hero",
     )
 
-    # Report-Karten mit Inline-Collapse für den vollen Markdown-Report.
+    # Report-Karten; „Vollständig lesen“ öffnet das zentrale Lese-Modal
+    # (Design-Handoff #3a) mit genau dieser Sektion.
+    ticker = str(analysis.get("ticker") or "")
     cards = []
     for key, title, role in REPORT_SECTIONS:
         content = reports.get(key)
@@ -500,17 +506,11 @@ def result_view(analysis: dict, current_score=None) -> html.Div:
                     html.P(
                         first_sentences(content), className="ms-agent-card-teaser"
                     ),
-                    html.Details(
-                        [
-                            html.Summary(
-                                html.Span(
-                                    "Vollständig lesen ›",
-                                    className="ms-agent-readlink",
-                                )
-                            ),
-                            dcc.Markdown(content, className="ms-agent-report mt-2"),
-                        ],
-                        className="ms-agent-full",
+                    html.Span(
+                        "Vollständig lesen ›",
+                        id={"type": "agent-read", "ticker": ticker, "key": key},
+                        n_clicks=0,
+                        className="ms-agent-readlink",
                     ),
                 ],
                 className="ms-card",
@@ -522,3 +522,177 @@ def result_view(analysis: dict, current_score=None) -> html.Div:
     if cards:
         children.append(html.Div(cards, className="ms-agent-cards"))
     return html.Div(children)
+
+
+# ── Lese-Modal (Design-Handoff #3a) ────────────────────────────────────────
+
+def modal_sections(reports: dict | None) -> list[tuple[str, str, str]]:
+    """Sektionen mit Inhalt in ``REPORT_SECTIONS``-Reihenfolge."""
+    reports = reports or {}
+    return [
+        (key, title, role)
+        for key, title, role in REPORT_SECTIONS
+        if isinstance(reports.get(key), str) and reports[key].strip()
+    ]
+
+
+def read_modal() -> html.Div:
+    """Global eingehängtes Lese-Modal (einmal im App-Layout, alle Seiten)."""
+    return html.Div(
+        [
+            dcc.Store(id="ms-agent-read-store"),
+            dbc.Modal(
+                [
+                    html.Div(id="ms-agent-read-head"),
+                    html.Div(id="ms-agent-read-body", className="ms-agent-modal-scroll"),
+                    html.Div(id="ms-agent-read-foot"),
+                ],
+                id="ms-agent-read-modal",
+                is_open=False,
+                size="lg",
+                centered=True,
+                keyboard=True,
+                class_name="ms-agent-read",
+                backdrop_class_name="ms-agent-read-backdrop",
+            ),
+        ]
+    )
+
+
+def _read_modal_content(analysis: dict, key: str):
+    """Kopf/Body/Fuß des Lese-Modals für eine Sektion. ``(head, body, foot)``."""
+    reports = analysis.get("reports") or {}
+    sections = modal_sections(reports)
+    keys = [k for k, _, _ in sections]
+    if key not in keys:
+        key = keys[0] if keys else key
+    idx = keys.index(key) if key in keys else 0
+    _, title, role = sections[idx] if sections else (key, key, "")
+    ticker = str(analysis.get("ticker") or "")
+
+    head = html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(
+                        f"{ticker} · Bericht {idx + 1} von {len(sections)} · {role}",
+                        className="ms-agent-modal-eyebrow",
+                    ),
+                    html.Div(title, className="ms-agent-modal-title"),
+                ]
+            ),
+            html.Button(
+                "×",
+                id="ms-agent-read-close",
+                n_clicks=0,
+                className="ms-agent-modal-close",
+                title="Schließen (Esc)",
+            ),
+        ],
+        className="ms-agent-modal-head",
+    )
+
+    body = html.Div(
+        dcc.Markdown(
+            reports.get(key) or "",
+            className="ms-agent-modal-body",
+        ),
+        className="ms-agent-modal-bodywrap",
+        # key-Wechsel erzwingt einen frischen DOM-Knoten — der Scroll
+        # springt beim Blättern nach oben.
+        key=f"{ticker}-{key}",
+    )
+
+    prev_label = sections[idx - 1][1] if idx > 0 else ""
+    next_label = sections[idx + 1][1] if idx + 1 < len(sections) else ""
+    dots = [
+        html.Span(
+            className="ms-agent-read-dot" + (" is-active" if i == idx else "")
+        )
+        for i in range(len(sections))
+    ]
+    foot = html.Div(
+        [
+            html.Button(
+                f"‹ {prev_label}",
+                id="ms-agent-read-prev",
+                n_clicks=0,
+                className="ms-agent-modal-nav",
+                style={} if prev_label else {"visibility": "hidden"},
+            ),
+            html.Div(dots, className="ms-agent-read-dots"),
+            html.Button(
+                f"{next_label} ›",
+                id="ms-agent-read-next",
+                n_clicks=0,
+                className="ms-agent-modal-nav",
+                style={} if next_label else {"visibility": "hidden"},
+            ),
+        ],
+        className="ms-agent-modal-foot",
+    )
+    return head, body, foot
+
+
+def _shifted_key(reports: dict | None, key: str, step: int) -> str:
+    keys = [k for k, _, _ in modal_sections(reports)]
+    if not keys:
+        return key
+    if key not in keys:
+        return keys[0]
+    return keys[max(0, min(len(keys) - 1, keys.index(key) + step))]
+
+
+@callback(
+    Output("ms-agent-read-modal", "is_open"),
+    Output("ms-agent-read-store", "data"),
+    Output("ms-agent-read-head", "children"),
+    Output("ms-agent-read-body", "children"),
+    Output("ms-agent-read-foot", "children"),
+    Input({"type": "agent-read", "ticker": ALL, "key": ALL}, "n_clicks"),
+    prevent_initial_call=True,
+)
+def _open_read_modal(n_clicks_list):
+    trigger = ctx.triggered_id
+    if not trigger or not any(n_clicks_list or []):
+        raise PreventUpdate
+    ticker = trigger.get("ticker")
+    key = trigger.get("key")
+    analysis = persistence.load_agent_analysis(ticker) if ticker else None
+    if not analysis:
+        raise PreventUpdate
+    head, body, foot = _read_modal_content(analysis, key)
+    return True, {"ticker": ticker, "key": key}, head, body, foot
+
+
+@callback(
+    Output("ms-agent-read-store", "data", allow_duplicate=True),
+    Output("ms-agent-read-head", "children", allow_duplicate=True),
+    Output("ms-agent-read-body", "children", allow_duplicate=True),
+    Output("ms-agent-read-foot", "children", allow_duplicate=True),
+    Input("ms-agent-read-prev", "n_clicks"),
+    Input("ms-agent-read-next", "n_clicks"),
+    State("ms-agent-read-store", "data"),
+    prevent_initial_call=True,
+)
+def _flip_read_modal(_prev, _next, data):
+    if not data or not data.get("ticker"):
+        raise PreventUpdate
+    analysis = persistence.load_agent_analysis(data["ticker"])
+    if not analysis:
+        raise PreventUpdate
+    step = -1 if ctx.triggered_id == "ms-agent-read-prev" else 1
+    new_key = _shifted_key(analysis.get("reports"), data.get("key"), step)
+    head, body, foot = _read_modal_content(analysis, new_key)
+    return {"ticker": data["ticker"], "key": new_key}, head, body, foot
+
+
+@callback(
+    Output("ms-agent-read-modal", "is_open", allow_duplicate=True),
+    Input("ms-agent-read-close", "n_clicks"),
+    prevent_initial_call=True,
+)
+def _close_read_modal(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate
+    return False

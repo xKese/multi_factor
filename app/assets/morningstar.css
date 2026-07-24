@@ -3109,9 +3109,129 @@ hr { border-color: var(--ms-border); opacity: 1; }
   cursor: pointer;
 }
 .ms-agent-readlink:hover { color: var(--ms-gold-2); }
-details.ms-agent-full > summary { list-style: none; }
-details.ms-agent-full > summary::-webkit-details-marker { display: none; }
-details.ms-agent-full[open] > summary .ms-agent-readlink::after { content: " ▴"; }
+/* — Lese-Modal (Design-Handoff #3a) — */
+.ms-agent-read .modal-dialog { max-width: 760px; }
+.ms-agent-read .modal-content {
+  background: var(--ms-surface);
+  border: 1px solid var(--ms-border);
+  border-radius: 4px;
+  box-shadow: 0 24px 60px rgba(31, 58, 42, 0.28);
+  overflow: hidden;
+  position: relative;
+  max-height: 80vh;
+}
+.ms-agent-read .modal-content::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--ms-gold);
+  z-index: 1;
+}
+.ms-agent-read-backdrop { background: rgba(31, 58, 42, 0.32); }
+.ms-agent-read-backdrop.show { opacity: 1; }
+.ms-agent-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 28px 16px;
+  border-bottom: 1px solid var(--ms-border);
+}
+.ms-agent-modal-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-gold);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.ms-agent-modal-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--ms-green-deep);
+  line-height: 1.1;
+}
+.ms-agent-modal-close {
+  background: transparent;
+  border: 1px solid var(--ms-border);
+  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  color: var(--ms-text-muted);
+  cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.ms-agent-modal-close:hover { border-color: var(--ms-border-strong); }
+.ms-agent-modal-scroll {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.ms-agent-modal-bodywrap { padding: 22px 28px; }
+.ms-agent-modal-body { max-width: 62ch; }
+.ms-agent-modal-body p {
+  font-size: 13px;
+  color: var(--ms-text);
+  line-height: 1.7;
+  margin: 0 0 14px;
+}
+.ms-agent-modal-body h1,
+.ms-agent-modal-body h2,
+.ms-agent-modal-body h3,
+.ms-agent-modal-body h4 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ms-green-deep);
+  margin: 18px 0 8px;
+}
+.ms-agent-modal-body ul,
+.ms-agent-modal-body ol {
+  font-size: 13px;
+  color: var(--ms-text);
+  line-height: 1.7;
+  margin: 0 0 14px;
+  padding-left: 20px;
+}
+.ms-agent-modal-body table { font-size: 12px; }
+.ms-agent-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 28px;
+  border-top: 1px solid var(--ms-border);
+  background: var(--ms-surface-alt);
+}
+.ms-agent-modal-nav {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ms-gold);
+  cursor: pointer;
+  font-family: inherit;
+}
+.ms-agent-modal-nav:hover { color: var(--ms-gold-2); }
+.ms-agent-read-dots { display: flex; gap: 6px; }
+.ms-agent-read-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ms-border-strong);
+  display: inline-block;
+}
+.ms-agent-read-dot.is-active { background: var(--ms-gold); }
 
 /* — Ad-hoc: Suche + Treffer-Liste + Status-Karte — */
 .ms-agent-adhoc-grid {
