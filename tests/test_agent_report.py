@@ -147,6 +147,31 @@ def test_shifted_key_bounds():
     assert ar._shifted_key({}, "x", 1) == "x"
 
 
+def test_flip_callback_is_registered_on_the_right_function():
+    """Regression: Der @callback-Dekorator des Blätter-Callbacks muss auf
+    ``_flip_read_modal`` sitzen. Nach dem #16-Commit dekorierte er versehent-
+    lich die davor eingefügte Hilfsfunktion ``_flip_step`` — Dash registrierte
+    die falsche Funktion, jeder Klick warf SchemaTypeValidationError und das
+    Umblättern war komplett tot."""
+    from dash._callback import GLOBAL_CALLBACK_MAP
+
+    # Der Blätter-Callback nutzt allow_duplicate-Outputs (Key mit @hash);
+    # der Öffnen-Callback enthält -foot ebenfalls, aber zusätzlich is_open.
+    entry = next(
+        (
+            v
+            for k, v in GLOBAL_CALLBACK_MAP.items()
+            if "ms-agent-read-foot.children@" in k and "is_open" not in k
+        ),
+        None,
+    )
+    assert entry is not None, "Blätter-Callback nicht registriert"
+    assert entry["callback"].__name__ == "_flip_read_modal"
+
+    # Und die Hilfsfunktion ist eine reine Funktion geblieben (kein Callback).
+    assert ar._flip_step("ms-agent-read-next", 0, 1) == 1
+
+
 def test_flip_step_requires_real_click():
     """Regression: Insertion-Fire der frisch gerenderten Nav-Buttons (n_clicks
     0/None) darf NICHT blättern — sonst öffnet „Vollständig lesen" immer den

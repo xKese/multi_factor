@@ -677,16 +677,6 @@ def _open_read_modal(n_clicks_list):
     return True, {"ticker": ticker, "key": key}, head, body, foot
 
 
-@callback(
-    Output("ms-agent-read-store", "data", allow_duplicate=True),
-    Output("ms-agent-read-head", "children", allow_duplicate=True),
-    Output("ms-agent-read-body", "children", allow_duplicate=True),
-    Output("ms-agent-read-foot", "children", allow_duplicate=True),
-    Input("ms-agent-read-prev", "n_clicks"),
-    Input("ms-agent-read-next", "n_clicks"),
-    State("ms-agent-read-store", "data"),
-    prevent_initial_call=True,
-)
 def _flip_step(trigger, prev_clicks, next_clicks) -> int | None:
     """Blätter-Richtung eines Nav-Triggers — ``None`` ohne echten Klick.
 
@@ -703,6 +693,16 @@ def _flip_step(trigger, prev_clicks, next_clicks) -> int | None:
     return None
 
 
+@callback(
+    Output("ms-agent-read-store", "data", allow_duplicate=True),
+    Output("ms-agent-read-head", "children", allow_duplicate=True),
+    Output("ms-agent-read-body", "children", allow_duplicate=True),
+    Output("ms-agent-read-foot", "children", allow_duplicate=True),
+    Input("ms-agent-read-prev", "n_clicks"),
+    Input("ms-agent-read-next", "n_clicks"),
+    State("ms-agent-read-store", "data"),
+    prevent_initial_call=True,
+)
 def _flip_read_modal(_prev, _next, data):
     step = _flip_step(ctx.triggered_id, _prev, _next)
     if step is None:
