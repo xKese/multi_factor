@@ -416,3 +416,27 @@ def test_build_run_payload_sends_temperature(monkeypatch):
     s2 = Settings()
     s2.agents_temperature = None
     assert "temperature" not in agents_client.build_run_payload("AAPL", None, s2)[0]
+
+
+def test_friendly_error_flags_transient_provider_failures():
+    """Regression: Ollama Clouds 500 („Internal Server Error (ref: …)") kam
+    als rohe Exception in der UI an — ohne Hinweis, dass der Fehler beim
+    LLM-Anbieter lag und ein Neustart genügt."""
+    msg = (
+        "InternalServerError: Error code: 500 - "
+        "{'error': 'Internal Server Error (ref: eddcd20d-c829-4b09)'}"
+    )
+    out = agents_client._friendly_error(msg)
+    assert "vorübergehender Fehler beim LLM-Anbieter" in out
+    assert "neu gestartet" in out
+    assert "Error code: 500" in out  # Original bleibt für die Diagnose sichtbar
+
+    # Auch 502/503 und Timeouts gelten als transient.
+    assert "LLM-Anbieter" in agents_client._friendly_error("Error code: 503 - overloaded")
+    assert "LLM-Anbieter" in agents_client._friendly_error("Read timed out")
+
+
+def test_friendly_error_leaves_other_messages_untouched():
+    assert agents_client._friendly_error("Ungültige Research-Tiefe.") == "Ungültige Research-Tiefe."
+    assert agents_client._friendly_error(None) == "Unbekannter Fehler"
+    assert agents_client._friendly_error("") == "Unbekannter Fehler"

@@ -460,6 +460,31 @@ def _try_archive_fallback(
     return None
 
 
+# Signaturen transienter Fehler des LLM-Anbieters (5xx/Überlast/Timeout) —
+# z. B. Ollama Clouds "InternalServerError: Error code: 500 - {'error':
+# 'Internal Server Error (ref: …)'}". Solche Läufe scheitern nicht an der
+# Eingabe, ein Neustart genügt meist.
+_TRANSIENT_MARKERS = (
+    "internalservererror",
+    "error code: 5",
+    "overloaded",
+    "service unavailable",
+    "timed out",
+    "timeout",
+)
+
+
+def _friendly_error(msg: str) -> str:
+    """Ergänzt bei transienten Provider-Fehlern einen Neustart-Hinweis."""
+    text = str(msg or "Unbekannter Fehler")
+    if any(marker in text.lower() for marker in _TRANSIENT_MARKERS):
+        return (
+            f"{text[:300]} — vorübergehender Fehler beim LLM-Anbieter; "
+            "die Analyse kann einfach neu gestartet werden."
+        )
+    return text
+
+
 def _run_job(
     ticker: str,
     agents_ticker: str,
@@ -477,7 +502,11 @@ def _run_job(
                     detail = resp.json().get("detail") or resp.text
                 except Exception:  # noqa: BLE001
                     detail = resp.text
-                _set_job(ticker, status="error", error=str(detail)[:500])
+                _set_job(
+                    ticker,
+                    status="error",
+                    error=_friendly_error(str(detail)[:500]),
+                )
                 return
 
             for event, data in _iter_sse(resp):
@@ -503,7 +532,7 @@ def _run_job(
                     _set_job(
                         ticker,
                         status="error",
-                        error=str(data.get("message") or "Unbekannter Fehler"),
+                        error=_friendly_error(data.get("message")),
                     )
                     return
                 elif event == "final":
