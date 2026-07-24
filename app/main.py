@@ -208,6 +208,8 @@ def create_app() -> dash.Dash:
         from dash import no_update
 
         from app.core import agents_client
+        from app.core.persistence import load_agent_analysis
+        from app.ui.agent_report import progress_stats, rating_short, rating_tone
 
         jobs = agents_client.list_jobs()
         running = {t: j for t, j in jobs.items() if j.get("status") == "running"}
@@ -215,8 +217,10 @@ def create_app() -> dash.Dash:
         if running:
             ticker, job = next(iter(running.items()))
             agent = agents_client.current_agent(job)
+            stats = progress_stats(job)
+            counter = f"{stats['done']}/{stats['total']}" if stats["total"] else ""
             label = f"{ticker} · {agent}" if agent else f"{ticker} · Analyse läuft"
-            fp = f"run|{ticker}|{agent}"
+            fp = f"run|{ticker}|{agent}|{counter}"
             if fp == prev_fp:
                 return no_update, no_update
             return (
@@ -224,9 +228,14 @@ def create_app() -> dash.Dash:
                     [
                         html.Span(className="ms-agent-chip-dot"),
                         html.Span(label, className="ms-agent-chip-label"),
-                    ],
+                    ]
+                    + (
+                        [html.Span(counter, className="ms-agent-chip-count")]
+                        if counter
+                        else []
+                    ),
                     href="/agenten-analyse",
-                    className="ms-agent-chip is-running",
+                    className="ms-agent-chip is-running-gold",
                     title="Agenten-Tiefenanalyse läuft — Klick für Details",
                 ),
                 fp,
@@ -236,23 +245,48 @@ def create_app() -> dash.Dash:
         if jobs:
             ticker, job = next(iter(jobs.items()))
             ok = job.get("status") == "done"
-            icon, tone = ("✓", "is-done") if ok else ("⚠", "is-error")
             fp = f"idle|{ticker}|{job.get('status')}"
             if fp == prev_fp:
                 return no_update, no_update
+            if ok:
+                analysis = load_agent_analysis(ticker)
+                rating = analysis.get("rating") if analysis else None
+                children = [
+                    html.Span("✓", className="ms-agent-chip-icon"),
+                    html.Span(ticker, className="ms-agent-chip-label"),
+                ]
+                if rating:
+                    tone = rating_tone(rating)
+                    children.append(
+                        html.Span(
+                            html.Span(
+                                rating_short(rating), className="ms-badge-value"
+                            ),
+                            className=f"ms-badge is-{tone}" if tone else "ms-badge",
+                            title=rating,
+                        )
+                    )
+                return (
+                    dcc.Link(
+                        children,
+                        href="/agenten-analyse",
+                        className="ms-agent-chip is-done",
+                        title="Letzte Tiefenanalyse abgeschlossen — Klick für Details",
+                    ),
+                    fp,
+                )
             return (
                 dcc.Link(
                     [
-                        html.Span(icon, className="ms-agent-chip-icon"),
-                        html.Span(ticker, className="ms-agent-chip-label"),
+                        html.Span("⚠", className="ms-agent-chip-icon"),
+                        html.Span(
+                            f"{ticker} · fehlgeschlagen",
+                            className="ms-agent-chip-label",
+                        ),
                     ],
                     href="/agenten-analyse",
-                    className=f"ms-agent-chip {tone}",
-                    title=(
-                        "Letzte Tiefenanalyse abgeschlossen — Klick für Details"
-                        if ok
-                        else "Letzte Tiefenanalyse fehlgeschlagen — Klick für Details"
-                    ),
+                    className="ms-agent-chip is-error",
+                    title="Letzte Tiefenanalyse fehlgeschlagen — Klick für Details",
                 ),
                 fp,
             )

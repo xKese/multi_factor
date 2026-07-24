@@ -879,27 +879,145 @@ def _render(ticker: str | None):
                 className="ms-dash-section",
             ),
             html.Div(id="ea-comparables"),
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Div("Tiefenanalyse", className="ms-eyebrow"),
-                            html.H2("Agenten-Tiefenanalyse"),
-                        ]
-                    ),
-                    html.Div(
-                        "LLM-Agenten (TradingAgents)",
-                        className="ms-meta",
-                    ),
-                ],
-                className="ms-dash-section",
-            ),
             html.Div(id="ea-agent-section"),
         ]
     )
 
 
-# ── Agenten-Tiefenanalyse ──────────────────────────────────────────────────
+# ── Agenten-Tiefenanalyse (Design-Handoff Turn 2, Screen 2a) ───────────────
+
+def _agent_section_head(meta_children) -> html.Div:
+    """Section-Kopf mit Gold-Eyebrow und zustandsabhängiger Meta-Zeile."""
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(
+                        "Tiefenanalyse",
+                        className="ms-eyebrow",
+                        style={"color": "var(--ms-gold)"},
+                    ),
+                    html.H2("Agenten-Tiefenanalyse"),
+                ]
+            ),
+            html.Div(meta_children, className="ms-meta"),
+        ],
+        className="ms-dash-section",
+    )
+
+
+def _current_quant(ticker: str):
+    """(total_score, klassifikations-kurzform) aus dem Universum, sonst None."""
+    if STATE.scored.empty:
+        return None, None
+    row = STATE.scored.loc[STATE.scored["ticker"] == ticker]
+    if row.empty:
+        return None, None
+    r = row.iloc[0]
+    score = r.get("total_score")
+    cls = _class_of(float(score)) if pd.notna(score) else None
+    return (float(score) if pd.notna(score) else None), (cls["code"] if cls else None)
+
+
+def _agent_start_state(ticker: str, service_ok: bool, error: str | None) -> html.Div:
+    """Zustand 1 — Start: zweispaltige Karte mit Ablauf-Panel."""
+    score, cls_code = _current_quant(ticker)
+    if score is not None:
+        quant_txt = (
+            f"Der Quant-Score dieser Seite ({fmt_de(score, 1)}"
+            + (f" · {cls_code}" if cls_code else "")
+            + ") wird den Agenten als Vorab-Rating mitgegeben — sie bestätigen "
+            "oder widerlegen ihn. "
+        )
+    else:
+        quant_txt = "Für diesen Titel liegt kein Quant-Score vor (Ad-hoc-Analyse). "
+
+    effective = ticker_mapping.resolve(ticker) or ticker
+    main_children: list = [
+        html.P(
+            "Zwölf LLM-Agenten prüfen Markt, Sentiment, News und "
+            "Fundamentaldaten, debattieren Bull gegen Bear und liefern ein "
+            "Rating samt Begründung.",
+            className="ms-agent-serif-intro",
+        ),
+        html.P(
+            quant_txt + "Dauer: mehrere Minuten; das Ergebnis wird gespeichert.",
+            className="ms-agent-start-sub",
+        ),
+        html.Div(
+            [
+                html.Button(
+                    "Tiefenanalyse starten",
+                    id="ea-agent-start",
+                    n_clicks=0,
+                    disabled=not service_ok,
+                    className="ms-agent-btn-primary",
+                ),
+                html.Button(
+                    f"Börsen-Ticker ändern … ({effective})",
+                    id="ea-agent-mapping-open",
+                    n_clicks=0,
+                    disabled=not service_ok,
+                    className="ms-agent-btn-secondary",
+                    title="Yahoo-Ticker für die Agenten-Analyse prüfen/korrigieren",
+                ),
+            ],
+            className="ms-agent-start-actions",
+        ),
+    ]
+    if error:
+        main_children.append(
+            html.Div(
+                [html.Span("⚠"), html.Span(f"Analyse fehlgeschlagen: {error}")],
+                className="ms-agent-warnstrip",
+            )
+        )
+    if not service_ok:
+        main_children.append(
+            html.Div(
+                [
+                    html.Span("⚠"),
+                    html.Span(
+                        "TradingAgents-Service nicht erreichbar "
+                        "(TRADINGAGENTS_URL prüfen)."
+                    ),
+                ],
+                className="ms-agent-warnstrip",
+            )
+        )
+
+    ablauf = [
+        ("1", "Vier Analysten (Markt, Sentiment, News, Fundamentals)"),
+        ("2", "Bull/Bear-Debatte & Research-Fazit"),
+        ("3", "Trading-Plan & Risiko-Runde"),
+        ("4", "Rating: Buy … Sell"),
+    ]
+    return html.Div(
+        [
+            html.Div(main_children, className="ms-agent-start-main"),
+            html.Div(
+                [
+                    html.Div("Ablauf", className="ms-agent-aside-label"),
+                    html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.Span(num, className="ms-agent-ablauf-num"),
+                                    html.Span(txt),
+                                ],
+                                className="ms-agent-ablauf-row",
+                            )
+                            for num, txt in ablauf
+                        ],
+                        className="ms-agent-ablauf",
+                    ),
+                ],
+                className="ms-agent-start-aside",
+            ),
+        ],
+        className="ms-agent-start",
+    )
+
 
 def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
     """Aktuellen Zustand des Agenten-Abschnitts rendern.
@@ -908,77 +1026,63 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
     """
     job = agents_client.get_status(ticker)
     if job and job.get("status") == "running":
-        return progress_checklist(job), False
-
-    children: list = []
-    if job and job.get("status") == "error":
-        children.append(
-            dbc.Alert(
-                f"Analyse fehlgeschlagen: {job.get('error') or 'Unbekannter Fehler'}",
-                color="danger",
-                className="small",
-            )
+        return (
+            html.Div(
+                [
+                    _agent_section_head("Analyse läuft …"),
+                    progress_checklist(job),
+                ]
+            ),
+            False,
         )
 
+    error = job.get("error") if job and job.get("status") == "error" else None
     analysis = persistence.load_agent_analysis(ticker)
     service_ok = agents_client.service_available()
 
-    if analysis:
-        current = None
-        if not STATE.scored.empty:
-            row = STATE.scored.loc[STATE.scored["ticker"] == ticker]
-            if not row.empty:
-                current = row.iloc[0].get("total_score")
-        children.append(result_view(analysis, current_score=current))
-        button_label = "Neu analysieren"
-    else:
-        children.append(
-            html.P(
-                "Die LLM-Agenten von TradingAgents führen eine tiefgehende "
-                "Analyse durch (Markt, Sentiment, News, Fundamentals, "
-                "Bull/Bear-Debatte, Risiko) und liefern ein Rating samt "
-                "Begründung. Der Quant-Score dieser Seite wird den Agenten "
-                "als Vorab-Rating mitgegeben.",
-                className="small ms-tt-muted",
+    if analysis and not error:
+        created = analysis.get("created_at")
+        try:
+            created_label = pd.to_datetime(created).strftime("%d.%m.%Y %H:%M")
+        except (ValueError, TypeError):
+            created_label = str(created or "–")
+        meta: list = [
+            "Analyse vom ",
+            html.Strong(created_label, style={"color": "var(--ms-text)"}),
+        ]
+        if analysis.get("provider"):
+            meta.append(f" · {analysis['provider']}")
+        if service_ok:
+            meta.append(" · ")
+            meta.append(
+                html.A(
+                    "Neu analysieren",
+                    id="ea-agent-start",
+                    n_clicks=0,
+                    style={"color": "var(--ms-gold)", "cursor": "pointer"},
+                )
             )
-        )
-        button_label = "Tiefenanalyse starten"
 
-    effective = ticker_mapping.resolve(ticker) or ticker
-    children.append(
+        current, _ = _current_quant(ticker)
+        return (
+            html.Div(
+                [
+                    _agent_section_head(meta),
+                    result_view(analysis, current_score=current),
+                ]
+            ),
+            True,
+        )
+
+    return (
         html.Div(
             [
-                dbc.Button(
-                    button_label,
-                    id="ea-agent-start",
-                    color="dark",
-                    size="sm",
-                    n_clicks=0,
-                    disabled=not service_ok,
-                ),
-                dbc.Button(
-                    f"Börsen-Ticker ändern … ({effective})",
-                    id="ea-agent-mapping-open",
-                    color="secondary",
-                    outline=True,
-                    size="sm",
-                    n_clicks=0,
-                    className="ms-2",
-                    disabled=not service_ok,
-                    title="Yahoo-Ticker für die Agenten-Analyse prüfen/korrigieren",
-                ),
-                html.Span(
-                    ""
-                    if service_ok
-                    else " TradingAgents-Service nicht erreichbar "
-                    "(TRADINGAGENTS_URL prüfen).",
-                    className="small text-warning ms-2",
-                ),
-            ],
-            className="mt-3",
-        )
+                _agent_section_head(f"Noch keine Analyse für {ticker}"),
+                _agent_start_state(ticker, service_ok, error),
+            ]
+        ),
+        True,
     )
-    return html.Div(children, className="ms-card p-3"), True
 
 
 def _start_agent_run(ticker: str, agents_ticker: str) -> tuple[bool, str]:

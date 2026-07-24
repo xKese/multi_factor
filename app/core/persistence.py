@@ -1007,6 +1007,7 @@ def list_agent_analyses(limit: int = 100) -> pd.DataFrame:
         "provider",
         "total_score",
         "classification",
+        "factor_context_json",
         "created_at",
     ]
     empty = pd.DataFrame(columns=cols)
