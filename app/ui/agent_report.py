@@ -12,7 +12,10 @@ Alle Farben/Abstände über die bestehenden ``--ms-*``-Tokens bzw. die
 
 from __future__ import annotations
 
+import os
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -20,6 +23,43 @@ from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from app.core import persistence
+
+
+def _display_tz() -> ZoneInfo:
+    """Anzeige-Zeitzone der App (Server laufen oft in UTC, z. B. Replit)."""
+    try:
+        return ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Berlin"))
+    except Exception:  # noqa: BLE001 — unbekannte Zone: UTC statt Crash
+        return ZoneInfo("UTC")
+
+
+def fmt_local_epoch(epoch, fmt: str = "%H:%M") -> str:
+    """Unix-Epoch (``time.time()``) → lokale Wandzeit; ``""`` bei Fehler."""
+    if epoch is None:
+        return ""
+    try:
+        return datetime.fromtimestamp(float(epoch), tz=_display_tz()).strftime(fmt)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
+def fmt_local_dt(value, fmt: str = "%d.%m.%Y %H:%M") -> str:
+    """DB-Zeitstempel → lokale Wandzeit.
+
+    Naive Werte werden als UTC interpretiert (SQLites ``CURRENT_TIMESTAMP``
+    schreibt UTC); aware Werte werden konvertiert. Unlesbare Werte kommen
+    als Rohtext zurück (fail-open im Render-Pfad).
+    """
+    if value is None:
+        return "–"
+    try:
+        ts = pd.to_datetime(value)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        return ts.tz_convert(_display_tz()).strftime(fmt)
+    except (ValueError, TypeError):
+        return str(value)
+
 
 # Reihenfolge, deutsche Titel und Agentenrollen der Report-Sektionen.
 REPORT_SECTIONS: tuple[tuple[str, str, str], ...] = (
@@ -234,12 +274,7 @@ def progress_checklist(job: dict) -> html.Div:
     phases = assign_phases(stats["agents"])
     ticker = job.get("agents_ticker") or job.get("ticker") or ""
     started = job.get("started_at")
-    started_label = ""
-    if started:
-        try:
-            started_label = pd.to_datetime(started, unit="s").strftime("%H:%M")
-        except (ValueError, TypeError, OverflowError):
-            started_label = ""
+    started_label = fmt_local_epoch(started)
 
     pct = (stats["done"] / stats["total"] * 100) if stats["total"] else 0
 
@@ -321,10 +356,7 @@ def compact_status_card(ticker: str, job: dict) -> html.Div:
     )
 
     started = job.get("started_at")
-    try:
-        started_label = pd.to_datetime(started, unit="s").strftime("%H:%M")
-    except (ValueError, TypeError, OverflowError):
-        started_label = ""
+    started_label = fmt_local_epoch(started)
 
     rows = [
         html.Div(

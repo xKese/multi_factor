@@ -33,7 +33,12 @@ from dash.exceptions import PreventUpdate
 
 from app.core import agents_client, persistence, ticker_mapping
 from app.core.state import STATE
-from app.ui.agent_report import compact_status_card, delta_quant, rating_badge
+from app.ui.agent_report import (
+    compact_status_card,
+    delta_quant,
+    fmt_local_dt,
+    rating_badge,
+)
 
 
 def layout(**_) -> html.Div:
@@ -415,10 +420,7 @@ def _history_table(df: pd.DataFrame) -> html.Div:
     rows = []
     for _, r in df.iterrows():
         created = r.get("created_at")
-        try:
-            created_label = pd.to_datetime(created).strftime("%d.%m.%Y %H:%M")
-        except (ValueError, TypeError):
-            created_label = str(created or "–")
+        created_label = fmt_local_dt(created)
 
         total = r.get("total_score")
         if total is not None and not pd.isna(total):

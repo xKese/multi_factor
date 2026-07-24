@@ -41,7 +41,7 @@ from app.ui import (
     fmt_market_cap,
     fmt_percent,
 )
-from app.ui.agent_report import progress_checklist, result_view
+from app.ui.agent_report import fmt_local_dt, progress_checklist, result_view
 
 
 # ── Score → Klassifikation (gespiegelt aus dashboard.py / data.js) ─────────
@@ -1046,10 +1046,7 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
 
     if analysis and not error:
         created = analysis.get("created_at")
-        try:
-            created_label = pd.to_datetime(created).strftime("%d.%m.%Y %H:%M")
-        except (ValueError, TypeError):
-            created_label = str(created or "–")
+        created_label = fmt_local_dt(created)
         meta: list = [
             "Analyse vom ",
             html.Strong(created_label, style={"color": "var(--ms-text)"}),

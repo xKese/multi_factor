@@ -196,6 +196,57 @@ def test_result_view_links_open_modal():
     assert "Details" not in view
 
 
+def test_fmt_local_epoch_converts_to_berlin_time():
+    """Regression: ``started_at`` (time.time()-Epoch) wurde als UTC-Wandzeit
+    angezeigt — auf dem Replit-Server (UTC) stand dort „12:45" statt 14:45."""
+    import calendar
+
+    # 24.07.2026 12:45 UTC → 14:45 in Europe/Berlin (CEST, UTC+2).
+    july = calendar.timegm((2026, 7, 24, 12, 45, 0))
+    assert ar.fmt_local_epoch(july) == "14:45"
+    # 15.01.2026 12:45 UTC → 13:45 (CET, UTC+1) — DST-Wechsel korrekt.
+    january = calendar.timegm((2026, 1, 15, 12, 45, 0))
+    assert ar.fmt_local_epoch(january) == "13:45"
+    # Fehlertolerant im Render-Pfad.
+    assert ar.fmt_local_epoch(None) == ""
+    assert ar.fmt_local_epoch("unfug") == ""
+
+
+def test_fmt_local_epoch_respects_app_timezone_env(monkeypatch):
+    import calendar
+
+    monkeypatch.setenv("APP_TIMEZONE", "UTC")
+    july = calendar.timegm((2026, 7, 24, 12, 45, 0))
+    assert ar.fmt_local_epoch(july) == "12:45"
+    # Unbekannte Zone fällt auf UTC zurück statt zu crashen.
+    monkeypatch.setenv("APP_TIMEZONE", "Nirgend/Wo")
+    assert ar.fmt_local_epoch(july) == "12:45"
+
+
+def test_fmt_local_dt_interprets_naive_as_utc():
+    """DB-Zeitstempel (SQLite ``CURRENT_TIMESTAMP`` = UTC-naiv) müssen in
+    lokaler Zeit angezeigt werden."""
+    assert ar.fmt_local_dt("2026-07-24 12:45:00") == "24.07.2026 14:45"
+    assert ar.fmt_local_dt("2026-01-15 12:45:00") == "15.01.2026 13:45"
+    # Aware Werte werden konvertiert, nicht doppelt verschoben.
+    assert ar.fmt_local_dt("2026-07-24 12:45:00+00:00") == "24.07.2026 14:45"
+    # Fail-open: None → Platzhalter, Unlesbares → Rohwert.
+    assert ar.fmt_local_dt(None) == "–"
+    assert ar.fmt_local_dt("kein datum") == "kein datum"
+
+
+def test_progress_checklist_shows_local_start_time():
+    import calendar
+
+    job = {
+        "agents_ticker": "SAP.DE",
+        "agents": ["Market Analyst"],
+        "agent_states": {},
+        "started_at": float(calendar.timegm((2026, 7, 24, 12, 45, 0))),
+    }
+    assert "gestartet 14:45" in str(ar.progress_checklist(job))
+
+
 def test_progress_checklist_renders_pipeline():
     job = {
         "agents_ticker": "SAP.DE",
