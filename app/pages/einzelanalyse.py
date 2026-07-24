@@ -106,6 +106,11 @@ def layout(ticker: str = "", **_) -> html.Div:
             dcc.Download(id="ea-pdf-download"),
             html.Div(id="ea-pdf-error", className="text-danger small mb-2"),
             html.Div(id="ea-content"),
+            # Statisch im Layout (nicht im ea-content-Callback-Baum): der
+            # Abschnitts-Callback feuert beim Seitenladen parallel zu _render —
+            # läge sein Ziel innerhalb von ea-content, ginge sein Output beim
+            # verlorenen Rennen verloren und der Abschnitt bliebe leer.
+            html.Div(id="ea-agent-section"),
             dcc.Interval(id="ea-agent-poll", interval=2500, disabled=True),
             _mapping_modal(),
         ]
@@ -879,7 +884,6 @@ def _render(ticker: str | None):
                 className="ms-dash-section",
             ),
             html.Div(id="ea-comparables"),
-            html.Div(id="ea-agent-section"),
         ]
     )
 
