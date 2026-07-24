@@ -482,7 +482,13 @@ def _run_job(
 
             for event, data in _iter_sse(resp):
                 if event == "run":
-                    _set_job(ticker, agents=list(data.get("agents") or []))
+                    # Der Service liefert agents als Liste von Dicts
+                    # ({team, name, status}); die Registry und alle Render-
+                    # Helfer arbeiten mit Namens-Strings (agent_states ist
+                    # ebenfalls nach Name verschlüsselt). Namen extrahieren.
+                    raw = data.get("agents") or []
+                    names = [a.get("name") if isinstance(a, dict) else a for a in raw]
+                    _set_job(ticker, agents=[n for n in names if n])
                 elif event == "status":
                     agent = data.get("agent")
                     status = data.get("status")

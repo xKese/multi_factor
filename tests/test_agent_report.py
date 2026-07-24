@@ -174,3 +174,39 @@ def test_progress_checklist_renders_pipeline():
     assert "Tiefenanalyse läuft · SAP.DE" in view
     assert "Bull Researcher arbeitet" in view
     assert "1 · Analysten" in view and "4 · Entscheidung" in view
+
+
+def test_render_helpers_tolerate_service_dict_agents():
+    """Regression: der ``run``-SSE-Event des Service liefert ``agents`` als
+    Liste von Dicts ({team, name, status}). Vor dem Fix warf jeder Render-Pfad
+    eines laufenden Jobs ``TypeError: unhashable type: 'dict'`` — Fortschritts-
+    und Statuskarte erschienen nie, die Tiefenanalyse schien „nicht zu starten".
+    """
+    job = {
+        "status": "running",
+        "stage": "Market Analyst (in_progress)",
+        "agents_ticker": "AAPL",
+        "started_at": 1_753_300_000.0,
+        "agents": [
+            {"team": "Analyst Team", "name": "Market Analyst", "status": "completed"},
+            {"team": "Analyst Team", "name": "Sentiment Analyst", "status": "pending"},
+            {"team": "Research Team", "name": "Bull Researcher", "status": "pending"},
+            {"team": "Portfolio Management", "name": "Portfolio Manager", "status": "pending"},
+        ],
+        "agent_states": {
+            "Market Analyst": "completed",
+            "Sentiment Analyst": "in_progress",
+        },
+    }
+
+    stats = ar.progress_stats(job)
+    assert stats["agents"] == [
+        "Market Analyst", "Sentiment Analyst", "Bull Researcher", "Portfolio Manager"
+    ]
+    assert stats["total"] == 4
+    assert stats["done"] == 1
+    assert stats["active"] == "Sentiment Analyst"
+
+    # Beide Render-Pfade laufender Jobs dürfen nicht mehr crashen.
+    assert "ms-agent-pipe" in str(ar.progress_checklist(job))
+    assert "Laufend · AAPL" in str(ar.compact_status_card("AAPL", job))

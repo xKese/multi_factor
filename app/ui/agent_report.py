@@ -76,6 +76,18 @@ def rating_badge(rating: str | None, label: str | None = "Agenten-Rating") -> ht
 
 # ── Phasen-Zuordnung & Fortschritt ─────────────────────────────────────────
 
+def _agent_name(agent) -> str:
+    """Namens-String eines Agenten-Eintrags.
+
+    Der Service liefert Agenten teils als Dict ({team, name, status}), teils
+    als reinen Namen — hier auf den Namen normalisieren, damit kein Dict in
+    die (nach Name verschlüsselten) State-Lookups gerät.
+    """
+    if isinstance(agent, dict):
+        return agent.get("name") or ""
+    return agent or ""
+
+
 def phase_of(agent_name: str) -> int:
     """Ordnet einen Agentennamen einer der vier Pipeline-Phasen (0–3) zu.
 
@@ -83,7 +95,7 @@ def phase_of(agent_name: str) -> int:
     bleibt erhalten. Risky/Safe/Neutral vor dem generischen "Analyst"-Match
     prüfen — sie heißen beim Service ebenfalls "… Analyst".
     """
-    n = (agent_name or "").lower()
+    n = _agent_name(agent_name).lower()
     if "portfolio" in n:
         return 3
     if "trader" in n or "risky" in n or "safe" in n or "neutral" in n:
@@ -103,7 +115,7 @@ def assign_phases(agents: list[str]) -> list[list[str]]:
 
 def progress_stats(job: dict) -> dict:
     """Fortschrittskennzahlen eines laufenden Jobs (rein präsentational)."""
-    agents = list(job.get("agents") or [])
+    agents = [_agent_name(a) for a in (job.get("agents") or [])]
     states = job.get("agent_states") or {}
     done = sum(1 for a in agents if states.get(a) == "completed")
     total = len(agents)
