@@ -147,6 +147,18 @@ def test_shifted_key_bounds():
     assert ar._shifted_key({}, "x", 1) == "x"
 
 
+def test_flip_step_requires_real_click():
+    """Regression: Insertion-Fire der frisch gerenderten Nav-Buttons (n_clicks
+    0/None) darf NICHT blättern — sonst öffnet „Vollständig lesen" immer den
+    vorherigen Bericht (Bear-These → Bull-These)."""
+    assert ar._flip_step("ms-agent-read-prev", 0, 0) is None
+    assert ar._flip_step("ms-agent-read-prev", None, None) is None
+    assert ar._flip_step("ms-agent-read-next", 0, None) is None
+    assert ar._flip_step("ms-agent-read-prev", 1, 0) == -1
+    assert ar._flip_step("ms-agent-read-next", 0, 2) == 1
+    assert ar._flip_step("irgendwas", 1, 1) is None
+
+
 def test_result_view_links_open_modal():
     analysis = {
         "ticker": "SAP",

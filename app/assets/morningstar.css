@@ -3200,7 +3200,42 @@ hr { border-color: var(--ms-border); opacity: 1; }
   margin: 0 0 14px;
   padding-left: 20px;
 }
-.ms-agent-modal-body table { font-size: 12px; }
+/* Markdown-Tabellen: Farben explizit über Tokens — ohne dies erben sie
+   Bootstraps (fast schwarze) Body-Farbe, die nicht mit dem Theme flippt. */
+.ms-agent-modal-body table {
+  font-size: 12px;
+  color: var(--ms-text);
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 14px;
+}
+.ms-agent-modal-body th,
+.ms-agent-modal-body td {
+  padding: 6px 10px;
+  border: 1px solid var(--ms-border);
+  color: var(--ms-text);
+  text-align: left;
+}
+.ms-agent-modal-body th {
+  background: var(--ms-surface-alt);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+}
+/* Gleiche Absicherung für Berichte außerhalb des Modals. */
+.ms-agent-report,
+.ms-agent-report table,
+.ms-agent-report th,
+.ms-agent-report td {
+  color: var(--ms-text);
+}
+.ms-agent-report th,
+.ms-agent-report td {
+  padding: 4px 8px;
+  border: 1px solid var(--ms-border);
+}
 .ms-agent-modal-foot {
   display: flex;
   align-items: center;

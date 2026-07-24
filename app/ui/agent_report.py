@@ -687,13 +687,31 @@ def _open_read_modal(n_clicks_list):
     State("ms-agent-read-store", "data"),
     prevent_initial_call=True,
 )
+def _flip_step(trigger, prev_clicks, next_clicks) -> int | None:
+    """Blätter-Richtung eines Nav-Triggers — ``None`` ohne echten Klick.
+
+    Dash feuert Callbacks auch, wenn ihre Input-Komponenten neu ins DOM
+    eingefügt werden (``prevent_initial_call`` greift nur beim Seitenladen).
+    Beim Öffnen des Modals werden die Nav-Buttons frisch gerendert — ohne
+    diesen Klick-Guard blätterte das sofort eine Sektion zurück und jeder
+    „Vollständig lesen“-Klick landete beim VORHERIGEN Bericht.
+    """
+    if trigger == "ms-agent-read-prev":
+        return -1 if prev_clicks else None
+    if trigger == "ms-agent-read-next":
+        return 1 if next_clicks else None
+    return None
+
+
 def _flip_read_modal(_prev, _next, data):
+    step = _flip_step(ctx.triggered_id, _prev, _next)
+    if step is None:
+        raise PreventUpdate
     if not data or not data.get("ticker"):
         raise PreventUpdate
     analysis = persistence.load_agent_analysis(data["ticker"])
     if not analysis:
         raise PreventUpdate
-    step = -1 if ctx.triggered_id == "ms-agent-read-prev" else 1
     new_key = _shifted_key(analysis.get("reports"), data.get("key"), step)
     head, body, foot = _read_modal_content(analysis, new_key)
     return {"ticker": data["ticker"], "key": new_key}, head, body, foot
