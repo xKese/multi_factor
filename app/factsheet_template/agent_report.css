@@ -1,0 +1,572 @@
+/* Print-Stylesheet der Agenten-Berichte (Design-Handoff #5a/#5b).
+   A4 hochkant, Farben als Literale (keine CSS-Variablen — die Werte
+   entsprechen exakt den --ms-*-Tokens der App). Liegt bewusst NICHT in
+   app/assets/ — Dash würde @page-Regeln in alle App-Seiten injizieren. */
+
+@font-face {
+  font-family: "Inter";
+  font-weight: 400;
+  font-style: normal;
+  src: local("Inter Regular"), local("Inter"),
+       url("fonts/Inter-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 500;
+  font-style: normal;
+  src: local("Inter Medium"),
+       url("fonts/Inter-Medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 600;
+  font-style: normal;
+  src: local("Inter SemiBold"),
+       url("fonts/Inter-SemiBold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 700;
+  font-style: normal;
+  src: local("Inter Bold"),
+       url("fonts/Inter-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-weight: 500;
+  font-style: normal;
+  src: local("Cormorant Garamond Medium"),
+       url("fonts/CormorantGaramond-Medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-weight: 500;
+  font-style: italic;
+  src: local("Cormorant Garamond Medium Italic"),
+       url("fonts/CormorantGaramond-MediumItalic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-weight: 400;
+  font-style: italic;
+  src: local("Cormorant Garamond Italic"),
+       url("fonts/CormorantGaramond-Italic.ttf") format("truetype");
+}
+
+/* ── Seitengeometrie ─────────────────────────────────────────────────── */
+/* A4 in px @96dpi wie editorial.css; Kopf- und Fußzone als Margin-Boxen. */
+
+@page {
+  size: 794px 1123px;
+  margin: 60px 0 64px;
+  @top-center { content: element(kolhead); }
+  @bottom-center { content: element(pagefoot); }
+}
+/* Seite 1 des Einzelberichts: Grünband im Fluss, kein Kolumnentitel. */
+@page :first {
+  margin-top: 0;
+  @top-center { content: none; }
+}
+/* Deckblatt des Sammelreports: randlos, ohne Fußzeile — zählt als S. 1. */
+@page cover {
+  margin: 0;
+  @top-center { content: none; }
+  @bottom-center { content: none; }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #FFFFFF;
+  font-family: "Inter", "DejaVu Sans", sans-serif;
+  color: #1A1A19;
+}
+
+/* ── Wiederkehrender Kolumnentitel & Fußzeile ────────────────────────── */
+
+/* Kein Flex in running elements — WeasyPrint lässt dort Flex-Items mit
+   ::after-Countern (und rechte Flex-Enden) fallen; Float ist zuverlässig.
+   Die Rechts-Elemente stehen im Markup VOR den Links-Elementen. */
+.kolhead {
+  position: running(kolhead);
+  width: 794px;
+  padding: 26px 56px 12px;
+  border-bottom: 1px solid #E2DED4;
+}
+.kolhead-left {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8A8A85;
+}
+.kolhead-brand {
+  float: right;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #A37F2F;
+}
+
+.pagefoot {
+  position: running(pagefoot);
+  width: 794px;
+  padding: 14px 56px 0;
+  border-top: 1px solid #E2DED4;
+}
+.foot-note {
+  display: block;
+  font-size: 8px;
+  color: #8A8A85;
+  line-height: 1.6;
+  max-width: 70ch;
+}
+.pageno {
+  float: right;
+  font-size: 9px;
+  color: #8A8A85;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pageno::after { content: counter(page) " / " counter(pages); }
+
+/* ── Kopfband (Seite 1 eines Dokuments) ──────────────────────────────── */
+
+.band {
+  background: #1F3A2A;
+  color: #F6F2EA;
+  padding: 22px 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.band-wordmark {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.band-doctype {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #C9A24B;
+}
+
+/* ── Gemeinsame Text-Bausteine ───────────────────────────────────────── */
+
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #A37F2F;
+  font-weight: 600;
+}
+.doc-title {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 34px;
+  font-weight: 500;
+  color: #1F3A2A;
+  line-height: 1.1;
+  margin: 8px 0 0;
+}
+.meta {
+  font-size: 10px;
+  color: #6E6E68;
+  margin-top: 6px;
+  letter-spacing: 0.04em;
+}
+.goldrule {
+  height: 2px;
+  background: #A37F2F;
+  width: 56px;
+  margin: 20px 0 22px;
+}
+.goldrule--sm { width: 48px; margin: 18px 0 20px; }
+.lead {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-style: italic;
+  font-size: 15px;
+  color: #1F3A2A;
+  line-height: 1.6;
+  margin: 0 0 20px;
+}
+
+/* Markdown-Fließtext. Alle Markdown-Überschriften (h1–h6) einheitlich als
+   Eyebrow — dieselbe Vereinheitlichung, die das Lese-Modal per CSS macht. */
+.report-body p {
+  font-size: 11px;
+  color: #1A1A19;
+  line-height: 1.75;
+  margin: 0 0 16px;
+  max-width: 72ch;
+}
+.report-body h1, .report-body h2, .report-body h3,
+.report-body h4, .report-body h5, .report-body h6 {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #1F3A2A;
+  margin: 18px 0 8px;
+}
+.report-body ul, .report-body ol {
+  font-size: 11px;
+  line-height: 1.75;
+  margin: 0 0 16px;
+  padding-left: 18px;
+  max-width: 70ch;
+}
+.report-body li { margin-bottom: 4px; }
+.report-body table {
+  border-collapse: collapse;
+  font-size: 10px;
+  margin: 0 0 16px;
+}
+.report-body th, .report-body td {
+  border: 1px solid #E2DED4;
+  padding: 4px 8px;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.report-body th { font-weight: 600; color: #1F3A2A; }
+.report-body blockquote {
+  margin: 0 0 16px;
+  padding-left: 12px;
+  border-left: 2px solid #E2DED4;
+  color: #6E6E68;
+}
+.report-body code {
+  font-size: 10px;
+  background: #F6F2EA;
+  padding: 1px 3px;
+}
+.report-body hr {
+  border: none;
+  border-top: 1px solid #E2DED4;
+  margin: 16px 0;
+}
+
+/* ── Kennzahlen-Seitenspalte ─────────────────────────────────────────── */
+/* Rechts gefloatete Box fester Höhe: der Fließtext umfließt sie auf der
+   ersten Seite eines Berichts und läuft auf Folgeseiten volle Breite. */
+
+.side {
+  float: right;
+  width: 232px;
+  height: 990px; /* S.1 Einzelbericht: 1123 − 66 Band − 64 Fuß − Reserve */
+  background: #F6F2EA;
+  border-left: 1px solid #E2DED4;
+  padding: 38px 28px 28px;
+  margin-left: 32px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.side--full {
+  width: 202px;
+  height: 985px; /* 1123 − 60 Kopf − 64 Fuß − Reserve */
+  padding: 32px 22px 24px;
+  margin-left: 28px;
+  gap: 18px;
+}
+.sb-sep { height: 1px; background: #E2DED4; flex-shrink: 0; }
+.sb-label {
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8A8A85;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.sb-big {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+  color: #1F3A2A;
+}
+.sb-big.is-up { color: #2F7A3A; }
+.sb-big.is-warn { color: #A37F2F; }
+.sb-big.is-down { color: #B23A2E; }
+.sb-note { font-size: 9px; color: #6E6E68; margin-top: 5px; line-height: 1.5; }
+.sb-class {
+  font-size: 9px;
+  color: #A37F2F;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+.sb-rows { display: flex; flex-direction: column; gap: 7px; }
+.sb-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+}
+.sb-row-label { color: #6E6E68; }
+.sb-row-value {
+  color: #1A1A19;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.sb-row-value.is-pos { color: #2F7A3A; }
+.sb-row-value.is-neg { color: #B23A2E; }
+.sb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 10px;
+  color: #6E6E68;
+  line-height: 1.4;
+}
+.sb-list .is-active { color: #1A1A19; font-weight: 600; }
+.sb-takeaway { font-size: 10px; color: #1A1A19; line-height: 1.6; }
+
+/* Abgleich-Chip (Tonalität wie der Verdict-Chip in der App). */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 4px 8px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.chip-icon { font-weight: 700; font-size: 10px; }
+.chip.is-up { background: #E6F0E4; border: 1px solid #2F7A3A; color: #2F7A3A; }
+.chip.is-warn { background: #F1E6CC; border: 1px solid #A37F2F; color: #A37F2F; }
+.chip.is-down { background: #F5E3E0; border: 1px solid #B23A2E; color: #B23A2E; }
+
+/* ── Einzelbericht (#5a) ─────────────────────────────────────────────── */
+
+.main { padding: 38px 56px 28px; }
+
+/* ── Sammelreport (#5b) — Deckblatt ──────────────────────────────────── */
+
+.cover {
+  page: cover;
+  height: 1123px;
+  background: #1F3A2A;
+  color: #F6F2EA;
+  padding: 72px;
+  display: flex;
+  flex-direction: column;
+}
+.cover-wordmark {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.cover-sub {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(246, 242, 234, 0.6);
+  margin-top: 4px;
+}
+.cover-mid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.cover-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #C9A24B;
+  font-weight: 600;
+  margin-bottom: 18px;
+}
+.cover-name {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 64px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+.cover-ticker {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 28px;
+  font-weight: 400;
+  font-style: italic;
+  color: rgba(246, 242, 234, 0.72);
+  margin-top: 10px;
+}
+.cover-rule {
+  height: 2px;
+  background: #C9A24B;
+  width: 88px;
+  margin: 36px 0;
+}
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 200px);
+  gap: 28px 48px;
+}
+.cover-label {
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(246, 242, 234, 0.55);
+}
+.cover-value {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 26px;
+  font-weight: 500;
+  color: #F6F2EA;
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.cover-value--sans {
+  font-family: "Inter", "DejaVu Sans", sans-serif;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.cover-note {
+  font-size: 8px;
+  color: rgba(246, 242, 234, 0.5);
+  line-height: 1.7;
+  max-width: 68ch;
+}
+
+/* ── Sammelreport — Überblick (Seite 2) ──────────────────────────────── */
+
+.overview {
+  break-before: page;
+  padding: 34px 56px 0;
+}
+.ov-title {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 30px;
+  font-weight: 500;
+  color: #1F3A2A;
+  line-height: 1.1;
+  margin: 8px 0 0;
+}
+.verdict {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  border: 1px solid #E2DED4;
+  margin-top: 20px;
+}
+.verdict-quote {
+  padding: 20px 22px;
+  border-left: 3px solid #A37F2F;
+}
+.verdict-quote p {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-style: italic;
+  font-size: 15px;
+  color: #1F3A2A;
+  line-height: 1.6;
+  margin: 0;
+}
+.verdict-side {
+  background: #F6F2EA;
+  border-left: 1px solid #E2DED4;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.verdict-side .sb-big { font-size: 24px; line-height: 1.1; }
+.verdict-side .chip { margin-top: 0; align-self: flex-start; }
+
+.ov-heading {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #1F3A2A;
+  margin: 28px 0 10px;
+}
+.toc { border-top: 1px solid #E2DED4; }
+.toc-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 40px;
+  gap: 16px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid #E2DED4;
+}
+.toc-title { font-size: 11px; font-weight: 600; color: #1F3A2A; }
+.toc-desc { font-size: 10px; color: #6E6E68; line-height: 1.5; }
+.toc-page {
+  font-size: 10px;
+  color: #8A8A85;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+.toc-page::after { content: target-counter(attr(href), page); }
+
+.ov-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid #E2DED4;
+}
+.ov-cell {
+  padding: 12px 14px;
+  border-right: 1px solid #E2DED4;
+  border-top: 1px solid #E2DED4;
+}
+.ov-cell:nth-child(3n) { border-right: none; }
+.ov-cell:nth-child(-n+3) { border-top: none; }
+.ov-cell-label {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8A8A85;
+}
+.ov-cell-value {
+  font-size: 15px;
+  color: #1A1A19;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+}
+.ov-cell-value.is-pos { color: #2F7A3A; }
+.ov-cell-value.is-neg { color: #B23A2E; }
+
+/* ── Sammelreport — Berichtsseiten (ab Seite 3) ──────────────────────── */
+
+.report-section {
+  break-before: page;
+  padding: 32px 0 0 56px;
+}
+.sec-headrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.sec-num {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 26px;
+  font-weight: 500;
+  color: #A37F2F;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.sec-title {
+  font-family: "Cormorant Garamond", "DejaVu Serif", serif;
+  font-size: 28px;
+  font-weight: 500;
+  color: #1F3A2A;
+  line-height: 1.15;
+  margin: 0;
+}
+.report-section .meta { margin-top: 5px; }
+.report-section .report-body { padding-right: 56px; }
+.main .report-body { padding-right: 0; }

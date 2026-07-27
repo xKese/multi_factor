@@ -3155,6 +3155,13 @@ hr { border-color: var(--ms-border); opacity: 1; }
   color: var(--ms-green-deep);
   line-height: 1.1;
 }
+.ms-agent-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ms-agent-modal-pdf-error { padding: 0 28px 12px; }
 .ms-agent-modal-close {
   background: transparent;
   border: 1px solid var(--ms-border);
@@ -3378,6 +3385,46 @@ hr { border-color: var(--ms-border); opacity: 1; }
   text-transform: uppercase;
   color: var(--ms-gold);
 }
+/* Button-Reset in Histlink-Optik — PDF-Export je Verlaufszeile */
+.ms-agent-histlink-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ms-agent-histactions {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Gold-Outline-Button (sekundär) — PDF-Export (Design-Handoff #5c) */
+.ms-btn-goldline {
+  background: transparent;
+  color: var(--ms-gold);
+  border: 1px solid var(--ms-gold);
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ms-btn-goldline:hover { background: var(--ms-gold-soft); }
+.ms-btn-goldline:disabled { opacity: 0.6; cursor: default; }
+.ms-btn-goldline--compact { padding: 0 12px; height: 32px; }
+
+/* Fehlerzeile unter PDF-Export-Auslösern */
+.ms-agent-pdf-error {
+  font-size: 11px;
+  color: var(--ms-down);
+  line-height: 1.5;
+}
+.ms-agent-pdf-error:empty { display: none; }
 
 /* Schmalere Viewports: Panels stapeln */
 @media (max-width: 1024px) {

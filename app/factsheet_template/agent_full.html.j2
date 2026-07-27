@@ -1,0 +1,133 @@
+{% import "agent_base.html.j2" as base %}<!DOCTYPE html>
+<html lang="de">
+{{ base.head(pdf_title, author) }}
+<body>
+{{ base.running(kolhead_left, disclaimer) }}
+
+{# ── Seite 1 — Deckblatt (randlos, ohne Fußzeile, zählt als Seite 1) ── #}
+<section class="cover">
+  <div>
+    <div class="cover-wordmark">Meeder &amp; Seifer</div>
+    <div class="cover-sub">Family Office · Frankfurt am Main</div>
+  </div>
+  <div class="cover-mid">
+    <div class="cover-eyebrow">Agenten-Tiefenanalyse · Gesamtbericht</div>
+    <div class="cover-name">{{ company }}</div>
+    {% if ticker and ticker != company %}<div class="cover-ticker">{{ ticker }}</div>{% endif %}
+    <div class="cover-rule"></div>
+    <div class="cover-grid">
+      {% if rating %}
+      <div>
+        <div class="cover-label">Agenten-Rating</div>
+        <div class="cover-value">{{ rating.value }}</div>
+      </div>
+      {% endif %}
+      {% if quant %}
+      <div>
+        <div class="cover-label">Quant-Score</div>
+        <div class="cover-value">{{ quant.cover_line }}</div>
+      </div>
+      {% endif %}
+      <div>
+        <div class="cover-label">Umfang</div>
+        <div class="cover-value cover-value--sans">{{ scope_line }}</div>
+      </div>
+      <div>
+        <div class="cover-label">Stand</div>
+        <div class="cover-value cover-value--sans">{{ date_long }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="cover-note">{{ confidentiality }}</div>
+</section>
+
+{# ── Seite 2 — Überblick ─────────────────────────────────────────────── #}
+<section class="overview">
+  <div class="eyebrow">Überblick</div>
+  <h1 class="ov-title">Ergebnis der Tiefenanalyse</h1>
+
+  <div class="verdict">
+    <div class="verdict-quote">
+      <p>„{{ summary }}“</p>
+    </div>
+    <div class="verdict-side">
+      {% if rating %}
+      <div>
+        <div class="sb-label">Agenten</div>
+        <div class="sb-big is-{{ rating.tone }}">{{ rating.value }}</div>
+      </div>
+      {% endif %}
+      {% if quant %}
+      <div>
+        <div class="sb-label">Quant</div>
+        <div class="sb-big">{{ quant.score }}</div>
+        {% if quant.class_line %}<div class="sb-class">{{ quant.class_line }}</div>{% endif %}
+      </div>
+      {% endif %}
+      {{ base.chip(delta) }}
+    </div>
+  </div>
+
+  <div class="ov-heading">Inhalt</div>
+  <div class="toc">
+    {% for sec in sections %}
+    <div class="toc-row">
+      <span class="toc-title">{{ sec.title }}</span>
+      <span class="toc-desc">{{ sec.takeaway }}{% if sec.takeaway %} · {% endif %}{{ sec.role }}</span>
+      <a class="toc-page" href="#sec-{{ sec.key }}"></a>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if overview_metrics %}
+  <div class="ov-heading">Kennzahlen im Überblick</div>
+  <div class="ov-grid">
+    {% for m in overview_metrics %}
+    <div class="ov-cell">
+      <div class="ov-cell-label">{{ m.label }}</div>
+      <div class="ov-cell-value{% if m.tone %} is-{{ m.tone }}{% endif %}">{{ m.value }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+{# ── Ab Seite 3 — je Bericht eine neue Seite ─────────────────────────── #}
+{% for sec in sections %}
+<section class="report-section" id="sec-{{ sec.key }}">
+  <aside class="side side--full">
+    {% if sec.takeaway %}
+    <div>
+      <div class="sb-label">Kernaussage</div>
+      <div class="sb-takeaway">{{ sec.takeaway }}</div>
+    </div>
+    {% endif %}
+    {% if sec.metrics %}
+    {% if sec.takeaway %}<div class="sb-sep"></div>{% endif %}
+    <div>
+      <div class="sb-label">Kennzahlen</div>
+      {{ base.metric_rows(sec.metrics) }}
+    </div>
+    {% endif %}
+    {% if sec.takeaway or sec.metrics %}<div class="sb-sep"></div>{% endif %}
+    <div>
+      <div class="sb-label">Berichte</div>
+      <div class="sb-list">
+        {% for r in report_index %}
+        <div{% if r.num == sec.num %} class="is-active"{% endif %}>{{ r.num }} {{ r.title }}</div>
+        {% endfor %}
+      </div>
+    </div>
+  </aside>
+  <div class="sec-headrow">
+    <span class="sec-num">{{ sec.num }}</span>
+    <span class="eyebrow">{{ sec.title }}</span>
+  </div>
+  {% if sec.takeaway %}<h2 class="sec-title">{{ sec.takeaway }}</h2>{% endif %}
+  <div class="meta">{{ sec.role }}</div>
+  <div class="goldrule goldrule--sm"></div>
+  <div class="report-body">{{ sec.body_html }}</div>
+</section>
+{% endfor %}
+</body>
+</html>

@@ -5,6 +5,14 @@ Der PDF-Export der Einzelanalyse rendert mit folgenden Schriftarten:
 - **Inter** (sans-serif body)
 - **Source Serif 4** (serif display + italic these)
 
+Der PDF-Export der Agenten-Berichte (`agent_report.css`) nutzt zusätzlich:
+
+- **Cormorant Garamond** (Titel, Ratings, Serif-Kursiv-Leads) —
+  `CormorantGaramond-Medium.ttf` (500), `CormorantGaramond-MediumItalic.ttf`
+  (500 italic), `CormorantGaramond-Italic.ttf` (400 italic).
+  Quelle: Google Fonts (<https://fonts.google.com/specimen/Cormorant+Garamond>),
+  SIL Open Font License (OFL).
+
 Beide sind nicht im Repo gebündelt (Lizenz/Größe). Solange sie fehlen, fällt
 WeasyPrint auf System-Fonts zurück (`DejaVu Sans` / `DejaVu Serif`). Das
 Layout bleibt identisch, die Typografie weicht jedoch leicht ab.

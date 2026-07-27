@@ -105,12 +105,16 @@ def layout(ticker: str = "", **_) -> html.Div:
             ),
             dcc.Download(id="ea-pdf-download"),
             html.Div(id="ea-pdf-error", className="text-danger small mb-2"),
+            # Sammelreport der Agenten-Tiefenanalyse — statisch, damit die
+            # Outputs die Re-Renders von ea-agent-section überleben.
+            dcc.Download(id="ea-agent-pdf-download"),
             html.Div(id="ea-content"),
             # Statisch im Layout (nicht im ea-content-Callback-Baum): der
             # Abschnitts-Callback feuert beim Seitenladen parallel zu _render —
             # läge sein Ziel innerhalb von ea-content, ginge sein Output beim
             # verlorenen Rennen verloren und der Abschnitt bliebe leer.
             html.Div(id="ea-agent-section"),
+            html.Div(id="ea-agent-pdf-error", className="ms-agent-pdf-error"),
             dcc.Interval(id="ea-agent-poll", interval=2500, disabled=True),
             _mapping_modal(),
         ]
@@ -1053,8 +1057,17 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
         ]
         if analysis.get("provider"):
             meta.append(f" · {analysis['provider']}")
+        meta.append(
+            html.Button(
+                "Alle Berichte als PDF",
+                id="ea-agent-pdf-all",
+                n_clicks=0,
+                className="ms-btn-goldline",
+                style={"margin": "0 14px"},
+                title="Sammelreport aller Agenten-Berichte als PDF",
+            )
+        )
         if service_ok:
-            meta.append(" · ")
             meta.append(
                 html.A(
                     "Neu analysieren",
@@ -1292,6 +1305,47 @@ def _export_factsheet_pdf(n_clicks: int | None, ticker: str | None):
         return no_update, str(exc)
 
     filename = f"factsheet_{ticker}_{date.today():%Y%m%d}.pdf"
+    return (
+        dcc.send_bytes(lambda buf: buf.write(pdf_bytes), filename=filename),
+        "",
+    )
+
+
+@callback(
+    Output("ea-agent-pdf-download", "data"),
+    Output("ea-agent-pdf-error", "children"),
+    Input("ea-agent-pdf-all", "n_clicks"),
+    State("ea-ticker", "value"),
+    running=[
+        (Output("ea-agent-pdf-all", "disabled"), True, False),
+        (
+            Output("ea-agent-pdf-all", "children"),
+            "Wird erstellt …",
+            "Alle Berichte als PDF",
+        ),
+    ],
+    prevent_initial_call=True,
+)
+def _export_agent_full_pdf(n_clicks: int | None, ticker: str | None):
+    """Sammelreport „Alle Berichte" der Agenten-Tiefenanalyse als PDF."""
+    # Re-Mount-Guard: die Agenten-Section wird bei Poll/Tickerwechsel neu
+    # gerendert — der Button feuert dann mit n_clicks=0.
+    if not n_clicks or not ticker:
+        raise PreventUpdate
+    analysis = persistence.load_agent_analysis(ticker)
+    if not analysis:
+        return no_update, "Keine gespeicherte Analyse gefunden."
+
+    try:
+        from app.core.pdf_export import FactsheetRenderError, render_full_pdf
+    except Exception as exc:  # pragma: no cover — import-time issues
+        return no_update, f"PDF-Modul nicht verfügbar: {exc!s}"
+
+    try:
+        pdf_bytes, filename = render_full_pdf(analysis, STATE.scored)
+    except (FactsheetRenderError, ValueError) as exc:
+        return no_update, str(exc)
+
     return (
         dcc.send_bytes(lambda buf: buf.write(pdf_bytes), filename=filename),
         "",

@@ -139,6 +139,10 @@ def layout(**_) -> html.Div:
                 className="ms-dash-section",
             ),
             html.Div(id="aa-history"),
+            # Sammelreport-Export aus der Verlaufstabelle — statisch, damit
+            # die Outputs die Tabellen-Re-Renders überleben.
+            dcc.Download(id="aa-pdf-download"),
+            html.Div(id="aa-pdf-error", className="ms-agent-pdf-error mt-2"),
         ]
     )
 
@@ -457,13 +461,30 @@ def _history_table(df: pd.DataFrame) -> html.Div:
                     html.Td("Ja" if in_uni else "Ad-hoc", className="ms-tt-muted"),
                     html.Td(created_label, className="is-num ms-tt-muted"),
                     html.Td(
-                        html.A(
-                            "Einzelanalyse ›",
-                            href=f"/einzelanalyse?ticker={ticker}",
-                            className="ms-agent-histlink",
-                        )
-                        if in_uni
-                        else "",
+                        html.Div(
+                            [
+                                html.A(
+                                    "Einzelanalyse ›",
+                                    href=f"/einzelanalyse?ticker={ticker}",
+                                    className="ms-agent-histlink",
+                                )
+                                if in_uni
+                                else None,
+                                # Sammelreport auch für Ad-hoc-Titel — das
+                                # PDF degradiert ohne Quant-Kontext von
+                                # selbst (keine Score-Blöcke, kein Chip).
+                                html.Button(
+                                    "PDF ›",
+                                    id={"type": "aa-hist-pdf", "ticker": ticker},
+                                    n_clicks=0,
+                                    className=(
+                                        "ms-agent-histlink ms-agent-histlink-btn"
+                                    ),
+                                    title="Alle Berichte als PDF",
+                                ),
+                            ],
+                            className="ms-agent-histactions",
+                        ),
                     ),
                 ]
             )
@@ -506,6 +527,40 @@ def _history(_fp):
     df = persistence.list_agent_analyses()
     count = f"{len(df)} Analysen" if len(df) != 1 else "1 Analyse"
     return _history_table(df), count
+
+
+@callback(
+    Output("aa-pdf-download", "data"),
+    Output("aa-pdf-error", "children"),
+    Input({"type": "aa-hist-pdf", "ticker": ALL}, "n_clicks"),
+    prevent_initial_call=True,
+)
+def _export_history_pdf(n_clicks_list):
+    """Sammelreport „Alle Berichte" aus einer Verlaufszeile als PDF."""
+    trigger = callback_context.triggered_id
+    # Re-Mount-Guard: die Tabelle wird bei jedem Job-Fingerprint neu
+    # gerendert — die Buttons feuern dann mit n_clicks=0.
+    if not trigger or not any(n_clicks_list or []):
+        raise PreventUpdate
+    ticker = trigger.get("ticker")
+    analysis = persistence.load_agent_analysis(ticker) if ticker else None
+    if not analysis:
+        return no_update, f"Keine gespeicherte Analyse für {ticker} gefunden."
+
+    try:
+        from app.core.pdf_export import FactsheetRenderError, render_full_pdf
+    except Exception as exc:  # pragma: no cover — import-time issues
+        return no_update, f"PDF-Modul nicht verfügbar: {exc!s}"
+
+    try:
+        pdf_bytes, filename = render_full_pdf(analysis, STATE.scored)
+    except (FactsheetRenderError, ValueError) as exc:
+        return no_update, str(exc)
+
+    return (
+        dcc.send_bytes(lambda buf: buf.write(pdf_bytes), filename=filename),
+        "",
+    )
 
 
 register_page(__name__, path="/agenten-analyse", name="Agenten-Analyse", layout=layout)

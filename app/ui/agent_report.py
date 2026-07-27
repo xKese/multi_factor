@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html
+from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from app.core import persistence
@@ -585,11 +585,16 @@ def read_modal() -> html.Div:
     return html.Div(
         [
             dcc.Store(id="ms-agent-read-store"),
+            dcc.Download(id="ms-agent-read-pdf-download"),
             dbc.Modal(
                 [
                     html.Div(id="ms-agent-read-head"),
                     html.Div(id="ms-agent-read-body", className="ms-agent-modal-scroll"),
                     html.Div(id="ms-agent-read-foot"),
+                    html.Div(
+                        id="ms-agent-read-pdf-error",
+                        className="ms-agent-pdf-error ms-agent-modal-pdf-error",
+                    ),
                 ],
                 id="ms-agent-read-modal",
                 is_open=False,
@@ -625,12 +630,24 @@ def _read_modal_content(analysis: dict, key: str):
                     html.Div(title, className="ms-agent-modal-title"),
                 ]
             ),
-            html.Button(
-                "×",
-                id="ms-agent-read-close",
-                n_clicks=0,
-                className="ms-agent-modal-close",
-                title="Schließen (Esc)",
+            html.Div(
+                [
+                    html.Button(
+                        "Als PDF",
+                        id="ms-agent-read-pdf",
+                        n_clicks=0,
+                        className="ms-btn-goldline ms-btn-goldline--compact",
+                        title="Diesen Bericht als PDF exportieren",
+                    ),
+                    html.Button(
+                        "×",
+                        id="ms-agent-read-close",
+                        n_clicks=0,
+                        className="ms-agent-modal-close",
+                        title="Schließen (Esc)",
+                    ),
+                ],
+                className="ms-agent-modal-actions",
             ),
         ],
         className="ms-agent-modal-head",
@@ -758,3 +775,41 @@ def _close_read_modal(n_clicks):
     if not n_clicks:
         raise PreventUpdate
     return False
+
+
+@callback(
+    Output("ms-agent-read-pdf-download", "data"),
+    Output("ms-agent-read-pdf-error", "children"),
+    Input("ms-agent-read-pdf", "n_clicks"),
+    State("ms-agent-read-store", "data"),
+    running=[
+        (Output("ms-agent-read-pdf", "disabled"), True, False),
+        (Output("ms-agent-read-pdf", "children"), "Wird erstellt …", "Als PDF"),
+    ],
+    prevent_initial_call=True,
+)
+def _export_read_modal_pdf(n_clicks, data):
+    # Klick-Guard wie bei den Nav-Buttons: der Modal-Kopf wird bei jedem
+    # Öffnen/Blättern neu gemountet, der Phantom-Fire kommt mit n_clicks=0.
+    if not n_clicks:
+        raise PreventUpdate
+    if not data or not data.get("ticker"):
+        raise PreventUpdate
+    analysis = persistence.load_agent_analysis(data["ticker"])
+    if not analysis:
+        return no_update, "Keine gespeicherte Analyse gefunden."
+    try:
+        from app.core.pdf_export import FactsheetRenderError, render_section_pdf
+        from app.core.state import STATE
+
+        pdf_bytes, filename = render_section_pdf(
+            analysis, data.get("key"), STATE.scored
+        )
+    except ImportError as exc:
+        return no_update, f"PDF-Export nicht verfügbar: {exc}"
+    except (FactsheetRenderError, ValueError) as exc:
+        return no_update, str(exc)
+    return (
+        dcc.send_bytes(lambda buf: buf.write(pdf_bytes), filename=filename),
+        "",
+    )
