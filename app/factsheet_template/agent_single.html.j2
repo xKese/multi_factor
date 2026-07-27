@@ -1,0 +1,56 @@
+{% import "agent_base.html.j2" as base %}<!DOCTYPE html>
+<html lang="de">
+{{ base.head(pdf_title, author) }}
+<body>
+{{ base.running(kolhead_left, disclaimer) }}
+{{ base.band(band_right) }}
+
+{% if sidebar %}
+<aside class="side">
+  {% if sidebar.rating %}
+  <div>
+    <div class="sb-label">Agenten-Rating</div>
+    <div class="sb-big is-{{ sidebar.rating.tone }}">{{ sidebar.rating.value }}</div>
+    <div class="sb-note">{{ sidebar.rating.note }}</div>
+  </div>
+  {% endif %}
+  {% if sidebar.quant %}
+  {% if sidebar.rating %}<div class="sb-sep"></div>{% endif %}
+  <div>
+    <div class="sb-label">Quant-Score</div>
+    <div class="sb-big">{{ sidebar.quant.score }}</div>
+    {% if sidebar.quant.class_line %}<div class="sb-class">{{ sidebar.quant.class_line }}</div>{% endif %}
+    {{ base.chip(sidebar.delta) }}
+  </div>
+  {% endif %}
+  {% if sidebar.metrics %}
+  <div class="sb-sep"></div>
+  <div>
+    <div class="sb-label">Kennzahlen</div>
+    {{ base.metric_rows(sidebar.metrics) }}
+  </div>
+  {% endif %}
+  {% if sidebar.reports|length > 1 %}
+  <div class="sb-sep"></div>
+  <div>
+    <div class="sb-label">Weitere Berichte</div>
+    <div class="sb-list">
+      {% for r in sidebar.reports %}
+      <div{% if r.active %} class="is-active"{% endif %}>{{ r.title }}</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</aside>
+{% endif %}
+
+<main class="main">
+  <div class="eyebrow">{{ section_title }}</div>
+  <h1 class="doc-title">{{ company }}</h1>
+  <div class="meta">{{ meta_line }}</div>
+  <div class="goldrule"></div>
+  {% if lead %}<p class="lead">{{ lead }}</p>{% endif %}
+  <div class="report-body">{{ body_html }}</div>
+</main>
+</body>
+</html>

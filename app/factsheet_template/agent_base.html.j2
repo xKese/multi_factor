@@ -1,0 +1,51 @@
+{# Gemeinsame Bausteine der Agenten-Bericht-PDFs (#5a/#5b). #}
+
+{% macro head(pdf_title, author) -%}
+<head>
+  <meta charset="utf-8">
+  {# WeasyPrint übernimmt <title> und <meta name="author"> als PDF-Metadaten. #}
+  <title>{{ pdf_title }}</title>
+  <meta name="author" content="{{ author }}">
+  <link rel="stylesheet" href="agent_report.css">
+</head>
+{%- endmacro %}
+
+{% macro running(kolhead_left, disclaimer) -%}
+{# Laufende Elemente: Kolumnentitel (Folgeseiten) und Fußzeile (jede Seite);
+   werden von @page-Margin-Boxen aufgegriffen. #}
+<div class="kolhead">
+  <span class="kolhead-brand">Meeder &amp; Seifer</span>
+  <span class="kolhead-left">{{ kolhead_left }}</span>
+</div>
+<div class="pagefoot">
+  <span class="pageno"></span>
+  <span class="foot-note">{{ disclaimer }}</span>
+</div>
+{%- endmacro %}
+
+{% macro band(doctype) -%}
+<header class="band">
+  <span class="band-wordmark">Meeder &amp; Seifer</span>
+  <span class="band-doctype">{{ doctype }}</span>
+</header>
+{%- endmacro %}
+
+{% macro chip(delta) -%}
+{% if delta %}
+<span class="chip is-{{ delta.tone }}">
+  <span class="chip-icon">{{ delta.icon }}</span>
+  <span>{{ delta.text }}</span>
+</span>
+{% endif %}
+{%- endmacro %}
+
+{% macro metric_rows(metrics) -%}
+<div class="sb-rows">
+  {% for m in metrics %}
+  <div class="sb-row">
+    <span class="sb-row-label">{{ m.label }}</span>
+    <span class="sb-row-value{% if m.tone %} is-{{ m.tone }}{% endif %}">{{ m.value }}</span>
+  </div>
+  {% endfor %}
+</div>
+{%- endmacro %}
