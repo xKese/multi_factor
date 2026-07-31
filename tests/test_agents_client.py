@@ -418,6 +418,30 @@ def test_build_run_payload_sends_temperature(monkeypatch):
     assert "temperature" not in agents_client.build_run_payload("AAPL", None, s2)[0]
 
 
+def test_build_run_payload_sends_previous_analysis_flag(monkeypatch):
+    monkeypatch.setattr(
+        agents_client,
+        "get_catalog",
+        lambda force=False: {
+            "defaults": {
+                "llm_provider": "ollama",
+                "quick_think_llm": "m",
+                "deep_think_llm": "m",
+            }
+        },
+    )
+    # App-Default: Vergleich mit letzter Analyse aktiv.
+    payload, err = agents_client.build_run_payload("AAPL", None, Settings())
+    assert err is None
+    assert payload["previous_analysis_enabled"] is True
+
+    # Abgeschaltet in den Einstellungen → explizit False im Payload.
+    s = Settings()
+    s.agents_prev_analysis = False
+    payload2, _ = agents_client.build_run_payload("AAPL", None, s)
+    assert payload2["previous_analysis_enabled"] is False
+
+
 def test_friendly_error_flags_transient_provider_failures():
     """Regression: Ollama Clouds 500 („Internal Server Error (ref: …)") kam
     als rohe Exception in der UI an — ohne Hinweis, dass der Fehler beim

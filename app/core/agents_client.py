@@ -281,6 +281,11 @@ def build_run_payload(
             payload["temperature"] = max(0.0, min(2.0, float(temperature)))
         except (TypeError, ValueError):
             pass
+    # Vergleich mit letzter Analyse: immer explizit senden, damit der
+    # UI-Schalter maßgeblich ist (fehlender Key hieße Service-Default).
+    payload["previous_analysis_enabled"] = bool(
+        getattr(settings, "agents_prev_analysis", True)
+    )
     if factor_context:
         payload["factor_context"] = factor_context
     return payload, None

@@ -102,6 +102,10 @@ class Settings:
     # Sampling-Temperatur der Agenten-LLMs (0–2). Default 0: maximal
     # deterministisch/konservativ — für Analyse-Reproduzierbarkeit erwünscht.
     agents_temperature: float = 0.0
+    # Kontext der letzten archivierten Analyse (Datum, Rating, Kurzfazit)
+    # fließt in Research Manager und Portfolio Manager ein; die Analysten
+    # bleiben unbeeinflusst.
+    agents_prev_analysis: bool = True
 
     INVERT_LOW_IS_BETTER: set[str] = field(
         default_factory=lambda: {
