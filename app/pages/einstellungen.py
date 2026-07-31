@@ -300,6 +300,22 @@ def _agents_card() -> dbc.Card:
                     ),
                     dbc.Row(
                         [
+                            dbc.Col(
+                                dbc.Checkbox(
+                                    id="agents-prev-analysis",
+                                    value=s.agents_prev_analysis,
+                                    label=(
+                                        "Vergleich mit letzter Analyse (Kontext für "
+                                        "Research/Portfolio Manager)"
+                                    ),
+                                ),
+                                md=12,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
                             dbc.Col(html.Label("Sprache der Analyse"), md=5),
                             dbc.Col(
                                 dbc.Select(
@@ -675,9 +691,11 @@ def _delete_snapshot(n_clicks_list):
     State("agents-depth", "value"),
     State("agents-language", "value"),
     State("agents-temperature", "value"),
+    State("agents-prev-analysis", "value"),
     prevent_initial_call=True,
 )
-def _save_agents(n_clicks, provider, quick, deep, depth, language, temperature):
+def _save_agents(n_clicks, provider, quick, deep, depth, language, temperature,
+                 prev_analysis):
     if not n_clicks:
         raise PreventUpdate
     s = STATE.settings
@@ -685,6 +703,7 @@ def _save_agents(n_clicks, provider, quick, deep, depth, language, temperature):
     s.agents_quick_model = (quick or "").strip()
     s.agents_deep_model = (deep or "").strip()
     s.agents_language = (language or "").strip() or "German"
+    s.agents_prev_analysis = bool(prev_analysis)
     try:
         s.agents_depth = int(depth) if depth else 1
     except (TypeError, ValueError):
