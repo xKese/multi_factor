@@ -33,14 +33,29 @@ Optional: `SMA (20D)` — kann an beliebiger Stelle ergänzt werden (der Import
 erkennt die Spalte am Namen). Aktiviert im Momentum-Monitor die
 Kurzfrist-Spalten der Watchlist (SMA-20, Gap 20/50).
 
+Optional: `Est. Revenue CAGR` bzw. `Revenue Est. Growth (NTM)` — ebenfalls an
+beliebiger Stelle; wird als zweiter Forward-Indikator (`Forward
+Umsatzwachstum`) im Growth-Faktor gescort. Ohne die Spalte greift die
+dynamische Neugewichtung.
+
 4. CSV exportieren und im Tab **Daten-Import** hochladen.
 
 ## Scoring-Logik
 
 - **Perzentil-Rang** je Indikator (Global / Sektor / Industrie mit Fallback).
-- **Dynamische Neugewichtung** bei fehlenden Werten.
+- **Dynamische Neugewichtung** bei fehlenden Werten; unter 50 %
+  Daten-Abdeckung eines Faktors wird dieser nicht gewertet.
+- **Plausibilitätsmaske**: Wachstumsraten über ±300 % (CAGR-Artefakte aus
+  negativer Basis) sowie ROE bei negativem Eigenkapital werden ignoriert.
 - **Faktor-Score** 0 – 100 → gewichteter Gesamt-Score.
-- **Filter**: Piotroski ≥ 5, Altman Z ≥ 1,8, Market Cap ≥ 1 Mrd.
+- **Growth** kombiniert historisch (Umsatz/EPS/FCF-CAGR 3J, Umsatzwachstum 1J)
+  und forward (EPS- und Umsatz-Schätzungen).
+- **Momentum** nutzt das 12-1-Momentum (12M-Return ohne letzten Monat) statt
+  des reinen 12M-Returns.
+- **Filter**: Piotroski ≥ 5, Altman Z ≥ 1,8, Market Cap ≥ 1 Mrd. Für
+  Financials wird das Altman-Kriterium übersprungen (für Banken/Versicherer
+  nicht definiert). Piotroski gilt nur bei mindestens 6 von 9 bewertbaren
+  Kriterien als aussagekräftig — sonst Filter „-".
 - **Klassifikation**: A ≥ 80 · B+ ≥ 70 · B ≥ 60 · C ≥ 50 · D ≥ 40 · F < 40.
 - **Empfehlung**: STRONG BUY / BUY / HOLD / SELL.
 

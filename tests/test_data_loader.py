@@ -101,6 +101,46 @@ def test_sma20_percent_variant_is_ignored():
     # zählt allein, dass sma_20 nicht fälschlich belegt wird.
 
 
+def test_fwd_rev_growth_detected_without_shifting_base_columns():
+    headers, values = _base_57_row()
+    # Erwartetes Umsatzwachstum mitten im Export (Position beliebig).
+    headers = headers[:25] + ["Est. Revenue CAGR (3Y)"] + headers[25:]
+    values = values[:25] + ["0.12"] + values[25:]
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    df = load_koyfin_csv(csv.encode("utf-8"))
+
+    assert df["fwd_rev_growth"].iloc[0] == 0.12
+    assert df["sma_50"].iloc[0] == 375
+    assert df["sma_200"].iloc[0] == 340
+    assert df["export_date"].iloc[0] == "2026-07-14"
+
+
+def test_fwd_rev_growth_absent_yields_nan_column():
+    headers, values = _base_57_row()
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    df = load_koyfin_csv(csv.encode("utf-8"))
+
+    assert "fwd_rev_growth" in df.columns
+    assert df["fwd_rev_growth"].isna().all()
+
+
+def test_eps_revision_header_not_mistaken_for_fwd_rev_growth():
+    headers, values = _base_57_row()
+    # Realer Koyfin-Header für EPS-Revisions enthält "Est." und "Revision" —
+    # darf NICHT als Forward-Umsatzwachstum extrahiert werden (das würde die
+    # positionale Zuordnung aller Folgespalten zerstören).
+    headers[26] = "EPS Est. Revision % (3M)"
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    df = load_koyfin_csv(csv.encode("utf-8"))
+
+    assert df["fwd_rev_growth"].isna().all()
+    assert df["sma_50"].iloc[0] == 375
+    assert df["export_date"].iloc[0] == "2026-07-14"
+
+
 def test_volatility_scaled_to_decimal():
     # Koyfin liefert Volatilität als Prozentwert (z. B. 28,4 = 28,4 %).
     # Der Loader muss durch 100 teilen, damit alle Prozent-Felder konsistent

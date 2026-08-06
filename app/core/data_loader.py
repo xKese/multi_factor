@@ -16,32 +16,61 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .schema import KOYFIN_COLUMNS
+from .schema import KOYFIN_COLUMNS, OPTIONAL_COLUMNS
 
 
 NUMERIC_COLUMNS = [
     c
     for c in KOYFIN_COLUMNS
     if c not in {"ticker", "name", "sector", "industry", "region", "export_date"}
-] + ["sma_20"]
+] + list(OPTIONAL_COLUMNS)
 
 
-def _extract_optional_sma20(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series | None]:
-    """Zieht eine optionale SMA-20-Spalte anhand des Headers heraus.
+def _match_sma20(raw: str, normalized: str) -> bool:
+    """Koyfin-Header wie ``SMA (20D)`` oder ``sma_20``; die Distanz-Variante
+    ``SMA % (20D)`` wird ausgeschlossen."""
+    return "%" not in raw and normalized in {"sma20", "sma20d"}
+
+
+def _match_fwd_rev_growth(raw: str, normalized: str) -> bool:
+    """Erwartetes Umsatzwachstum, z. B. ``Est. Revenue CAGR (3Y)``,
+    ``Revenue Est. Growth (NTM)`` oder ``fwd_rev_growth``. Historische
+    Umsatz-Header ohne Est/Fwd/NTM-Marker matchen nicht; Revisions-Header
+    (``EPS Est. Revision (3M)``) enthalten "rev"+"est" und werden explizit
+    ausgeschlossen."""
+    if "revision" in normalized:
+        return False
+    return "rev" in normalized and any(
+        marker in normalized for marker in ("est", "fwd", "ntm")
+    )
+
+
+_OPTIONAL_MATCHERS = {
+    "sma_20": _match_sma20,
+    "fwd_rev_growth": _match_fwd_rev_growth,
+}
+
+
+def _extract_optional_columns(
+    df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, pd.Series]]:
+    """Zieht optionale Spalten (``OPTIONAL_COLUMNS``) anhand des Headers heraus.
 
     Muss VOR dem positionalen Mapping laufen: Die 57 Basisspalten werden rein
     positional benannt, eine zusätzliche Spalte an beliebiger Stelle würde
-    alles dahinter verschieben. Erkannt werden Koyfin-Header wie ``SMA (20D)``
-    oder ``sma_20``; die Distanz-Variante ``SMA % (20D)`` wird ausgeschlossen.
+    alles dahinter verschieben.
     """
+    found: dict[str, pd.Series] = {}
+    drop: list = []
     for col in df.columns:
         raw = str(col)
-        if "%" in raw:
-            continue
         normalized = re.sub(r"[^a-z0-9]", "", raw.lower())
-        if normalized in {"sma20", "sma20d"}:
-            return df.drop(columns=[col]), df[col]
-    return df, None
+        for name, matcher in _OPTIONAL_MATCHERS.items():
+            if name not in found and matcher(raw, normalized):
+                found[name] = df[col]
+                drop.append(col)
+                break
+    return df.drop(columns=drop), found
 
 
 def _coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
@@ -69,8 +98,9 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
     sep = ";" if raw.count(";") > raw.count(",") else ","
     df = pd.read_csv(io.StringIO(raw), sep=sep, decimal=",", engine="python")
 
-    # Optionale SMA-20-Spalte vor dem positionalen Mapping herausziehen.
-    df, sma_20 = _extract_optional_sma20(df)
+    # Optionale Spalten (SMA-20, Forward-Umsatzwachstum) vor dem positionalen
+    # Mapping herausziehen.
+    df, optional = _extract_optional_columns(df)
 
     # Anzahl Spalten abgleichen: überschüssige ignorieren, fehlende auffüllen.
     df = df.iloc[:, : len(KOYFIN_COLUMNS)].copy()
@@ -78,11 +108,13 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
     for col in KOYFIN_COLUMNS:
         if col not in df.columns:
             df[col] = np.nan
-    df["sma_20"] = (
-        pd.to_numeric(sma_20, errors="coerce").values
-        if sma_20 is not None
-        else np.nan
-    )
+    for name in OPTIONAL_COLUMNS:
+        series = optional.get(name)
+        df[name] = (
+            pd.to_numeric(series, errors="coerce").values
+            if series is not None
+            else np.nan
+        )
 
     df = _coerce_numeric(df)
 

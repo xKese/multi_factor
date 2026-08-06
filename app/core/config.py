@@ -16,6 +16,30 @@ NEGATIVE_IS_INVALID: frozenset[str] = frozenset(
     {"pe", "pfcf", "peg", "ev_ebitda", "pb", "debt_equity"}
 )
 
+# Wachstums-Kennzahlen: Ein CAGR über einer negativen oder nahe null liegenden
+# Basis ist mathematisch nicht definiert bzw. explodiert. Solche Werte würden
+# nach dem Perzentil-Ranking falsch-positive Top-Ränge erzeugen. Werte mit
+# absurder Größenordnung (|x| > GROWTH_PLAUSIBILITY_LIMIT, d. h. > 300 % p. a.)
+# werden daher vor dem Ranking auf NaN maskiert. Legitime negative
+# Wachstumsraten innerhalb des Limits bleiben erhalten und ranken schlecht.
+GROWTH_PLAUSIBILITY_LIMIT: float = 3.0
+GROWTH_OUTLIER_INVALID: frozenset[str] = frozenset(
+    {
+        "rev_cagr_3y",
+        "eps_cagr_3y",
+        "fcf_cagr_3y",
+        "fwd_eps_growth",
+        "fwd_rev_growth",
+        "rev_growth_1y",
+    }
+)
+
+# Sektor-Erkennung für die Altman-Z-Filter-Ausnahme: Der Altman Z-Score ist
+# für Banken/Versicherer konzeptionell nicht definiert (Bilanzstruktur), daher
+# wird das Filterkriterium für Financials übersprungen. Match per Substring
+# auf den Koyfin-GICS-Sektornamen ("Financials").
+FINANCIAL_SECTOR_MARKER: str = "financ"
+
 
 @dataclass
 class Settings:
@@ -43,6 +67,8 @@ class Settings:
         }
     )
 
+    # ``ocf_ni`` (Cash-Conversion) als Earnings-Quality-Indikator,
+    # gegenfinanziert aus Interest Coverage und Current Ratio.
     quality_weights: dict[str, float] = field(
         default_factory=lambda: {
             "roe": 0.15,
@@ -51,28 +77,41 @@ class Settings:
             "gross_margin": 0.12,
             "op_margin": 0.12,
             "debt_equity": 0.10,
-            "int_coverage": 0.08,
-            "current_ratio": 0.08,
+            "int_coverage": 0.06,
+            "current_ratio": 0.05,
+            "ocf_ni": 0.05,
             "piotroski": 0.05,
             "altman_z": 0.05,
         }
     )
 
+    # 6 Indikatoren: drei historische (55 %), zwei Forward (35 %) plus
+    # kurzfristiges Umsatzwachstum (10 %). ``rev_growth_1y`` wird aus
+    # ``revenue``/``revenue_prev`` berechnet; ``fwd_rev_growth`` ist eine
+    # optionale Export-Spalte (fehlt sie, greift die dynamische
+    # Neugewichtung).
     growth_weights: dict[str, float] = field(
         default_factory=lambda: {
-            "rev_cagr_3y": 0.30,
-            "eps_cagr_3y": 0.30,
-            "fcf_cagr_3y": 0.20,
+            "rev_cagr_3y": 0.20,
+            "eps_cagr_3y": 0.20,
+            "fcf_cagr_3y": 0.15,
             "fwd_eps_growth": 0.20,
+            "fwd_rev_growth": 0.15,
+            "rev_growth_1y": 0.10,
         }
     )
 
+    # ``mom_12_1`` (12M-Return ohne letzten Monat) ersetzt ``ret_12m`` im
+    # Score; ``ret_1m`` ist wegen des kurzfristigen Reversal-Effekts auf 0
+    # gesetzt. Beide bleiben mit Gewicht 0 gelistet, damit sie in den
+    # Einstellungen sichtbar sind und bewusst reaktiviert werden können.
     momentum_weights: dict[str, float] = field(
         default_factory=lambda: {
-            "ret_1m": 0.15,
-            "ret_3m": 0.20,
-            "ret_6m": 0.25,
-            "ret_12m": 0.20,
+            "ret_1m": 0.0,
+            "ret_3m": 0.25,
+            "ret_6m": 0.30,
+            "ret_12m": 0.0,
+            "mom_12_1": 0.25,
             "eps_revisions_3m": 0.20,
         }
     )
@@ -90,6 +129,11 @@ class Settings:
     min_market_cap: float = 1000.0
     min_stocks_per_industry: int = 5
     percentile_mode: PercentileMode = "Industrie"
+    # Mindest-Datenabdeckung je Faktor: Liegt weniger als dieser Anteil der
+    # Indikator-Gewichtssumme mit Daten vor, wird der Faktor-Score NaN (statt
+    # eines Scores aus z. B. nur einem Indikator). Der Gesamt-Score wird dann
+    # über die Faktor-Neugewichtung aus den übrigen Faktoren gebildet.
+    min_factor_coverage: float = 0.5
 
     # Agenten-Tiefenanalyse (TradingAgents-Service). Leere Strings bedeuten:
     # die Defaults des Service-Katalogs (form_defaults) verwenden.

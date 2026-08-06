@@ -58,6 +58,7 @@ INDICATOR_GROUPS: tuple[IndicatorGroup, ...] = (
             IndicatorItem("Debt/Equity", "debt_equity", lower_better=True),
             IndicatorItem("Zinsdeckung", "int_coverage"),
             IndicatorItem("Current Ratio", "current_ratio"),
+            IndicatorItem("OCF / Net Income", "ocf_ni"),
             IndicatorItem("Piotroski", "piotroski"),
             IndicatorItem("Altman Z", "altman_z"),
         ),
@@ -73,6 +74,8 @@ INDICATOR_GROUPS: tuple[IndicatorGroup, ...] = (
             # Non-Breaking-Hyphen (U+2011) statt "-", damit "Forward
             # EPS‑Wachstum" nicht am Bindestrich auf 3 Zeilen umbricht.
             IndicatorItem("Forward EPS‑Wachstum", "fwd_eps_growth"),
+            IndicatorItem("Forward Umsatzwachstum", "fwd_rev_growth"),
+            IndicatorItem("Umsatzwachstum 1J", "rev_growth_1y"),
         ),
     ),
     IndicatorGroup(
@@ -84,6 +87,7 @@ INDICATOR_GROUPS: tuple[IndicatorGroup, ...] = (
             IndicatorItem("Return 3M", "ret_3m"),
             IndicatorItem("Return 6M", "ret_6m"),
             IndicatorItem("Return 12M", "ret_12m"),
+            IndicatorItem("Momentum 12‑1", "mom_12_1"),
             # Non-Breaking-Hyphen, damit "EPS‑Revisionen 3M" nur am
             # Leerzeichen wraped, nicht am Bindestrich.
             IndicatorItem("EPS‑Revisionen 3M", "eps_revisions_3m"),

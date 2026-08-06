@@ -17,9 +17,15 @@ import pandas as pd
 from app.core.schema import PERCENT_COLUMNS
 
 
-# PERCENT_COLUMNS aus dem Schema + ``range_52w`` (wird im Scoring als
-# Ratio berechnet) — zentrale Quelle für "ist Prozentfeld".
-PERCENT_FIELDS: set[str] = PERCENT_COLUMNS | {"range_52w"}
+# PERCENT_COLUMNS aus dem Schema + im Scoring berechnete Ratios
+# (``range_52w``, ``rev_growth_1y``, ``mom_12_1``, ``data_coverage``) —
+# zentrale Quelle für "ist Prozentfeld".
+PERCENT_FIELDS: set[str] = PERCENT_COLUMNS | {
+    "range_52w",
+    "rev_growth_1y",
+    "mom_12_1",
+    "data_coverage",
+}
 
 # Felder, die als ganze Zahl angezeigt werden.
 INT_FIELDS: set[str] = {"piotroski"}

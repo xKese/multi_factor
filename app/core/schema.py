@@ -65,7 +65,9 @@ KOYFIN_COLUMNS: list[str] = [
 # Optionale Spalten, die der Loader per Header-Erkennung extrahiert (Position
 # im Export beliebig). NICHT in KOYFIN_COLUMNS aufnehmen — das Mapping der 57
 # Basisspalten ist positional und würde sich sonst verschieben.
-OPTIONAL_COLUMNS: tuple[str, ...] = ("sma_20",)
+# ``fwd_rev_growth``: erwartetes Umsatzwachstum (Koyfin "Est. Revenue CAGR" /
+# "Revenue Est. Growth NTM") als zweiter Forward-Growth-Indikator.
+OPTIONAL_COLUMNS: tuple[str, ...] = ("sma_20", "fwd_rev_growth")
 
 PERCENT_COLUMNS: set[str] = {
     "div_yield",
@@ -78,6 +80,7 @@ PERCENT_COLUMNS: set[str] = {
     "eps_cagr_3y",
     "fcf_cagr_3y",
     "fwd_eps_growth",
+    "fwd_rev_growth",
     "eps_revisions_3m",
     "ret_1m",
     "ret_3m",
