@@ -38,6 +38,8 @@ INDICATOR_LABELS: dict[str, str] = {
     "eps_cagr_3y": "EPS-CAGR 3J",
     "fcf_cagr_3y": "FCF-CAGR 3J",
     "fwd_eps_growth": "Forward EPS Growth",
+    "fwd_rev_growth": "Forward Umsatzwachstum",
+    "rev_growth_1y": "Umsatzwachstum 1J",
     "eps_revisions_3m": "EPS-Revisions 3M",
     # Momentum
     "ret_1m": "Return 1M",
@@ -60,6 +62,7 @@ INDICATOR_LABELS: dict[str, str] = {
     "classification": "Klassifikation",
     "filter_ok": "Filter",
     "recommendation": "Empfehlung",
+    "data_coverage": "Daten-Abdeckung",
     "sma_signal": "SMA-Signal",
     "sma_200_distance": "Abstand SMA-200 (%)",
     "sma_50_distance": "Abstand SMA-50 (%)",

@@ -26,10 +26,18 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 ## Scoring-Logik
 
 - **Perzentil-Rang** je Indikator (Global / Sektor / Industrie mit Fallback)
-- **Dynamische Neugewichtung** bei fehlenden Werten
+- **Dynamische Neugewichtung** bei fehlenden Werten; Faktoren mit weniger als
+  50 % Daten-Abdeckung werden nicht gewertet
+- **Plausibilitätsmasken**: Wachstumsraten über ±300 % (CAGR-Artefakte) und
+  ROE bei negativem Eigenkapital werden ignoriert
 - **5 Faktoren**: Value (25 %), Quality (27 %), Growth (15 %), Momentum (18 %), Low Volatility (15 %)
+- **Growth** mit historischen (Umsatz/EPS/FCF-CAGR 3J, Umsatzwachstum 1J) und
+  Forward-Indikatoren (EPS- und optional Umsatz-Schätzungen)
+- **Momentum** auf Basis des 12-1-Momentums (12M-Return ohne letzten Monat)
 - **Gesamt-Score 0 – 100** → Klassifikation A / B+ / B / C / D / F
-- **Filter**: Piotroski ≥ 5 · Altman Z ≥ 1,8 · Market Cap ≥ 1 Mrd.
+- **Filter**: Piotroski ≥ 5 · Altman Z ≥ 1,8 (übersprungen für Financials) ·
+  Market Cap ≥ 1 Mrd. Piotroski erfordert mindestens 6 von 9 bewertbare
+  Kriterien, sonst keine Filter-Aussage
 - **Empfehlung**: STRONG BUY / BUY / HOLD / SELL
 - **Piotroski F-Score** (9 Kriterien, 0 – 9 Punkte)
 - **SMA-50/SMA-200-Signal**: Golden Cross, Death Cross, Kurs ≷ SMA-200

@@ -72,6 +72,7 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "min_altman_z",
     "min_market_cap",
     "min_stocks_per_industry",
+    "min_factor_coverage",
     "percentile_mode",
     "agents_provider",
     "agents_quick_model",
@@ -685,7 +686,15 @@ def _settings_to_dict(s: Settings) -> dict:
 
 def _apply_settings_dict(s: Settings, payload: dict) -> None:
     """Spiegelt persistierte Werte auf ein Settings-Objekt. Unbekannte Keys
-    werden ignoriert, fehlende Keys behalten den Default."""
+    werden ignoriert, fehlende Keys behalten den Default.
+
+    Gewichts-Dicts werden mit den Defaults gemergt: Indikatoren, die nach dem
+    Speichern der Einstellungen neu ins Modell gekommen sind, fehlen im
+    persistierten Dict und erhalten ihr Default-Gewicht — sonst blieben sie
+    für Bestandsnutzer dauerhaft unsichtbar/ungescort. Explizit auf 0 gesetzte
+    Gewichte bleiben erhalten (Key vorhanden). Die Gewichte werden im Scoring
+    ohnehin auf ihre Summe normiert, ein Merge verschiebt also nur relative
+    Anteile, keine Skala."""
 
     field_types = {f.name: f.type for f in dataclass_fields(Settings)}
     for key in _SETTINGS_FIELDS:
@@ -693,7 +702,9 @@ def _apply_settings_dict(s: Settings, payload: dict) -> None:
             continue
         value = payload[key]
         if field_types.get(key) == "dict[str, float]" and isinstance(value, dict):
-            value = {k: float(v) for k, v in value.items()}
+            defaults = getattr(s, key, {})
+            stored = {k: float(v) for k, v in value.items()}
+            value = {**defaults, **stored} if isinstance(defaults, dict) else stored
         setattr(s, key, value)
 
 
