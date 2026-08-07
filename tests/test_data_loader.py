@@ -57,6 +57,8 @@ def _base_57_row() -> tuple[list[str], list[str]]:
     values = ["MSFT", "Microsoft", "Tech", "SW", "US"] + ["1"] * (
         len(KOYFIN_COLUMNS) - 8
     ) + ["375", "340", "2026-07-14"]
+    # Plausibler Kurs, sonst schlägt der Kurs/SMA-200-Sentinel an.
+    values[headers.index("LAST_PRICE")] = "380"
     return headers, values
 
 
@@ -139,6 +141,131 @@ def test_eps_revision_header_not_mistaken_for_fwd_rev_growth():
     assert df["fwd_rev_growth"].isna().all()
     assert df["sma_50"].iloc[0] == 375
     assert df["export_date"].iloc[0] == "2026-07-14"
+
+
+# Echte Header-Zeile eines Koyfin-Exports (57 Spalten: 56 Basisspalten OHNE
+# "Export Date" + angehängtem "Est Rev CAGR (1Y)"). Regressionsbasis für den
+# Spalten-Verschiebungs-Bug: "EPS Est Avg Rev % (FY1E - 3M)" enthält
+# "rev"+"est" (Koyfin kürzt "Revision" zu "Rev") und wurde fälschlich als
+# Forward-Umsatzwachstum extrahiert — alle Folgespalten verrutschten.
+_REAL_HEADERS = (
+    "Ticker,Name,Sector,Industry,Region,Market Cap,Last Price,P/E (LTM),"
+    "P/B (LTM),P/S (LTM),P/FCF (LTM),EV/EBITDA (LTM),PEG (NTM),"
+    "Div Yield (TTM),Return On Equity % (LTM),Return on Assets (ROA) % (LTM),"
+    "ROIC (LTM),Gross Profit Margin % (LTM),EBIT Margin % (LTM),"
+    "Total Debt / Equity (LTM),EBIT / Interest Expense (LTM),"
+    "Current Ratio (LTM),Total Revenues/CAGR (3Y TTM),"
+    "Basic EPS - CO/CAGR (3Y TTM),FCF/CAGR (3Y TTM),EPS - Est YoY % (FY1E),"
+    "EPS Est Avg Rev % (FY1E - 3M),Total Return (1M),Total Return (3M),"
+    "Total Return (6M),Total Return (1Y),Beta (1Y),Volatility (1Y),"
+    "52W High,52W Low,Altman Z-Score (LTM),Net Income - (IS) (LTM),"
+    "Net Income - (IS) (-1FY),CFO (LTM),CFO (-1FY),Total Assets (LTM),"
+    "Total Assets (-1FY),Total Debt (LTM),Total Debt (-1FY),"
+    "Total Current Assets (LTM),Total Current Liabilities (LTM),"
+    "Total Current Assets (-1FY),Total Current Liabilities (-1FY),"
+    "Shrs Out,Shrs Out (-1FY),Total Revenues (LTM),"
+    "Cost of Goods Sold/Total (LTM),Total Revenues (-1FY),"
+    "Cost of Goods Sold/Total (-1FY),SMA (50D),SMA (200D),Est Rev CAGR (1Y)"
+)
+
+
+def _real_header_row() -> tuple[list[str], list[str]]:
+    headers = _REAL_HEADERS.split(",")
+    assert len(headers) == 57
+    values = ["MSFT", "Microsoft", "Tech", "SW", "US", "2500000", "380"]
+    # Indizes 7..25: Multiples/Margen/CAGRs — Marker 7.0..25.0.
+    values += [str(float(i)) for i in range(7, 26)]
+    values += [
+        "0.02",   # 26 EPS Est Avg Rev % (3M) = eps_revisions_3m
+        "0.03",   # 27 Total Return (1M)
+        "0.08",   # 28 Total Return (3M)
+        "0.15",   # 29 Total Return (6M)
+        "0.30",   # 30 Total Return (1Y)
+        "0.9",    # 31 Beta
+        "28.4",   # 32 Volatility (Prozentwert)
+        "400",    # 33 52W High
+        "300",    # 34 52W Low
+        "3.5",    # 35 Altman
+    ]
+    # Indizes 36..53: Piotroski-Rohdaten — Marker 36.0..53.0.
+    values += [str(float(i)) for i in range(36, 54)]
+    values += ["375", "340", "0.12"]  # SMA-50, SMA-200, Est Rev CAGR (1Y)
+    assert len(values) == 57
+    return headers, values
+
+
+def test_real_koyfin_headers_no_column_shift():
+    """Regression: Der EPS-Revisions-Header darf nicht als Forward-Umsatz
+    extrahiert werden — sonst verrutschen alle Folgespalten (SMA-200 bekam
+    CAGR-Werte → Distanzen in Millionen %)."""
+    headers, values = _real_header_row()
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    df = load_koyfin_csv(csv.encode("utf-8"))
+
+    row = df.iloc[0]
+    assert row["eps_revisions_3m"] == 0.02
+    assert row["ret_1m"] == 0.03
+    assert row["ret_12m"] == 0.30
+    assert row["beta"] == 0.9
+    assert row["volatility_1y"] == 0.284
+    assert row["sma_50"] == 375
+    assert row["sma_200"] == 340
+    # Die echte Est-Rev-Spalte am Ende wird als fwd_rev_growth erkannt.
+    assert row["fwd_rev_growth"] == 0.12
+    # Export ohne "Export Date" → Spalte NaN (Snapshot-Datum via Dateiname).
+    assert df["export_date"].isna().all()
+
+
+def test_real_koyfin_headers_with_export_date_and_mid_table_est_rev():
+    """Variante: 58 Spalten mit Export Date am Ende und Est-Rev-Spalte
+    mitten im Export."""
+    headers, values = _real_header_row()
+    headers, values = headers[:-1], values[:-1]  # Est Rev CAGR entfernen
+    headers = headers[:26] + ["Est Rev CAGR (1Y)"] + headers[26:] + ["Export Date"]
+    values = values[:26] + ["0.12"] + values[26:] + ["2026-08-07"]
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    df = load_koyfin_csv(csv.encode("utf-8"))
+
+    row = df.iloc[0]
+    assert row["fwd_rev_growth"] == 0.12
+    assert row["eps_revisions_3m"] == 0.02
+    assert row["sma_200"] == 340
+    assert row["export_date"] == "2026-08-07"
+
+
+def test_eps_est_avg_rev_header_not_matched():
+    from app.core.data_loader import _match_fwd_rev_growth
+
+    def norm(s: str) -> str:
+        import re
+
+        return re.sub(r"[^a-z0-9]", "", s.lower())
+
+    assert not _match_fwd_rev_growth(
+        "EPS Est Avg Rev % (FY1E - 3M)", norm("EPS Est Avg Rev % (FY1E - 3M)")
+    )
+    assert not _match_fwd_rev_growth(
+        "Total Revenues/CAGR (3Y TTM)", norm("Total Revenues/CAGR (3Y TTM)")
+    )
+    assert _match_fwd_rev_growth("Est Rev CAGR (1Y)", norm("Est Rev CAGR (1Y)"))
+    assert _match_fwd_rev_growth(
+        "Revenue Est. Growth (NTM)", norm("Revenue Est. Growth (NTM)")
+    )
+
+
+def test_shifted_columns_rejected_by_plausibility_check():
+    """Sentinel: Landet eine Wachstumsrate in der SMA-200-Spalte (verrutschte
+    Zuordnung), wird der Import laut abgelehnt statt still persistiert."""
+    import pytest
+
+    headers, values = _real_header_row()
+    values[55] = "0.08"  # SMA (200D) enthält plötzlich eine Wachstumsrate
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    with pytest.raises(ValueError, match="Spaltenzuordnung unplausibel"):
+        load_koyfin_csv(csv.encode("utf-8"))
 
 
 def test_volatility_scaled_to_decimal():
