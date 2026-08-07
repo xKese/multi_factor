@@ -79,3 +79,34 @@ def test_fail_open_without_engine(monkeypatch):
     assert persistence.load_agent_ratings().empty
     assert persistence.list_agent_analyses().empty
     assert persistence.load_ticker_mapping("X") is None
+
+
+def test_sector_score_history_date_window(tmp_path, monkeypatch):
+    """``load_sector_score_history`` lädt datumbasiert (Fenster relativ zum
+    jüngsten Snapshot), nicht mehr die N jüngsten Snapshot-Daten — sonst
+    deckte das Fenster bei täglichen Uploads nur ~2 Wochen ab."""
+    from datetime import date, timedelta
+
+    p = _fresh_db(tmp_path, monkeypatch)
+
+    latest = date(2026, 8, 7)
+    records = [{"level": "sector", "key": "Technology", "score": 70.0}]
+    # 30 tägliche Snapshots + ein alter außerhalb des Fensters.
+    for i in range(30):
+        p.save_sector_score_history(records, latest - timedelta(days=i))
+    p.save_sector_score_history(records, latest - timedelta(days=500))
+
+    df = p.load_sector_score_history()
+    dates = sorted(df["snapshot_date"].unique())
+    assert len(dates) == 30, "alle Snapshots im 400-Tage-Fenster, alter fehlt"
+    assert dates[0] == latest - timedelta(days=29)
+    assert dates[-1] == latest
+
+    # Enges Fenster: nur die letzten 7 Tage.
+    df7 = p.load_sector_score_history(max_age_days=7)
+    assert sorted(df7["snapshot_date"].unique())[0] == latest - timedelta(days=7)
+
+
+def test_sector_score_history_empty(tmp_path, monkeypatch):
+    p = _fresh_db(tmp_path, monkeypatch)
+    assert p.load_sector_score_history().empty

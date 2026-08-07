@@ -30,12 +30,14 @@ log = logging.getLogger(__name__)
 _snapshot_date_from_universe = snapshot_date_from_universe
 
 
-def _persist_sector_score_history() -> None:
+def _persist_sector_score_history(filename: str | None = None) -> None:
     """Persistiert die aktuellen Sektor-/Industrie-Aggregate als Snapshot.
 
-    Wird nach :func:`STATE.set_raw` aufgerufen. Fehler werden geloggt, aber
-    nicht propagiert — die Score-History ist eine Komfortfunktion, ihr
-    Ausfall darf den Daten-Import nicht blockieren.
+    Wird nach :func:`STATE.set_raw` aufgerufen. ``filename`` dient als
+    Fallback-Quelle für das Snapshot-Datum (Koyfin-Dateinamen tragen das
+    Export-Datum). Fehler werden geloggt, aber nicht propagiert — die
+    Score-History ist eine Komfortfunktion, ihr Ausfall darf den
+    Daten-Import nicht blockieren.
     """
     df = STATE.scored
     if df is None or df.empty:
@@ -45,13 +47,13 @@ def _persist_sector_score_history() -> None:
         records = aggregates_to_history_records(agg)
         if not records:
             return
-        snap = _snapshot_date_from_universe(df)
+        snap = _snapshot_date_from_universe(df, filename)
         save_sector_score_history(records, snap)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sektor-Score-Historie konnte nicht gespeichert werden: %s", exc)
 
 
-def _persist_signal_history() -> None:
+def _persist_signal_history(filename: str | None = None) -> None:
     """Persistiert die SMA-Signal-Zustände je Aktie als Snapshot.
 
     Grundlage für die Event-Erkennung des Momentum-Monitors („NEU seit
@@ -82,7 +84,7 @@ def _persist_signal_history() -> None:
             "total_score",
         ]
         frame = frame[[c for c in cols if c in frame.columns]]
-        save_signal_history(frame, snapshot_date_from_universe(df))
+        save_signal_history(frame, snapshot_date_from_universe(df, filename))
     except Exception as exc:  # noqa: BLE001
         log.warning("Signal-Historie konnte nicht gespeichert werden: %s", exc)
     finally:
@@ -147,8 +149,8 @@ def _handle(contents: str | None, filename: str | None):
                         color="warning",
                     )
                 )
-            _persist_sector_score_history()
-            _persist_signal_history()
+            _persist_sector_score_history(filename)
+            _persist_signal_history(filename)
             status = html.Div(alerts)
         except Exception as exc:  # noqa: BLE001
             status = dbc.Alert(f"Fehler: {exc}", color="danger")

@@ -787,7 +787,14 @@ def _detail_table(agg: list[dict], active: str | None, open_: str | None) -> htm
                             html.Th("SMA-50", className="is-num"),
                             html.Th("SMA-200", className="is-num"),
                             html.Th("Breadth > SMA-200", className="is-num"),
-                            html.Th("Verlauf 12M", className="is-ctr"),
+                            html.Th(
+                                "Verlauf 12W",
+                                className="is-ctr",
+                                title=(
+                                    "Score-Verlauf der letzten 12 Kalenderwochen "
+                                    "(letzter Import je Woche)"
+                                ),
+                            ),
                             html.Th("Aktien", className="is-num"),
                         ]
                     )
@@ -1161,7 +1168,7 @@ def _render_main(agg: list[dict], tf: str, active: str | None, open_: str | None
 
 def layout(**_) -> html.Div:
     df = STATE.scored
-    history = load_sector_score_history(12) if not df.empty else None
+    history = load_sector_score_history() if not df.empty else None
     agg = aggregate_sectors(df, history=history) if not df.empty else []
 
     return html.Div(
@@ -1255,7 +1262,7 @@ def _on_close_drill(n_clicks):
 )
 def _render(tf, active, open_):
     df = STATE.scored
-    history = load_sector_score_history(12) if not df.empty else None
+    history = load_sector_score_history() if not df.empty else None
     agg = aggregate_sectors(df, history=history) if not df.empty else []
     return _render_main(agg, tf or "12_1", active, open_)
 

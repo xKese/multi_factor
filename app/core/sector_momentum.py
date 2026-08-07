@@ -125,10 +125,11 @@ def build_snapshot_frame(df: pd.DataFrame, snapshot_date: date) -> pd.DataFrame:
 #
 # Aggregiert das gescorte Equity-Universum (``STATE.scored``) sektorweise und
 # liefert pro Sektor: Score, ΔScore (gegenüber dem Vormonat), Returns, SMA-
-# Distanzen, Momentum 12M-1M, Breadth-Anteile, 12-Monats-Score-Sparkline und
-# Industrie-Sub-Aggregate. ΔScore und Sparkline werden aus persistierten
-# Snapshots gespeist (siehe ``persistence.load_sector_score_history``); ohne
-# Historie liefern sie ``NaN`` bzw. eine leere Liste — das UI zeigt dann „–".
+# Distanzen, Momentum 12M-1M, Breadth-Anteile, 12-Wochen-Score-Sparkline
+# (letzter Snapshot je Kalenderwoche) und Industrie-Sub-Aggregate. ΔScore und
+# Sparkline werden aus persistierten Snapshots gespeist (siehe
+# ``persistence.load_sector_score_history``); ohne Historie liefern sie
+# ``NaN`` bzw. eine leere Liste — das UI zeigt dann „–".
 
 
 def _mean_pct(series: pd.Series, robust: bool = False) -> float:
@@ -179,8 +180,12 @@ def _history_lookup(
     Snapshot zu weit entfernt, wird ``prev_score`` zu ``NaN`` (kein irreführender
     ΔScore aus uralt-Daten) und ``meta["prev_rejected_stale"]`` ist ``True``.
 
-    ``spark`` enthält bis zu 12 Score-Werte aufsteigend sortiert; der jüngste wird
-    durch ``current_score`` ersetzt, damit die Sparkline garantiert im Heute-Wert
+    ``spark`` enthält bis zu 12 Score-Werte aufsteigend sortiert — je
+    Kalenderwoche der letzte Snapshot, davon die 12 jüngsten Wochen. Damit ist
+    die Auflösung unabhängig von der Upload-Frequenz: Bei mehreren Uploads pro
+    Woche zählt nur der jeweils letzte, bei exakt wöchentlichen Uploads
+    entspricht das den 12 letzten Snapshots. Der jüngste Wert wird durch
+    ``current_score`` ersetzt, damit die Sparkline garantiert im Heute-Wert
     endet.
 
     ``meta`` liefert Diagnose-Felder für die Confidence-Markierung im Aufrufer:
@@ -200,14 +205,19 @@ def _history_lookup(
         return float("nan"), [], meta
     sub = sub.sort_values("snapshot_date")
     meta["history_count"] = int(len(sub))
-    scores = [
-        round(float(v), 1)
-        for v in pd.to_numeric(sub["score"], errors="coerce").tolist()
-        if pd.notna(v)
-    ]
-    if not scores:
+    valid = sub[pd.to_numeric(sub["score"], errors="coerce").notna()]
+    if valid.empty:
         return float("nan"), [], meta
-    spark = scores[-12:]
+
+    # Wochen-Resampling: letzter Snapshot je ISO-Kalenderwoche, davon die 12
+    # jüngsten Wochen. drop_duplicates(keep="last") auf der Wochen-Periode —
+    # ``valid`` ist bereits aufsteigend nach Datum sortiert.
+    week = pd.PeriodIndex(pd.to_datetime(valid["snapshot_date"]), freq="W")
+    weekly = valid.assign(_week=week).drop_duplicates("_week", keep="last")
+    spark = [
+        round(float(v), 1)
+        for v in pd.to_numeric(weekly["score"], errors="coerce").tolist()
+    ][-12:]
     if pd.notna(current_score):
         spark[-1] = round(float(current_score), 1)
 
@@ -330,8 +340,9 @@ def aggregate_sectors(
     ``history`` ist der DataFrame aus
     :func:`persistence.load_sector_score_history`. Enthält er Zeilen für
     einen Sektor (``level == "sector"``), wird ``delta_score`` als
-    ``score_now − score_~1M`` und ``spark`` aus den letzten 12 Snapshots
-    berechnet. Ohne Historie sind beide Felder ``NaN`` bzw. ``[]``.
+    ``score_now − score_~1M`` und ``spark`` aus den letzten 12 Kalenderwochen
+    (letzter Snapshot je Woche) berechnet. Ohne Historie sind beide Felder
+    ``NaN`` bzw. ``[]``.
     """
     if df is None or df.empty or "sector" not in df.columns:
         return []

@@ -105,3 +105,34 @@ def test_snapshot_date_from_universe():
     df["export_date"] = "2026-07-14"
     assert snapshot_date_from_universe(df) == TODAY
     assert snapshot_date_from_universe(pd.DataFrame()) == date.today()
+
+
+def test_parse_koyfin_filename_date():
+    from app.core.signal_events import parse_koyfin_filename_date
+
+    assert parse_koyfin_filename_date(
+        "koyfin_MSCI World_2026.08.07_08.31.02.300.csv"
+    ) == date(2026, 8, 7)
+    assert parse_koyfin_filename_date("koyfin_export.csv") is None
+    assert parse_koyfin_filename_date(None) is None
+    # Ungültiges Datum (13. Monat) → None statt Exception.
+    assert parse_koyfin_filename_date("koyfin_x_2026.13.07_08.00.00.000.csv") is None
+
+
+def test_snapshot_date_filename_fallback():
+    # export_date vorhanden → führend, Dateiname wird ignoriert.
+    df = _universe()
+    df["export_date"] = "2026-07-14"
+    assert (
+        snapshot_date_from_universe(df, "koyfin_MSCI World_2026.08.07_08.31.02.300.csv")
+        == TODAY
+    )
+    # Ohne export_date → Datum aus dem Dateinamen.
+    assert (
+        snapshot_date_from_universe(
+            pd.DataFrame(), "koyfin_MSCI World_2026.08.07_08.31.02.300.csv"
+        )
+        == date(2026, 8, 7)
+    )
+    # Weder Spalte noch Dateiname → heute.
+    assert snapshot_date_from_universe(pd.DataFrame(), "export.csv") == date.today()
