@@ -15,8 +15,9 @@ import pandas as pd
 
 from .config import (
     FINANCIAL_SECTOR_MARKER,
+    GROWTH_CLIP_LIMIT,
+    GROWTH_MIN_VALID,
     GROWTH_OUTLIER_INVALID,
-    GROWTH_PLAUSIBILITY_LIMIT,
     NEGATIVE_IS_INVALID,
     Settings,
 )
@@ -81,13 +82,16 @@ INDICATOR_TO_COLUMN: dict[str, str] = {
 def _clean_series(df: pd.DataFrame, column: str) -> pd.Series:
     """Maskiert fachlich ungültige Werte auf NaN, damit sie kein Perzentil
     erhalten: negative Multiples (z. B. negativer P/E durch Verlust) sowie
-    Wachstumsraten mit absurder Größenordnung (CAGR über negativer oder nahe
-    null liegender Basis)."""
+    mathematisch unmögliche Wachstumsraten (< −100 % p. a. = Artefakt aus
+    negativer Basis). Sehr hohe positive Wachstumsraten sind real möglich und
+    bleiben erhalten — sie werden fürs Ranking lediglich auf
+    ``GROWTH_CLIP_LIMIT`` gedeckelt (zählen als "sehr hoch", Top-Rang)."""
     series = df[column]
     if column in NEGATIVE_IS_INVALID:
         series = series.where(series > 0)
     if column in GROWTH_OUTLIER_INVALID:
-        series = series.where(series.abs() <= GROWTH_PLAUSIBILITY_LIMIT)
+        series = series.where(series >= GROWTH_MIN_VALID)
+        series = series.clip(upper=GROWTH_CLIP_LIMIT)
     return series
 
 
@@ -284,7 +288,11 @@ def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     else:
         df["data_coverage"] = np.nan
 
-    # Gesamt-Score mit dynamischer Neugewichtung auf Faktor-Ebene.
+    # Gesamt-Score mit dynamischer Neugewichtung auf Faktor-Ebene. Die
+    # vorhandenen Faktoren müssen mindestens ``min_total_coverage`` der
+    # Faktor-Gewichtssumme stellen — sonst würde ein Titel mit z. B. nur
+    # Momentum + Low-Vol einen überproportional hohen, nicht vergleichbaren
+    # Gesamt-Score erhalten.
     factor_cols = {
         "value_score": settings.factor_weights["value"],
         "quality_score": settings.factor_weights["quality"],
@@ -298,7 +306,10 @@ def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
         mask = df[col].notna()
         num = num + df[col].fillna(0) * w * mask
         den = den + w * mask
-    df["total_score"] = np.where(den > 0, (num / den).round(1), np.nan)
+    total_weight = sum(factor_cols.values())
+    min_den = settings.min_total_coverage * total_weight
+    enough = (den > 0) & (den >= min_den)
+    df["total_score"] = np.where(enough, (num / den.where(den > 0)).round(1), np.nan)
 
     # Klassifikation.
     df["classification"] = df["total_score"].apply(_classify)

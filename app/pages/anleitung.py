@@ -48,9 +48,13 @@ Datum verwendet.
 
 - **Perzentil-Rang** je Indikator (Global / Sektor / Industrie mit Fallback).
 - **Dynamische Neugewichtung** bei fehlenden Werten; unter 50 %
-  Daten-Abdeckung eines Faktors wird dieser nicht gewertet.
-- **Plausibilitätsmaske**: Wachstumsraten über ±300 % (CAGR-Artefakte aus
-  negativer Basis) sowie ROE bei negativem Eigenkapital werden ignoriert.
+  Daten-Abdeckung eines Faktors wird dieser nicht gewertet, unter 60 %
+  Faktor-Abdeckung gibt es keinen Gesamt-Score (statt eines verzerrten
+  Scores aus z. B. nur Momentum + Low-Vol).
+- **Plausibilitätsmaske**: mathematisch unmögliche Wachstumsraten
+  (< −100 % p. a., Artefakte aus negativer Basis) sowie ROE bei negativem
+  Eigenkapital werden ignoriert. Sehr hohe echte Wachstumsraten (> 300 %)
+  bleiben gewertet und zählen beim Ranking als „sehr hoch" (gedeckelt).
 - **Faktor-Score** 0 – 100 → gewichteter Gesamt-Score.
 - **Growth** kombiniert historisch (Umsatz/EPS/FCF-CAGR 3J, Umsatzwachstum 1J)
   und forward (EPS- und Umsatz-Schätzungen).

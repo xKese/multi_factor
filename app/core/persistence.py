@@ -73,6 +73,7 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "min_market_cap",
     "min_stocks_per_industry",
     "min_factor_coverage",
+    "min_total_coverage",
     "percentile_mode",
     "agents_provider",
     "agents_quick_model",

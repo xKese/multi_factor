@@ -27,9 +27,11 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 
 - **Perzentil-Rang** je Indikator (Global / Sektor / Industrie mit Fallback)
 - **Dynamische Neugewichtung** bei fehlenden Werten; Faktoren mit weniger als
-  50 % Daten-Abdeckung werden nicht gewertet
-- **Plausibilitätsmasken**: Wachstumsraten über ±300 % (CAGR-Artefakte) und
-  ROE bei negativem Eigenkapital werden ignoriert
+  50 % Daten-Abdeckung werden nicht gewertet, und ohne mindestens 60 %
+  Faktor-Abdeckung gibt es keinen Gesamt-Score
+- **Plausibilitätsmasken**: mathematisch unmögliche Wachstumsraten
+  (< −100 % p. a.) und ROE bei negativem Eigenkapital werden ignoriert;
+  sehr hohe echte Wachstumsraten (> 300 %) zählen als „sehr hoch" (gedeckelt)
 - **5 Faktoren**: Value (25 %), Quality (27 %), Growth (15 %), Momentum (18 %), Low Volatility (15 %)
 - **Growth** mit historischen (Umsatz/EPS/FCF-CAGR 3J, Umsatzwachstum 1J) und
   Forward-Indikatoren (EPS- und optional Umsatz-Schätzungen)
