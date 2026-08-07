@@ -17,7 +17,7 @@ import json
 import logging
 import os
 from dataclasses import fields as dataclass_fields
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -411,8 +411,14 @@ def save_sector_score_history(
     return len(rows)
 
 
-def load_sector_score_history(limit_snapshots: int = 12) -> pd.DataFrame:
-    """Laedt die ``limit_snapshots`` juengsten Snapshot-Datumswerte komplett.
+def load_sector_score_history(max_age_days: int = 400) -> pd.DataFrame:
+    """Laedt alle Snapshots der letzten ``max_age_days`` Tage (relativ zum
+    juengsten Snapshot, nicht zur Wall-Clock).
+
+    Datumbasiert statt Anzahl-basiert, damit das Fenster unabhaengig von der
+    Upload-Frequenz ist: Bei taeglichen Uploads deckten die frueher geladenen
+    "12 juengsten Snapshot-Daten" nur ~2 Wochen ab und der ~30-Tage-Lookup
+    fuer den Delta-Score lief ins Leere.
 
     Liefert einen DataFrame mit Spalten ``snapshot_date, level, key, score, …``,
     aufsteigend nach Datum sortiert. Bei DB-Fehlern oder fehlender Tabelle
@@ -440,23 +446,26 @@ def load_sector_score_history(limit_snapshots: int = 12) -> pd.DataFrame:
     try:
         with engine.begin() as conn:
             _ensure_sector_score_history_table(conn)
+            latest = conn.execute(
+                text(
+                    f"SELECT MAX(snapshot_date) FROM {_SECTOR_SCORE_HISTORY_TABLE}"
+                )
+            ).scalar()
+            if latest is None:
+                return empty
+            latest_date = pd.Timestamp(latest).date()
+            cutoff = latest_date - timedelta(days=int(max_age_days))
             df = pd.read_sql(
                 text(
                     f"SELECT snapshot_date, level, key, score, ret_1m, "
                     "ret_12m, mom_12_1, sma200_dist, sma50_dist, "
                     "breadth_sma200, n "
                     f"FROM {_SECTOR_SCORE_HISTORY_TABLE} "
-                    "WHERE snapshot_date IN ("
-                    "  SELECT snapshot_date FROM ("
-                    "    SELECT DISTINCT snapshot_date "
-                    f"    FROM {_SECTOR_SCORE_HISTORY_TABLE} "
-                    "    ORDER BY snapshot_date DESC LIMIT :n"
-                    "  ) s"
-                    ") "
+                    "WHERE snapshot_date >= :cutoff "
                     "ORDER BY snapshot_date ASC, level ASC, key ASC"
                 ),
                 conn,
-                params={"n": int(limit_snapshots)},
+                params={"cutoff": cutoff},
             )
     except SQLAlchemyError as exc:
         log.warning("Laden der Sektor-Score-Historie fehlgeschlagen: %s", exc)

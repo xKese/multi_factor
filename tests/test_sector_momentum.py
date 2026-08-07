@@ -443,3 +443,95 @@ def test_aggregate_logs_warning_on_short_history(caplog):
         "nur 1 Snapshot" in rec.message or "<2" in rec.message
         for rec in caplog.records
     )
+
+
+# ── Wochen-Resampling der Sparkline & Frequenz-Robustheit ──────────────────
+
+
+def _sector_history(dates_scores: list[tuple[date, float]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "snapshot_date": d,
+                "level": "sector",
+                "key": "Technology",
+                "score": s,
+            }
+            for d, s in dates_scores
+        ]
+    )
+
+
+def test_spark_weekly_resampling_daily_uploads():
+    """Tägliche Snapshots über 20 Wochen → 12 Spark-Werte, je Kalenderwoche
+    der letzte Snapshot, Ende im Live-Score."""
+    df = _scored_frame()
+    start = date(2025, 1, 6)  # Montag
+    rows = []
+    for i in range(140):  # 20 Wochen täglich
+        d = start + timedelta(days=i)
+        rows.append((d, 50.0 + i * 0.1))
+    history = _sector_history(rows)
+
+    agg = aggregate_sectors(df, history=history)
+    tech = _by_sector(agg, "Technology")
+
+    assert len(tech["spark"]) == 12
+    # Vorletzter Spark-Wert = letzter Snapshot der vorletzten Kalenderwoche
+    # (Sonntag der 19. Woche, Index 18*7+6 = 132).
+    assert tech["spark"][-2] == round(50.0 + 132 * 0.1, 1)
+    # Jüngster Wert durch Live-Score ersetzt.
+    assert tech["spark"][-1] == tech["score"]
+
+
+def test_spark_multiple_uploads_same_week_keeps_last():
+    df = _scored_frame()
+    history = _sector_history(
+        [
+            (date(2025, 1, 6), 40.0),   # Montag KW 2
+            (date(2025, 1, 8), 41.0),   # Mittwoch KW 2
+            (date(2025, 1, 10), 42.0),  # Freitag KW 2 → zählt
+            (date(2025, 1, 13), 55.0),  # Montag KW 3
+            (date(2025, 1, 17), 56.0),  # Freitag KW 3 → zählt (durch Live ersetzt)
+        ]
+    )
+
+    agg = aggregate_sectors(df, history=history)
+    tech = _by_sector(agg, "Technology")
+
+    assert len(tech["spark"]) == 2
+    assert tech["spark"][0] == 42.0
+    assert tech["spark"][-1] == tech["score"]
+
+
+def test_spark_weekly_uploads_unchanged_behavior():
+    """Exakt wöchentliche Uploads (heutiges Nutzungsmuster): Spark = die 12
+    jüngsten Snapshots, wie vor der Umstellung."""
+    df = _scored_frame()
+    start = date(2024, 9, 2)
+    rows = [(start + timedelta(weeks=i), 50.0 + i) for i in range(16)]
+    history = _sector_history(rows)
+
+    agg = aggregate_sectors(df, history=history)
+    tech = _by_sector(agg, "Technology")
+
+    assert len(tech["spark"]) == 12
+    assert tech["spark"][0] == 50.0 + 4  # 16 Wochen − 12 = Offset 4
+    assert tech["spark"][-1] == tech["score"]
+
+
+def test_delta_score_with_daily_uploads():
+    """Tägliche Snapshots: ΔScore vergleicht weiterhin gegen ~30 Tage zurück
+    (kein NaN durch zu kleines Fenster)."""
+    df = _scored_frame()
+    today = date(2025, 3, 1)
+    rows = [(today - timedelta(days=i), 60.0 + i * 0.5) for i in range(60)]
+    rows.sort()
+    history = _sector_history(rows)
+
+    agg = aggregate_sectors(df, history=history)
+    tech = _by_sector(agg, "Technology")
+
+    # Snapshot exakt 30 Tage vor dem jüngsten: Score 60 + 30*0.5 = 75.
+    assert tech["prev_score"] == 75.0
+    assert tech["delta_score"] == round(tech["score"] - 75.0, 1)

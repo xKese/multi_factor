@@ -11,6 +11,7 @@ zweiten Import bleiben die Event-Felder leer (fail-open, raised nie).
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import pandas as pd
@@ -36,13 +37,43 @@ EVENT_COLUMNS = [
 _cache: tuple[tuple[str, int], pd.DataFrame] | None = None
 
 
-def snapshot_date_from_universe(df: pd.DataFrame) -> date:
+# Koyfin-Dateinamen tragen das Export-Datum: ``koyfin_MSCI
+# World_2026.08.07_08.31.02.300.csv`` = 07.08.2026 (JJJJ.MM.TT).
+_FILENAME_DATE_RE = re.compile(r"(\d{4})\.(\d{2})\.(\d{2})")
+
+
+def parse_koyfin_filename_date(filename: str | None) -> date | None:
+    """Extrahiert das Datum aus einem Koyfin-Dateinamen (``JJJJ.MM.TT``).
+
+    Liefert ``None``, wenn kein oder kein gültiges Datum im Namen steht.
+    """
+    if not filename:
+        return None
+    m = _FILENAME_DATE_RE.search(str(filename))
+    if m is None:
+        return None
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def snapshot_date_from_universe(
+    df: pd.DataFrame, filename: str | None = None
+) -> date:
     """Snapshot-Datum eines Universums: Maximum von ``export_date``,
-    Fallback heutiges Datum."""
+    Fallback Datum aus dem Koyfin-Dateinamen, Fallback heutiges Datum.
+
+    ``export_date`` bleibt führend (Datenstands-Datum aus dem Export selbst);
+    der Dateiname trägt den Download-Zeitpunkt und greift nur, wenn die
+    Spalte fehlt oder leer ist."""
     if df is not None and "export_date" in df.columns:
         parsed = pd.to_datetime(df["export_date"], errors="coerce").dropna()
         if not parsed.empty:
             return parsed.max().date()
+    from_name = parse_koyfin_filename_date(filename)
+    if from_name is not None:
+        return from_name
     return date.today()
 
 
