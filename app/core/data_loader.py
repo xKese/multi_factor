@@ -33,12 +33,18 @@ def _match_sma20(raw: str, normalized: str) -> bool:
 
 
 def _match_fwd_rev_growth(raw: str, normalized: str) -> bool:
-    """Erwartetes Umsatzwachstum, z. B. ``Est. Revenue CAGR (3Y)``,
-    ``Revenue Est. Growth (NTM)`` oder ``fwd_rev_growth``. Historische
-    Umsatz-Header ohne Est/Fwd/NTM-Marker matchen nicht; Revisions-Header
-    (``EPS Est. Revision (3M)``) enthalten "rev"+"est" und werden explizit
-    ausgeschlossen."""
-    if "revision" in normalized:
+    """Erwartetes Umsatzwachstum, z. B. ``Est Rev CAGR (1Y)``,
+    ``Revenue Est. Growth (NTM)`` oder ``fwd_rev_growth``.
+
+    Bewusst eng gefasst: zusätzlich zu "rev" + Est/Fwd/NTM-Marker muss
+    "cagr" oder "growth" im Namen stehen, und EPS-/Revisions-Header sind
+    ausgeschlossen. Koyfin kürzt "Revision" zu "Rev" ab — der reale
+    EPS-Revisions-Header ``EPS Est Avg Rev % (FY1E - 3M)`` enthält
+    "rev"+"est" und würde sonst fälschlich extrahiert, was alle
+    nachfolgenden Basisspalten positional verschiebt."""
+    if "eps" in normalized or "revision" in normalized:
+        return False
+    if not any(marker in normalized for marker in ("cagr", "growth")):
         return False
     return "rev" in normalized and any(
         marker in normalized for marker in ("est", "fwd", "ntm")
@@ -78,6 +84,45 @@ def _coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+def validate_universe_plausibility(df: pd.DataFrame) -> list[str]:
+    """Sanity-Checks gegen verrutschte Spaltenzuordnung (positionales Mapping).
+
+    Eine falsch extrahierte oder zusätzliche Spalte verschiebt alle
+    nachfolgenden Basisspalten — dann landen z. B. Beta-Werte in ``ret_12m``
+    oder Wachstumsraten in ``sma_200`` (SMA-Distanzen in Millionen %).
+    Median-basierte, bewusst laxe Schwellen; geprüft wird nur, wo Daten
+    vorliegen. Liefert eine Liste verletzter Checks (leer = plausibel).
+    """
+    def _col(name: str) -> pd.Series:
+        series = df[name] if name in df.columns else pd.Series(dtype=float)
+        return pd.to_numeric(series, errors="coerce")
+
+    problems: list[str] = []
+
+    ret = _col("ret_12m").dropna()
+    if not ret.empty and ret.abs().median() > 5:
+        problems.append(
+            f"Median |Return 12M| = {ret.abs().median():.1f} (> 5,0 = 500 %)"
+        )
+
+    if "last_price" in df.columns and "sma_200" in df.columns:
+        price = _col("last_price")
+        sma = _col("sma_200")
+        both = (price > 0) & (sma > 0)
+        if both.any():
+            ratio = (price[both] / sma[both]).median()
+            if not 0.2 <= ratio <= 5:
+                problems.append(
+                    f"Median Kurs/SMA-200 = {ratio:.2f} (außerhalb 0,2–5)"
+                )
+
+    beta = _col("beta").dropna()
+    if not beta.empty and beta.abs().median() > 5:
+        problems.append(f"Median |Beta| = {beta.abs().median():.1f} (> 5)")
+
+    return problems
 
 
 def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
@@ -133,4 +178,12 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
         df = df.loc[~(df["name"].isna() & df["last_price"].isna())]
 
     df = df.dropna(subset=["ticker"]).reset_index(drop=True)
+
+    problems = validate_universe_plausibility(df)
+    if problems:
+        raise ValueError(
+            "Import abgelehnt — Spaltenzuordnung unplausibel (vermutlich "
+            "weicht die Spaltenreihenfolge vom 57-Spalten-Schema ab oder eine "
+            "Zusatzspalte verschiebt das Mapping): " + " · ".join(problems)
+        )
     return df

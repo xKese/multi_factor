@@ -33,10 +33,14 @@ Optional: `SMA (20D)` — kann an beliebiger Stelle ergänzt werden (der Import
 erkennt die Spalte am Namen). Aktiviert im Momentum-Monitor die
 Kurzfrist-Spalten der Watchlist (SMA-20, Gap 20/50).
 
-Optional: `Est. Revenue CAGR` bzw. `Revenue Est. Growth (NTM)` — ebenfalls an
-beliebiger Stelle; wird als zweiter Forward-Indikator (`Forward
-Umsatzwachstum`) im Growth-Faktor gescort. Ohne die Spalte greift die
-dynamische Neugewichtung.
+Optional: `Est Rev CAGR (1Y)` (bzw. ein Est-/Fwd-/NTM-Revenue-Header mit
+„CAGR" oder „Growth" im Namen) — ebenfalls an beliebiger Stelle; wird als
+zweiter Forward-Indikator (`Forward Umsatzwachstum`) im Growth-Faktor
+gescort. Ohne die Spalte greift die dynamische Neugewichtung.
+
+Fehlt die Spalte `Export Date`, wird das Snapshot-Datum aus dem
+Koyfin-Dateinamen gelesen (`koyfin_..._JJJJ.MM.TT_...`), sonst das heutige
+Datum verwendet.
 
 4. CSV exportieren und im Tab **Daten-Import** hochladen.
 
