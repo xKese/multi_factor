@@ -131,17 +131,24 @@ def test_pdf_percentiles_mask_negative_multiples():
     assert pct_map["pb"].iloc[0] == pct_map["pb"].dropna().max()
 
 
-def test_growth_outlier_masked():
-    """CAGR aus negativer/naher-Null-Basis (>300 %) darf kein Perzentil bekommen."""
+def test_growth_impossible_rate_masked_high_growth_kept():
+    """Wachstumsraten unter −100 % sind mathematisch unmöglich (Artefakt) →
+    NaN. Sehr hohe echte Raten (Micron-Fall: > 300 %) bleiben gewertet und
+    ranken top (gedeckelt, nicht verworfen)."""
     df = _universe(
         pe=[10.0] * 6,
         pb=[1.0] * 6,
     )
-    df["rev_cagr_3y"] = [8.5, 0.10, 0.15, 0.20, -0.05, 0.02]  # 850 % = Artefakt
+    df["rev_cagr_3y"] = [8.5, -1.5, 0.15, 0.20, -0.05, 4.0]
     settings = Settings()
 
     pct = _indicator_percentile(df, "rev_cagr_3y", settings)
-    assert pd.isna(pct.iloc[0]), "explodierter CAGR muss NaN-Perzentil bekommen"
+    # 850 % und 400 % → beide gedeckelt auf 300 % → geteilter Top-Rang.
+    top = pct.dropna().max()
+    assert pct.iloc[0] == top, "hohes echtes Wachstum muss top ranken"
+    assert pct.iloc[5] == top
+    # < −100 % ist unmöglich → Artefakt → NaN.
+    assert pd.isna(pct.iloc[1])
     # Legitime negative Wachstumsrate bleibt drin und rankt am schlechtesten.
     assert pct.iloc[4] == pct.dropna().min()
 
@@ -287,6 +294,75 @@ def test_min_factor_coverage():
     df["fwd_eps_growth"] = [0.10, 0.08, 0.06, 0.04, 0.02, 0.01]
     scored = compute_scores(df, Settings())
     assert scored["growth_score"].notna().all()
+
+
+def test_high_growth_stock_gets_high_growth_score():
+    """Micron-Fall: reale Wachstumsraten über 300 % dürfen den Growth-Score
+    nicht auslöschen — der Titel muss den besten Growth-Score bekommen."""
+    df = _full_universe()
+    df["rev_cagr_3y"] = [0.60, 0.10, 0.08, 0.06, 0.04, 0.02]
+    df["eps_cagr_3y"] = [4.50, 0.12, 0.10, 0.08, 0.06, 0.04]  # 450 % real
+    df["fwd_eps_growth"] = [3.80, 0.15, 0.12, 0.10, 0.08, 0.06]  # 380 % real
+    scored = compute_scores(df, Settings())
+    assert scored["growth_score"].notna().all()
+    assert scored["growth_score"].iloc[0] == scored["growth_score"].max()
+
+
+def test_total_score_requires_min_factor_coverage():
+    """BDX-Fall: Nur Momentum + Low-Vol vorhanden (33 % Faktor-Gewicht) →
+    kein Gesamt-Score statt eines überproportionalen aus 2 von 5 Faktoren."""
+    df = _full_universe()
+    # Momentum-Daten (voll) …
+    df["ret_1m"] = [0.02, 0.01, 0.03, 0.00, 0.02, 0.01]
+    df["ret_3m"] = [0.05, 0.04, 0.06, 0.02, 0.05, 0.03]
+    df["ret_6m"] = [0.10, 0.08, 0.12, 0.05, 0.09, 0.06]
+    df["ret_12m"] = [0.30, 0.25, 0.35, 0.15, 0.28, 0.20]
+    df["eps_revisions_3m"] = [0.01, 0.02, 0.00, 0.01, 0.02, 0.00]
+    # … und Low-Vol-Daten (voll), sonst nichts.
+    df["beta"] = [0.9, 1.1, 0.8, 1.2, 1.0, 0.95]
+    df["volatility_1y"] = [0.25, 0.30, 0.22, 0.35, 0.28, 0.26]
+    df["high_52w"] = [120.0] * 6
+    df["low_52w"] = [80.0] * 6
+
+    scored = compute_scores(df, Settings())
+    assert scored["momentum_score"].notna().all()
+    assert scored["lowvol_score"].notna().all()
+    # Value/Quality/Growth fehlen → Gesamt-Score NaN, Klassifikation "-".
+    assert scored["total_score"].isna().all()
+    assert (scored["classification"] == "-").all()
+
+
+def test_total_score_ok_when_one_factor_missing():
+    """Fehlt nur der Growth-Faktor (15 % Gewicht), bleibt der Gesamt-Score
+    erhalten (85 % Abdeckung ≥ 60 %)."""
+    df = _full_universe()
+    # Value
+    df["pe"] = [10.0, 12.0, 14.0, 16.0, 18.0, 20.0]
+    df["pb"] = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+    df["ps"] = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+    df["ev_ebitda"] = [8.0, 9.0, 10.0, 11.0, 12.0, 13.0]
+    # Quality
+    df["roe"] = [0.20, 0.18, 0.16, 0.14, 0.12, 0.10]
+    df["roic"] = [0.15, 0.14, 0.13, 0.12, 0.11, 0.10]
+    df["roa"] = [0.10, 0.09, 0.08, 0.07, 0.06, 0.05]
+    df["gross_margin"] = [0.60, 0.55, 0.50, 0.45, 0.40, 0.35]
+    df["op_margin"] = [0.30, 0.28, 0.26, 0.24, 0.22, 0.20]
+    df["debt_equity"] = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    # Momentum
+    df["ret_1m"] = [0.02] * 6
+    df["ret_3m"] = [0.05, 0.04, 0.06, 0.02, 0.05, 0.03]
+    df["ret_6m"] = [0.10, 0.08, 0.12, 0.05, 0.09, 0.06]
+    df["ret_12m"] = [0.30, 0.25, 0.35, 0.15, 0.28, 0.20]
+    df["eps_revisions_3m"] = [0.01, 0.02, 0.00, 0.01, 0.02, 0.00]
+    # Low-Vol
+    df["beta"] = [0.9, 1.1, 0.8, 1.2, 1.0, 0.95]
+    df["volatility_1y"] = [0.25, 0.30, 0.22, 0.35, 0.28, 0.26]
+    df["high_52w"] = [120.0] * 6
+    df["low_52w"] = [80.0] * 6
+
+    scored = compute_scores(df, Settings())
+    assert scored["growth_score"].isna().all()
+    assert scored["total_score"].notna().all()
 
 
 def test_data_coverage_column():

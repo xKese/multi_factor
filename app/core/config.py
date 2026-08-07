@@ -16,13 +16,15 @@ NEGATIVE_IS_INVALID: frozenset[str] = frozenset(
     {"pe", "pfcf", "peg", "ev_ebitda", "pb", "debt_equity"}
 )
 
-# Wachstums-Kennzahlen: Ein CAGR über einer negativen oder nahe null liegenden
-# Basis ist mathematisch nicht definiert bzw. explodiert. Solche Werte würden
-# nach dem Perzentil-Ranking falsch-positive Top-Ränge erzeugen. Werte mit
-# absurder Größenordnung (|x| > GROWTH_PLAUSIBILITY_LIMIT, d. h. > 300 % p. a.)
-# werden daher vor dem Ranking auf NaN maskiert. Legitime negative
-# Wachstumsraten innerhalb des Limits bleiben erhalten und ranken schlecht.
-GROWTH_PLAUSIBILITY_LIMIT: float = 3.0
+# Wachstums-Kennzahlen: Eine Wachstumsrate unter −100 % p. a. ist mathematisch
+# unmöglich und damit sicher ein Datenartefakt (z. B. CAGR über negativer
+# Basis) → NaN. Sehr hohe positive Raten sind dagegen real möglich (z. B.
+# Halbleiter-Zyklus: EPS-Wachstum > 300 %) und dürfen NICHT verworfen werden —
+# sie werden beim Ranking lediglich auf GROWTH_CLIP_LIMIT gedeckelt, sodass
+# echtes Hochwachstum und etwaige Rechenartefakte gleichermaßen als "sehr
+# hoch" (Top-Rang) zählen, statt dass Artefakte allein die Spitze bilden.
+GROWTH_MIN_VALID: float = -1.0
+GROWTH_CLIP_LIMIT: float = 3.0
 GROWTH_OUTLIER_INVALID: frozenset[str] = frozenset(
     {
         "rev_cagr_3y",
@@ -134,6 +136,12 @@ class Settings:
     # eines Scores aus z. B. nur einem Indikator). Der Gesamt-Score wird dann
     # über die Faktor-Neugewichtung aus den übrigen Faktoren gebildet.
     min_factor_coverage: float = 0.5
+    # Mindest-Abdeckung auf Faktor-Ebene für den Gesamt-Score: Die Gewichte
+    # der vorhandenen Faktor-Scores müssen mindestens diesen Anteil der
+    # Faktor-Gewichtssumme stellen, sonst ist der Gesamt-Score NaN. Verhindert,
+    # dass ein Titel mit z. B. nur Momentum + Low-Vol (33 % Gewicht) einen
+    # überproportional hohen, nicht vergleichbaren Gesamt-Score erhält.
+    min_total_coverage: float = 0.6
 
     # Agenten-Tiefenanalyse (TradingAgents-Service). Leere Strings bedeuten:
     # die Defaults des Service-Katalogs (form_defaults) verwenden.
