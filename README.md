@@ -54,7 +54,8 @@ pip install -r requirements.txt
 python -m app.main
 ```
 
-App läuft auf <http://127.0.0.1:8050>. Beim Start ist kein Universum geladen —
+App läuft auf <http://127.0.0.1:8050> (lokaler Dev-Start; unter Docker
+stattdessen Port 5000, siehe unten). Beim Start ist kein Universum geladen —
 das Dashboard zeigt eine Hinweis-Meldung.
 
 Importierte Daten und Einstellungen werden standardmäßig in einer lokalen
@@ -117,8 +118,9 @@ jederzeit prüfen und korrigieren. Bestätigte Zuordnungen werden gespeichert
 
 ### Kombinierter Start mit Docker
 
-Beide Repos als Geschwister-Verzeichnisse auschecken und die LLM-API-Keys in
-`../TradingAgents/.env` hinterlegen, dann:
+Der TradingAgents-Service ist **kein Git-Submodule** dieses Repos, sondern
+wird als Geschwister-Verzeichnis erwartet. Beide Repos nebeneinander
+auschecken und die LLM-API-Keys in `../TradingAgents/.env` hinterlegen, dann:
 
 ```bash
 docker compose -f docker-compose.combined.yml up --build
@@ -143,7 +145,7 @@ Agenten-Funktionen sind deaktiviert (Hinweis in der UI).
 
 ## Daten hochladen
 
-1. Browser auf <http://127.0.0.1:8050/daten-import>
+1. Browser auf <http://127.0.0.1:8050/daten-import> (Docker: Port 5000)
 2. Koyfin-CSV-Export (57 Spalten, siehe `app/core/schema.py`; optional
    zusätzlich `SMA (20D)` an beliebiger Position) per Drag & Drop
    oder Klick auswählen
@@ -157,7 +159,9 @@ Agenten-Funktionen sind deaktiviert (Hinweis in der UI).
 
 - Trennzeichen: `;` oder `,` (Auto-Detection)
 - Dezimaltrennzeichen: `,` (europäisch)
-- Prozent-Werte dürfen als `15,3` oder `0,153` vorliegen (Auto-Normalisierung)
+- Prozent-Werte müssen als Dezimalanteil vorliegen (`0,153` für 15,3 % —
+  Koyfin-Standard). Einzige Ausnahme: die Volatilität liefert Koyfin als
+  Prozentzahl, sie wird beim Import automatisch durch 100 geteilt
 - Spalten-Reihenfolge: siehe `KOYFIN_COLUMNS` in `app/core/schema.py`
 
 ## Tests
