@@ -633,6 +633,9 @@ def _save(n_clicks, v, q, g, m, lv, piotr, altman, mcap, minind, mode, ind_vals,
         dbc.Alert(
             "Einstellungen gespeichert. Scores wurden neu berechnet.",
             color="success",
+            # Automatisch ausblenden: eine dauerhaft stehende Bestätigung
+            # wirkt beim zweiten Speichern wie ein veralteter Status.
+            duration=4000,
         )
     ]
     try:
@@ -719,7 +722,12 @@ def _save_agents(n_clicks, provider, quick, deep, depth, language, temperature,
             f"Gespeichert (nur für diese Sitzung — DB nicht erreichbar: {exc})",
             className="text-warning",
         )
-    return html.Span("Agenten-Einstellungen gespeichert.", className="text-success")
+    return dbc.Alert(
+        "Agenten-Einstellungen gespeichert.",
+        color="success",
+        duration=4000,
+        className="mb-0 py-2",
+    )
 
 
 register_page(__name__, path="/einstellungen", name="Einstellungen", layout=layout)
