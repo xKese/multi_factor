@@ -11,7 +11,8 @@ Abgeschlossen (nicht mehr hier):
   (Cmd+K / `/`) · Tabellen-Export (xlsx) · Einzelanalyse-Rückblicks-
   fenster (Übergangs-Variante — siehe unten) · Theme-Toggle Sun/Moon +
   A11y · Portfolio-Input-Validierung + Feedback · Dashboard-Sektor-
-  Drilldown (klickbare Balken + Filter-Chip) (siehe Git-Historie).
+  Drilldown (klickbare Balken + Filter-Chip) · Einstellungen-Save-
+  Bestätigung blendet nach 4 s automatisch aus (siehe Git-Historie).
 
 ### Offene Datenfrage (nicht blockierend)
 - **Echte Sparklines** für die Einzelanalyse benötigen Monats-
@@ -32,5 +33,3 @@ Abgeschlossen (nicht mehr hier):
   explizit definieren oder als "Desktop-Only" dokumentieren.
 - **Dash-Table-Filter-Syntax** ist für Endnutzer kryptisch
   (`>=3`, `contains "Tech"`). Eventuell Tooltip mit Beispielen einbauen.
-- **Einstellungen-Save-Bestätigung** verschwindet nicht — wird nach
-  zweitem Save überschrieben, wirkt aber „stale". Timeout einbauen.

@@ -1,0 +1,7 @@
+# Kein Build-/Packaging-Manifest — die App wird direkt aus dem Checkout
+# gestartet (requirements.txt). Diese Datei konfiguriert nur pytest, damit
+# `python -m pytest tests -q` ohne manuelles PYTHONPATH=. läuft.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
