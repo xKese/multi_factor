@@ -1,9 +1,12 @@
 """M&S-Portfolio: Koyfin-Watchlist-Import und Handlungs-Flag-Logik.
 
-Der Portfolio-Export ist eine reine Ticker-Liste (keine Gewichte). Anders als
+Der Portfolio-Export ist im Kern eine Ticker-Liste; optional darf eine
+Gewichtsspalte enthalten sein (für das Risiko-&-Benchmark-Modul). Anders als
 der 57-Spalten-Universums-Import (``data_loader.load_koyfin_csv``) ist
 Spaltenzahl und -reihenfolge hier unbekannt — der Loader erkennt die
-Ticker-/Name-Spalte am Header statt über ein positionales Schema.
+Ticker-/Name-/Gewichts-Spalte am Header statt über ein positionales Schema.
+Fehlt die Gewichtsspalte, fällt das Risiko-Modul auf Gleichgewichtung
+zurück (``AppState.portfolio_weights``).
 """
 
 from __future__ import annotations
@@ -30,13 +33,45 @@ def _find_column(df: pd.DataFrame, aliases: set[str]) -> str | None:
     return None
 
 
+# Header-Aliasse (normalisiert) für die optionale Gewichtsspalte.
+_WEIGHT_ALIASES = {"weight", "gewicht", "gewichtung", "anteil", "allokation"}
+
+
+def _parse_weights(df: pd.DataFrame, weight_col: str) -> pd.Series | None:
+    """Koerziert die Gewichtsspalte zu normierten Dezimalanteilen.
+
+    Toleriert Dezimalkomma und Prozent-Skala: Summiert die Spalte auf ≈ 100,
+    wird durch 100 geteilt; anschließend wird auf Summe 1,0 renormalisiert.
+    ``None``, wenn keine verwertbaren Werte vorliegen (→ Gleichgewichtung).
+    """
+
+    raw = df[weight_col]
+    if raw.dtype == object:
+        raw = (
+            raw.astype(str)
+            .str.replace("%", "", regex=False)
+            .str.replace(",", ".", regex=False)
+        )
+    weights = pd.to_numeric(raw, errors="coerce").fillna(0.0).clip(lower=0.0)
+    total = float(weights.sum())
+    if total <= 0:
+        return None
+    if total > 1.5:
+        weights = weights / 100.0
+        total = float(weights.sum())
+    return weights / total
+
+
 def load_portfolio_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
-    """Parst einen Koyfin-Watchlist-Export (Ticker-Liste, keine Gewichte).
+    """Parst einen Koyfin-Watchlist-Export (Ticker-Liste, optional Gewichte).
 
     Liefert einen DataFrame mit den Spalten ``ticker`` und ``name`` (Name kann
     leer sein), in Datei-Reihenfolge, Ticker upper-case und dedupliziert.
-    Gruppen-Kopfzeilen (nur die Ticker-Spalte gefüllt, z. B. "MSCI World")
-    werden verworfen. Raises ``ValueError``, wenn keine Ticker gefunden werden.
+    Enthält die Datei eine Gewichtsspalte (Header z. B. ``Gewicht``,
+    ``Weight``, ``Anteil``), kommt zusätzlich ``weight`` als auf 1,0
+    normierter Dezimalanteil dazu. Gruppen-Kopfzeilen (nur die Ticker-Spalte
+    gefüllt, z. B. "MSCI World") werden verworfen. Raises ``ValueError``,
+    wenn keine Ticker gefunden werden.
     """
 
     if isinstance(source, (bytes, bytearray)):
@@ -55,9 +90,12 @@ def load_portfolio_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
         raise ValueError("Keine Ticker in der Datei gefunden")
 
     ticker_col = _find_column(df, {"ticker", "symbol"}) or df.columns[0]
+    weight_col = _find_column(df, _WEIGHT_ALIASES)
     name_col = _find_column(df, {"name"})
     if name_col is None and df.shape[1] >= 2:
-        candidates = [c for c in df.columns if c != ticker_col]
+        candidates = [
+            c for c in df.columns if c != ticker_col and c != weight_col
+        ]
         name_col = candidates[0] if candidates else None
 
     # Gruppen-Kopfzeilen: außer dem Ticker ist alles leer. Bei einer reinen
@@ -79,10 +117,22 @@ def load_portfolio_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
     names = names.where(names.str.lower() != "nan", "")
 
     out = pd.DataFrame({"ticker": tickers, "name": names})
+    if weight_col is not None:
+        parsed = _parse_weights(df, weight_col)
+        if parsed is not None:
+            out["weight"] = parsed
     out = out[(out["ticker"] != "") & (out["ticker"] != "NAN")]
     out = out.drop_duplicates(subset="ticker", keep="first").reset_index(drop=True)
     if out.empty:
         raise ValueError("Keine Ticker in der Datei gefunden")
+    if "weight" in out.columns:
+        # Nach Filter/Dedup erneut auf 1,0 normieren; ohne verwertbare
+        # Gewichte fällt die Spalte weg (→ Gleichgewichtung im Risiko-Modul).
+        total = float(out["weight"].sum())
+        if total > 0:
+            out["weight"] = out["weight"] / total
+        else:
+            out = out.drop(columns=["weight"])
     return out
 
 

@@ -28,10 +28,11 @@ NAV_ORDER = {
     "Sektor-Momentum": 4,
     "M&S Portfolio": 5,
     "Factor Timing": 6,
-    "Daten-Import": 7,
-    "Einstellungen": 8,
-    "Perzentil-Hilfe": 9,
-    "Anleitung": 10,
+    "Risiko & Benchmark": 7,
+    "Daten-Import": 8,
+    "Einstellungen": 9,
+    "Perzentil-Hilfe": 10,
+    "Anleitung": 11,
 }
 
 
@@ -138,6 +139,7 @@ def create_app() -> dash.Dash:
         factor_timing,
         perzentil_hilfe,
         portfolios,
+        risiko,
         sektor_momentum,
         sma_signale,
     )

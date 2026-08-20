@@ -22,6 +22,7 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 | Perzentil_Hilfe  | automatisch aus Universum                       |
 | Anleitung        | Bedienungsanleitung                             |
 | —                | Agenten-Analyse: LLM-Tiefenanalyse via TradingAgents (siehe unten) |
+| —                | Risiko & Benchmark: Tracking Error, MCTE-Risikobeiträge, Szenarien, Faktor-Schocks (siehe unten) |
 
 ## Scoring-Logik
 
@@ -164,12 +165,105 @@ Agenten-Funktionen sind deaktiviert (Hinweis in der UI).
   Prozentzahl, sie wird beim Import automatisch durch 100 geteilt
 - Spalten-Reihenfolge: siehe `KOYFIN_COLUMNS` in `app/core/schema.py`
 
+## Risiko & Benchmark (Tracking Error, MCTE, Szenarien)
+
+Eigenständiges Modul (`app/core/av_client|av_store|market_data|risk_*`),
+Dash-Seite `/risiko` und CLI. Datenquelle ist die Alpha-Vantage-Premium-API
+(Tageskurse adjusted, FX, 10Y-Treasury, WTI); Benchmark ist der iShares MSCI
+ACWI ETF (US-Ticker `ACWI`, konfigurierbar) als investierbarer Proxy. Alle
+Reihen werden nach EUR umgerechnet — die Ergebnisse bilden die **EUR-Sicht
+ohne Currency-Hedging** ab.
+
+### Setup
+
+```bash
+export ALPHAVANTAGE_API_KEY=...     # Premium-Key, niemals im Code/Repo
+
+python -m app.tools.risk_report update                  # Kurse/FX/Makro cachen
+python -m app.tools.risk_report report --asof 2026-08-20
+python -m app.tools.risk_report report --only "COVID,Zinsjahr2022"
+python -m app.tools.risk_report report --variante buyhold
+```
+
+- `update` lädt inkrementell (nur fehlende Tage; heute schon Abgerufenes wird
+  übersprungen) in die App-DB (`av_price_cache`); rückwirkende
+  Split-/Dividenden-Adjustierungen werden am Overlap-Tag erkannt und lösen
+  einen Full-Refetch aus. `report` rechnet strikt aus dem Cache (keine
+  API-Calls) und schreibt `reports/risiko_benchmark_YYYY-MM-DD.md`.
+- Exit-Codes: `0` Erfolg, `1` fehlende Daten (kein Portfolio/Cache), `2`
+  Argumentfehler — geeignet für einen täglichen Scheduler-Lauf
+  (`update` gefolgt von `report`).
+- **Portfoliogewichte:** Der Watchlist-Upload auf `/portfolios` darf optional
+  eine Gewichtsspalte enthalten (Header `Gewicht`/`Weight`/`Anteil`;
+  Dezimalkomma, Prozent- oder Dezimalskala). Ohne Spalte gilt
+  Gleichgewichtung (1/N). Beispiel:
+
+  ```csv
+  Ticker;Name;Gewicht
+  AAPL;Apple;25,0
+  SAP;SAP SE;40,0
+  ACN;Accenture;35,0
+  ```
+
+- **Ticker-Mapping:** Alpha Vantage nutzt eigene Börsen-Suffixe (`SAP.DEX`
+  für Xetra, `.LON` für London, `.FRK` für Frankfurt). Die Auflösung läuft
+  automatisch (gespeichertes Mapping → Suffix-/Share-Class-Heuristik →
+  `SYMBOL_SEARCH`-Validierung, die zugleich die Handelswährung liefert) und
+  wird in `av_ticker_mappings` persistiert. Nicht auflösbare Ticker landen
+  im Datenqualitätsteil des Reports; manuell zuordnen mit z. B.
+  `--map SAP=SAP.DEX:EUR` (Beispielzeilen: `MBG=MBG.DEX:EUR`,
+  `BRKB=BRK-B:USD`, `HSBA=HSBA.LON:GBX`).
+
+### Formeln (Kurzfassung)
+
+- Ex-post TE = Std(aktive Tagesrendite) × √252, rollierend 1J/3J und
+  Gesamtperiode; aktive Rendite = Portfolio − Benchmark (einfache Renditen
+  aus Adjusted Close in EUR); Portfoliovariante `fest` (fixe Gewichte,
+  täglich rebalanced, Default) oder `buyhold` (Drift ab Start).
+- Information Ratio = annualisierte aktive Rendite / TE; aktives Beta und
+  Korrelation per OLS Portfolio vs. Benchmark; Up-/Downside-Capture;
+  max. relativer Drawdown des Wertverhältnisses Portfolio/Benchmark.
+- Ex-ante TE = √(wᵀΣw · 252) mit Σ = Kovarianz der aktiven Renditen
+  (r_i − r_Benchmark, 2 Jahre Tagesdaten), geschätzt mit
+  **Ledoit-Wolf-Shrinkage** (`sklearn.covariance.LedoitWolf`); die rohe
+  Sample-Kovarianz wird als Robustheits-Check zusätzlich ausgewiesen.
+  MCTE_i = (Σw)_i · 252 / TE, CTE_i = w_i · MCTE_i mit Σ CTE_i ≡ TE
+  (Unit-Test, Toleranz 1e-10).
+- Szenario-Replay: heutige Gewichte durch historische Fenster (GFC,
+  Eurokrise, COVID, Zinsjahr 2022, Vol-Schock 2018 — konfigurierbar);
+  Gewichte auf verfügbare Titel renormalisiert, Abdeckungsgrad wird
+  ausgewiesen, unter 60 % gilt das Szenario als „nicht belastbar“.
+- Faktor-Schocks: je Titel OLS der Wochenrenditen (3 Jahre) auf
+  Benchmark-Rendite, Δ10Y-Treasury (bp), WTI- und EURUSD-Rendite; Schocks
+  (Zinsen +100 bp, Öl +20 %, USD −10 %, Markt −15 %, „Stagflation“) über
+  die Betas propagiert; R² < 0,2 → „geringe Erklärungsgüte“.
+
+### Bekannte Limitierungen
+
+- Kovarianz und Betas sind **rückwärtsgerichtet** — Strukturbrüche
+  (z. B. Zinsregime) bilden sie erst verzögert ab.
+- **Korrelationskonvergenz in Krisen:** In Stressphasen steigen
+  Korrelationen sprunghaft; ex-ante TE und Schock-P&L unterschätzen
+  Krisenrisiken systematisch.
+- Der Benchmark ist ein **ETF-Proxy** (inkl. Kosten/Tracking-Differenz),
+  nicht der MSCI-ACWI-Index selbst; Historie erst ab März 2008 — das
+  GFC-Fenster ist dadurch nur teilweise abgedeckt.
+- Adjusted Close approximiert Total Return (Dividenden reinvestiert am
+  Ex-Tag); ACWI-Sektorgewichte sind ein statischer Quartalsstand
+  (`Settings.risk_benchmark_sector_weights`, Quelle iShares-Factsheet).
+- Einmal gespeicherte Einstellungen: `risk_scenario_windows` und
+  `risk_factor_shocks` werden beim Laden **nicht** mit neuen Defaults
+  gemergt (nur `dict[str, float]`-Felder werden gemergt) — neue
+  Default-Szenarien erreichen Bestandsinstallationen daher nur über ein
+  erneutes Speichern der Einstellungen.
+
 ## Tests
 
 ```bash
 python -m tests.test_scoring        # Smoke-Test Scoring
 python -m pytest tests -q           # komplette Suite (inkl. Agenten-Client,
-                                    # Ticker-Mapping, Agenten-Persistenz)
+                                    # Ticker-Mapping, Agenten-Persistenz,
+                                    # Risiko-&-Benchmark-Modul)
 ```
 
 Smoke-Test gegen `tests/fixtures/koyfin_sample.csv` (10 synthetische Tickers).
