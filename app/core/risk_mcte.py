@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-from sklearn.covariance import LedoitWolf
 
 from .risk_metrics import TRADING_DAYS
 
@@ -45,6 +44,26 @@ class McteResult:
     # ursprünglicher Gewichtsanteil (drückt den TE tendenziell nach unten).
     ausgeschlossen: list[str] = field(default_factory=list)
     ausgeschlossen_gewicht: float = 0.0
+
+
+def _ledoit_wolf_class():
+    """Lazy-Import von scikit-learn.
+
+    Bewusst nicht auf Modulebene: Fehlt das Paket (z. B. Umgebung noch ohne
+    ``pip install -r requirements.txt``), soll die App trotzdem starten —
+    nur die MCTE-Berechnung meldet dann einen verständlichen Hinweis
+    (``ValueError`` wird vom Report-Orchestrator als Notiz angezeigt).
+    """
+
+    try:
+        from sklearn.covariance import LedoitWolf
+    except ImportError as exc:
+        raise ValueError(
+            "scikit-learn ist nicht installiert (für die Ledoit-Wolf-"
+            "Kovarianz nötig) — bitte 'pip install -r requirements.txt' "
+            "ausführen."
+        ) from exc
+    return LedoitWolf
 
 
 def _contributions(
@@ -101,7 +120,7 @@ def compute_mcte(
     total = float(sum(weights[c] for c in kept))
     w = np.array([weights[c] / total for c in kept])
 
-    lw = LedoitWolf().fit(X.to_numpy())
+    lw = _ledoit_wolf_class()().fit(X.to_numpy())
     sigma_lw = lw.covariance_
     sigma_sample = np.cov(X.to_numpy().T, ddof=1).reshape(len(kept), len(kept))
 

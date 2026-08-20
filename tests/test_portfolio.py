@@ -151,6 +151,19 @@ def test_weights_roundtrip_through_db(tmp_path, monkeypatch):
     state.set_ms_portfolio(loaded)
     assert state.portfolio_weights() == pytest.approx({"AAA": 0.6, "BBB": 0.4})
 
+    # Regression: Wiederholte Aufrufe (Spalte existiert bereits) dürfen die
+    # Transaktion nicht vergiften — in Postgres bricht ein fehlgeschlagenes
+    # ALTER sonst alle Folge-Statements ab (InFailedSqlTransaction). Der
+    # Inspector-Check muss das ALTER überspringen, auch zweimal im selben
+    # Transaktionsblock.
+    again = persistence.load_ms_portfolio()
+    assert list(again["ticker"]) == ["AAA", "BBB"]
+    with engine.begin() as conn:
+        persistence._ensure_column(conn, "ms_portfolio", "weight", "DOUBLE PRECISION")
+        persistence._ensure_column(conn, "ms_portfolio", "weight", "DOUBLE PRECISION")
+        rows = conn.execute(text("SELECT weight FROM ms_portfolio")).fetchall()
+    assert len(rows) == 2
+
 
 # ── Handlungs-Flags ────────────────────────────────────────────────────────
 
