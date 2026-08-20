@@ -20,7 +20,7 @@ from dataclasses import fields as dataclass_fields
 from datetime import date, timedelta
 
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -488,15 +488,15 @@ def load_sector_score_history(max_age_days: int = 400) -> pd.DataFrame:
 def _ensure_column(conn, table: str, column: str, ddl_type: str) -> None:
     """Idempotentes ``ALTER TABLE … ADD COLUMN`` im SQLite∩Postgres-Dialekt.
 
-    Beide Dialekte kennen kein ``ADD COLUMN IF NOT EXISTS`` (SQLite gar
-    nicht, Postgres erst ab 9.6 — und der Fehlerfall ist ohnehin billig):
-    Existiert die Spalte schon, schlägt das ALTER fehl und wird verschluckt.
+    Bewusst per Inspector-Check statt „ALTER versuchen und Fehler
+    verschlucken": In Postgres bricht ein fehlgeschlagenes Statement die
+    gesamte laufende Transaktion ab (``InFailedSqlTransaction``) — alle
+    Folge-Statements im selben ``engine.begin()``-Block würden scheitern.
     """
 
-    try:
+    existing = {c["name"] for c in inspect(conn).get_columns(table)}
+    if column not in existing:
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
-    except SQLAlchemyError:
-        pass
 
 
 def _ensure_ms_portfolio_table(conn) -> None:
