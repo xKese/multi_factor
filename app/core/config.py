@@ -159,6 +159,57 @@ class Settings:
     # bleiben unbeeinflusst.
     agents_prev_analysis: bool = True
 
+    # ── Risiko & Benchmark ──────────────────────────────────────────────
+    # Benchmark-Proxy: iShares MSCI ACWI ETF (US-Listing, USD). Bereits im
+    # AV-Symbolformat — wird ohne Mapping direkt geladen.
+    risk_benchmark_symbol: str = "ACWI"
+    # Zielverzeichnis der Markdown-Reports (relativ zum Arbeitsverzeichnis).
+    risk_report_dir: str = "reports"
+    # Alpha-Vantage-Rate-Limit (Premium-Plan 75/min → ein Request Puffer).
+    risk_av_requests_per_minute: int = 70
+    # GICS-Sektorgewichte des MSCI ACWI als Dezimalanteile. Quelle:
+    # iShares-ACWI-Factsheet; quartalsweise manuell nachpflegen. Die Keys
+    # müssen den Sektornamen des Koyfin-Universums entsprechen — Sektoren
+    # ohne Gegenstück werden in der aktiven Allokation mit Gewicht 0 auf
+    # der jeweils anderen Seite ausgewiesen (nicht verworfen).
+    risk_benchmark_sector_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "Information Technology": 0.278,
+            "Financials": 0.158,
+            "Consumer Discretionary": 0.105,
+            "Industrials": 0.105,
+            "Health Care": 0.095,
+            "Communication Services": 0.082,
+            "Consumer Staples": 0.058,
+            "Energy": 0.037,
+            "Materials": 0.036,
+            "Utilities": 0.026,
+            "Real Estate": 0.020,
+        }
+    )
+    # Historische Szenario-Fenster (Replay), Werte = [Start, Ende] ISO.
+    risk_scenario_windows: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "GFC": ["2007-10-09", "2009-03-09"],
+            "Eurokrise": ["2011-05-02", "2011-10-04"],
+            "COVID": ["2020-02-19", "2020-03-23"],
+            "Zinsjahr2022": ["2022-01-03", "2022-10-14"],
+            "VolSchock2018": ["2018-01-26", "2018-02-08"],
+        }
+    )
+    # Hypothetische Faktor-Schocks. Keys je Szenario: ``markt`` (Rendite),
+    # ``zins_bp`` (Δ 10Y-Treasury in Basispunkten), ``oel`` (WTI-Rendite),
+    # ``usd`` (USD-Rendite ggü. EUR). Fehlende Keys = kein Schock.
+    risk_factor_shocks: dict[str, dict[str, float]] = field(
+        default_factory=lambda: {
+            "Zinsen +100bp": {"zins_bp": 100.0},
+            "Öl +20%": {"oel": 0.20},
+            "USD −10%": {"usd": -0.10},
+            "Markt −15%": {"markt": -0.15},
+            "Stagflation": {"markt": -0.10, "zins_bp": 75.0, "oel": 0.25},
+        }
+    )
+
     INVERT_LOW_IS_BETTER: set[str] = field(
         default_factory=lambda: {
             "pb",

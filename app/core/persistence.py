@@ -82,6 +82,15 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "agents_language",
     "agents_temperature",
     "agents_prev_analysis",
+    # Risiko & Benchmark. Hinweis: ``_apply_settings_dict`` mergt nur
+    # ``dict[str, float]``-Felder mit den Defaults — gespeicherte
+    # Szenario-/Schock-Dicts gewinnen als Ganzes (dokumentiert im README).
+    "risk_benchmark_symbol",
+    "risk_report_dir",
+    "risk_av_requests_per_minute",
+    "risk_benchmark_sector_weights",
+    "risk_scenario_windows",
+    "risk_factor_shocks",
 )
 
 _engine: Engine | None = None
@@ -476,6 +485,20 @@ def load_sector_score_history(max_age_days: int = 400) -> pd.DataFrame:
     return df
 
 
+def _ensure_column(conn, table: str, column: str, ddl_type: str) -> None:
+    """Idempotentes ``ALTER TABLE … ADD COLUMN`` im SQLite∩Postgres-Dialekt.
+
+    Beide Dialekte kennen kein ``ADD COLUMN IF NOT EXISTS`` (SQLite gar
+    nicht, Postgres erst ab 9.6 — und der Fehlerfall ist ohnehin billig):
+    Existiert die Spalte schon, schlägt das ALTER fehl und wird verschluckt.
+    """
+
+    try:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+    except SQLAlchemyError:
+        pass
+
+
 def _ensure_ms_portfolio_table(conn) -> None:
     conn.execute(
         text(
@@ -483,15 +506,20 @@ def _ensure_ms_portfolio_table(conn) -> None:
             "position INTEGER PRIMARY KEY, "
             "ticker TEXT NOT NULL, "
             "name TEXT, "
+            "weight DOUBLE PRECISION, "
             "imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
     )
+    # Migration für Bestands-DBs: Die Tabelle wird per DELETE+INSERT
+    # wiederbefüllt, aber nie gedroppt — Altbestände haben die Spalte nicht.
+    _ensure_column(conn, _MS_PORTFOLIO_TABLE, "weight", "DOUBLE PRECISION")
 
 
 def save_ms_portfolio(df: pd.DataFrame) -> int:
     """Ersetzt den Inhalt von ``ms_portfolio`` durch ``df`` (Spalten
-    ``ticker``, optional ``name``; Position = Zeilenreihenfolge). Raised bei
-    DB-Problemen — der Aufrufer zeigt eine UI-Warnung. Liefert Zeilenzahl.
+    ``ticker``, optional ``name`` und ``weight``; Position =
+    Zeilenreihenfolge). Raised bei DB-Problemen — der Aufrufer zeigt eine
+    UI-Warnung. Liefert Zeilenzahl.
     """
 
     engine = get_engine()
@@ -500,15 +528,20 @@ def save_ms_portfolio(df: pd.DataFrame) -> int:
     if df is None or df.empty:
         return 0
 
-    rows = [
-        {
-            "position": i,
-            "ticker": str(r["ticker"]),
-            "name": str(r.get("name") or "") or None,
-        }
-        for i, (_, r) in enumerate(df.iterrows())
-        if isinstance(r.get("ticker"), str) and r.get("ticker")
-    ]
+    has_weight = "weight" in df.columns
+    rows = []
+    for i, (_, r) in enumerate(df.iterrows()):
+        if not (isinstance(r.get("ticker"), str) and r.get("ticker")):
+            continue
+        weight = r.get("weight") if has_weight else None
+        rows.append(
+            {
+                "position": i,
+                "ticker": str(r["ticker"]),
+                "name": str(r.get("name") or "") or None,
+                "weight": None if weight is None or pd.isna(weight) else float(weight),
+            }
+        )
     if not rows:
         return 0
 
@@ -517,8 +550,9 @@ def save_ms_portfolio(df: pd.DataFrame) -> int:
         conn.execute(text(f"DELETE FROM {_MS_PORTFOLIO_TABLE}"))
         conn.execute(
             text(
-                f"INSERT INTO {_MS_PORTFOLIO_TABLE} (position, ticker, name) "
-                "VALUES (:position, :ticker, :name)"
+                f"INSERT INTO {_MS_PORTFOLIO_TABLE} "
+                "(position, ticker, name, weight) "
+                "VALUES (:position, :ticker, :name, :weight)"
             ),
             rows,
         )
@@ -526,7 +560,7 @@ def save_ms_portfolio(df: pd.DataFrame) -> int:
 
 
 def load_ms_portfolio() -> pd.DataFrame | None:
-    """Lädt das M&S-Portfolio (Spalten ``ticker, name, imported_at``,
+    """Lädt das M&S-Portfolio (Spalten ``ticker, name, weight, imported_at``,
     sortiert nach Position). ``None`` bei fehlender Tabelle/DB. Raised nie.
     """
 
@@ -538,7 +572,8 @@ def load_ms_portfolio() -> pd.DataFrame | None:
             _ensure_ms_portfolio_table(conn)
             df = pd.read_sql(
                 text(
-                    f"SELECT ticker, name, imported_at FROM {_MS_PORTFOLIO_TABLE} "
+                    f"SELECT ticker, name, weight, imported_at "
+                    f"FROM {_MS_PORTFOLIO_TABLE} "
                     "ORDER BY position ASC"
                 ),
                 conn,

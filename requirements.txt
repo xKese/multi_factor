@@ -3,6 +3,7 @@ dash-bootstrap-components>=1.6.0
 plotly>=5.22.0
 pandas>=2.2.0
 numpy>=1.26.0
+scikit-learn>=1.4
 python-dateutil>=2.9.0
 sqlalchemy>=2.0
 psycopg2-binary>=2.9

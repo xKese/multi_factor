@@ -62,6 +62,96 @@ def test_empty_file_raises():
         load_portfolio_csv(b"Ticker\n")
 
 
+# ── Optionale Gewichtsspalte ───────────────────────────────────────────────
+
+WEIGHTS_FIXTURE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "koyfin_portfolio_weights_sample.csv"
+)
+
+
+def test_weight_column_parsed_normalized_and_deduped():
+    """Prozent-Skala (Summe ≈ 100) wird zu Dezimalanteilen; Gruppen-Kopf und
+    Duplikat fallen raus, danach wird auf Summe 1,0 renormalisiert."""
+
+    df = load_portfolio_csv(WEIGHTS_FIXTURE.read_bytes())
+
+    assert list(df["ticker"]) == ["AAPL", "MSFT", "SAP"]
+    assert df["weight"].sum() == pytest.approx(1.0)
+    weights = dict(zip(df["ticker"], df["weight"]))
+    assert weights["AAPL"] == pytest.approx(0.25)
+    assert weights["SAP"] == pytest.approx(0.40)
+
+
+def test_weight_column_decimal_fractions_kept():
+    raw = b"Ticker;Weight\nAAA;0,6\nBBB;0,4\n"
+    df = load_portfolio_csv(raw)
+    assert dict(zip(df["ticker"], df["weight"])) == pytest.approx(
+        {"AAA": 0.6, "BBB": 0.4}
+    )
+
+
+def test_missing_weight_column_yields_no_weight():
+    df = load_portfolio_csv(FIXTURE.read_bytes())
+    assert "weight" not in df.columns
+
+
+def test_state_equal_weight_fallback():
+    state = AppState()
+    state.set_ms_portfolio(pd.DataFrame({"ticker": ["A", "B", "C", "D"]}))
+    weights = state.portfolio_weights()
+    assert weights == pytest.approx({t: 0.25 for t in ["A", "B", "C", "D"]})
+
+
+def test_state_uses_imported_weights():
+    state = AppState()
+    state.set_ms_portfolio(
+        pd.DataFrame({"ticker": ["A", "B"], "weight": [0.7, 0.3]})
+    )
+    assert state.portfolio_weights() == pytest.approx({"A": 0.7, "B": 0.3})
+
+
+def test_weights_roundtrip_through_db(tmp_path, monkeypatch):
+    """Gewichte überleben save_ms_portfolio → load_ms_portfolio, inkl.
+    ALTER-Migration einer Bestandstabelle ohne weight-Spalte."""
+
+    import importlib
+
+    from sqlalchemy import text
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
+    from app.core import persistence
+
+    importlib.reload(persistence)
+
+    # Bestandstabelle im alten Schema (ohne weight) anlegen.
+    engine = persistence.get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE ms_portfolio ("
+                "position INTEGER PRIMARY KEY, ticker TEXT NOT NULL, "
+                "name TEXT, imported_at TIMESTAMP NOT NULL "
+                "DEFAULT CURRENT_TIMESTAMP)"
+            )
+        )
+
+    df = pd.DataFrame(
+        {"ticker": ["AAA", "BBB"], "name": ["A", "B"], "weight": [0.6, 0.4]}
+    )
+    assert persistence.save_ms_portfolio(df) == 2
+
+    loaded = persistence.load_ms_portfolio()
+    assert dict(zip(loaded["ticker"], loaded["weight"])) == pytest.approx(
+        {"AAA": 0.6, "BBB": 0.4}
+    )
+
+    state = AppState()
+    state.set_ms_portfolio(loaded)
+    assert state.portfolio_weights() == pytest.approx({"AAA": 0.6, "BBB": 0.4})
+
+
 # ── Handlungs-Flags ────────────────────────────────────────────────────────
 
 def _scored_frame() -> pd.DataFrame:

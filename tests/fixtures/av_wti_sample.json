@@ -1,0 +1,11 @@
+{
+  "name": "Crude Oil Prices WTI",
+  "interval": "daily",
+  "unit": "dollars per barrel",
+  "data": [
+    {"date": "2024-01-08", "value": "70.77"},
+    {"date": "2024-01-05", "value": "73.81"},
+    {"date": "2024-01-04", "value": "."},
+    {"date": "2024-01-03", "value": "72.70"}
+  ]
+}
