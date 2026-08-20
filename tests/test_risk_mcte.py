@@ -98,6 +98,24 @@ def test_too_little_data_raises_german_message():
         risk_mcte.compute_mcte(rets, bm, {"A": 1.0})
 
 
+def test_missing_sklearn_yields_german_hint(monkeypatch):
+    """Fehlendes scikit-learn darf den App-Start nicht verhindern — die
+    Berechnung meldet stattdessen einen verständlichen ValueError."""
+
+    def _boom():
+        raise ValueError(
+            "scikit-learn ist nicht installiert (für die Ledoit-Wolf-"
+            "Kovarianz nötig) — bitte 'pip install -r requirements.txt' "
+            "ausführen."
+        )
+
+    monkeypatch.setattr(risk_mcte, "_ledoit_wolf_class", _boom)
+    rets, bm = _panel()
+    with pytest.raises(ValueError) as err:
+        risk_mcte.compute_mcte(rets, bm, WEIGHTS)
+    assert "scikit-learn" in str(err.value)
+
+
 def test_sector_aggregation_sums_to_te():
     rets, bm = _panel()
     result = risk_mcte.compute_mcte(rets, bm, WEIGHTS)
