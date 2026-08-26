@@ -437,6 +437,40 @@ def layout(**_) -> html.Div:
                     ),
                     dbc.Row(
                         [
+                            dbc.Col(html.Label("BUY ab Gesamt-Score"), md=6),
+                            dbc.Col(
+                                dbc.Input(
+                                    id="buy-threshold",
+                                    type="number",
+                                    value=s.buy_threshold,
+                                    min=0,
+                                    max=100,
+                                    step=1,
+                                ),
+                                md=4,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("SELL unter Gesamt-Score"), md=6),
+                            dbc.Col(
+                                dbc.Input(
+                                    id="sell-threshold",
+                                    type="number",
+                                    value=s.sell_threshold,
+                                    min=0,
+                                    max=100,
+                                    step=1,
+                                ),
+                                md=4,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
                             dbc.Col(html.Label("Perzentil-Modus"), md=6),
                             dbc.Col(
                                 dbc.Select(
@@ -549,6 +583,8 @@ def _factor_sum(values: list) -> tuple[list, str]:
     Output("min-altman", "value"),
     Output("min-mcap", "value"),
     Output("min-industry", "value"),
+    Output("buy-threshold", "value"),
+    Output("sell-threshold", "value"),
     Output("pct-mode", "value"),
     Input("reset-settings", "n_clicks"),
     State({"type": "factor-weight", "index": ALL}, "id"),
@@ -576,6 +612,8 @@ def _reset(_n, factor_ids, ind_ids):
         defaults.min_altman_z,
         defaults.min_market_cap,
         defaults.min_stocks_per_industry,
+        defaults.buy_threshold,
+        defaults.sell_threshold,
         defaults.percentile_mode,
     )
 
@@ -592,15 +630,21 @@ def _reset(_n, factor_ids, ind_ids):
     State("min-altman", "value"),
     State("min-mcap", "value"),
     State("min-industry", "value"),
+    State("buy-threshold", "value"),
+    State("sell-threshold", "value"),
     State("pct-mode", "value"),
     State({"type": "ind-weight", "index": ALL}, "value"),
     State({"type": "ind-weight", "index": ALL}, "id"),
     prevent_initial_call=True,
 )
-def _save(n_clicks, v, q, g, m, lv, piotr, altman, mcap, minind, mode, ind_vals, ind_ids):
+def _save(
+    n_clicks, v, q, g, m, lv, piotr, altman, mcap, minind,
+    buy_thr, sell_thr, mode, ind_vals, ind_ids,
+):
     if not n_clicks:
         return ""
     s = STATE.settings
+    defaults = Settings()
     s.factor_weights = {
         "value": float(v or 0),
         "quality": float(q or 0),
@@ -612,6 +656,13 @@ def _save(n_clicks, v, q, g, m, lv, piotr, altman, mcap, minind, mode, ind_vals,
     s.min_altman_z = float(altman or 0)
     s.min_market_cap = float(mcap or 0)
     s.min_stocks_per_industry = int(minind or 1)
+    # Leeres Feld → Default; SELL-Schwelle darf die BUY-Schwelle nicht
+    # überschreiten, sonst gäbe es kein HOLD-Band mehr.
+    s.buy_threshold = float(buy_thr if buy_thr is not None else defaults.buy_threshold)
+    s.sell_threshold = min(
+        float(sell_thr if sell_thr is not None else defaults.sell_threshold),
+        s.buy_threshold,
+    )
     s.percentile_mode = mode or "Industrie"
 
     # Indikator-Gewichte schreiben

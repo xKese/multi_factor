@@ -61,11 +61,20 @@ Datum verwendet.
 - **Momentum** nutzt das 12-1-Momentum (12M-Return ohne letzten Monat) statt
   des reinen 12M-Returns.
 - **Filter**: Piotroski ≥ 5, Altman Z ≥ 1,8, Market Cap ≥ 1 Mrd. Für
-  Financials wird das Altman-Kriterium übersprungen (für Banken/Versicherer
-  nicht definiert). Piotroski gilt nur bei mindestens 6 von 9 bewertbaren
-  Kriterien als aussagekräftig — sonst Filter „-".
+  Financials und Real Estate wird das Altman-Kriterium übersprungen (dort
+  nicht definiert bzw. sachfremd kalibriert). Piotroski gilt nur bei
+  mindestens 6 von 9 bewertbaren Kriterien als aussagekräftig (Financials:
+  4 von 6) — sonst Filter „-".
 - **Klassifikation**: A ≥ 80 · B+ ≥ 70 · B ≥ 60 · C ≥ 50 · D ≥ 40 · F < 40.
-- **Empfehlung**: STRONG BUY / BUY / HOLD / SELL.
+- **Empfehlung**: STRONG BUY ≥ 80 · BUY ab BUY-Schwelle (Default 70) ·
+  HOLD · SELL unter SELL-Schwelle (Default 45); Schwellen editierbar in den
+  Einstellungen. Das breite HOLD-Band verhindert Empfehlungs-Flackern.
+  Zusätzlich „Empfehlung inkl. Momentum": ein aktives Death Cross bei
+  Gesamt-Score < 60 eskaliert HOLD auf „SELL (Death Cross)".
+- **Financials-Sonderbehandlung**: Für Banken/Versicherer nicht definierte
+  Kennzahlen (EV/EBITDA, P/FCF, Margen, Zinsdeckung, Current Ratio, OCF/NI,
+  Debt/Equity, Altman Z) fließen nicht in deren Faktor-Scores und
+  Daten-Abdeckung ein.
 
 ## Piotroski F-Score (9 Kriterien, 0–9 Punkte)
 
@@ -73,11 +82,14 @@ Datum verwendet.
 2. Operating Cash Flow > 0
 3. ROA steigend
 4. OCF > Net Income
-5. Total Debt sinkend
-6. Current Ratio steigend
+5. Total Debt sinkend — entfällt für Financials
+6. Current Ratio steigend — entfällt für Financials
 7. Aktienzahl konstant oder sinkend
-8. Gross Margin steigend
+8. Gross Margin steigend — entfällt für Financials
 9. Asset Turnover steigend
+
+Financials werden auf den verbleibenden 6 Kriterien gescort (0–6 Punkte);
+die Filter-Schwelle wird proportional umgerechnet.
 
 ## Momentum-Monitor (SMA-Signale)
 

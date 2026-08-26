@@ -14,11 +14,13 @@ import numpy as np
 import pandas as pd
 
 from .config import (
+    FINANCIAL_IRRELEVANT_INDICATORS,
     FINANCIAL_SECTOR_MARKER,
     GROWTH_CLIP_LIMIT,
     GROWTH_MIN_VALID,
     GROWTH_OUTLIER_INVALID,
     NEGATIVE_IS_INVALID,
+    REAL_ESTATE_SECTOR_MARKER,
     Settings,
 )
 from .momentum import (
@@ -30,7 +32,12 @@ from .momentum import (
     classify_momentum,
     classify_trend_phase,
 )
-from .piotroski import compute_piotroski
+from .piotroski import PIOTROSKI_MAX_CRITERIA, compute_piotroski, is_financial_sector
+
+
+# Unterhalb dieses Gesamt-Scores eskaliert ein aktives Death Cross die
+# HOLD-Empfehlung im Overlay auf SELL (siehe ``recommendation_overlay``).
+_DEATH_CROSS_ESCALATION_SCORE: float = 60.0
 
 
 _SMA_ICON_LABELS: dict[str, str] = {
@@ -142,21 +149,43 @@ def _indicator_percentile(
     return pct
 
 
+def _relevant_weight_total(
+    df: pd.DataFrame, weights: dict[str, float]
+) -> pd.Series:
+    """Gewichtssumme der je Zeile fachlich anwendbaren Indikatoren.
+
+    Für Financials werden die Gewichte der für Banken/Versicherer sachfremden
+    Indikatoren (``FINANCIAL_IRRELEVANT_INDICATORS``) abgezogen — sonst würde
+    jede Bank an der Mindest-Abdeckung scheitern bzw. mit künstlich niedriger
+    ``data_coverage`` ausgewiesen, obwohl die fehlenden Kennzahlen für sie gar
+    nicht definiert sind."""
+
+    financial = is_financial_sector(df)
+    total = pd.Series(float(sum(weights.values())), index=df.index)
+    for indicator, weight in weights.items():
+        if indicator in FINANCIAL_IRRELEVANT_INDICATORS:
+            total = total - weight * financial
+    return total
+
+
 def _factor_coverage(df: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
     """Anteil der Indikator-Gewichtssumme, für den valide Daten vorliegen
-    (0..1). Basis ist die volle Gewichtssumme des Faktors — auch wenn eine
-    Spalte im Import komplett fehlt, zählt sie als nicht abgedeckt."""
+    (0..1). Basis ist die Gewichtssumme der je Zeile anwendbaren Indikatoren
+    (für Financials ohne die bankfremden Kennzahlen) — auch wenn eine Spalte
+    im Import komplett fehlt, zählt sie als nicht abgedeckt."""
 
-    total = sum(weights.values())
+    financial = is_financial_sector(df)
+    total = _relevant_weight_total(df, weights)
     covered = pd.Series(0.0, index=df.index)
-    if total <= 0:
-        return covered
     for indicator, weight in weights.items():
         column = INDICATOR_TO_COLUMN[indicator]
         if column not in df.columns:
             continue
-        covered = covered + weight * _clean_series(df, column).notna()
-    return covered / total
+        mask = _clean_series(df, column).notna()
+        if indicator in FINANCIAL_IRRELEVANT_INDICATORS:
+            mask = mask & ~financial
+        covered = covered + weight * mask
+    return (covered / total.where(total > 0)).fillna(0.0)
 
 
 def _factor_score(
@@ -167,13 +196,21 @@ def _factor_score(
     """Gewichteter Durchschnitt der Indikator-Perzentile mit dynamischer
     Neugewichtung bei fehlenden Werten.
 
-    Liegt weniger als ``settings.min_factor_coverage`` der Gewichtssumme mit
-    Daten vor, ist der Score NaN — ein Faktor-Score aus einem einzelnen
-    Indikator wäre nicht mit voll abgedeckten Titeln vergleichbar."""
+    Für Financials gehen die bankfremden Indikatoren
+    (``FINANCIAL_IRRELEVANT_INDICATORS``) nicht ein — auch wenn der Export
+    Werte liefert, wären es Rankings auf konzeptionell nicht definierten
+    Kennzahlen. Die Mindest-Abdeckung bemisst sich dann an der Gewichtssumme
+    der verbleibenden, anwendbaren Indikatoren.
 
+    Liegt weniger als ``settings.min_factor_coverage`` der (anwendbaren)
+    Gewichtssumme mit Daten vor, ist der Score NaN — ein Faktor-Score aus
+    einem einzelnen Indikator wäre nicht mit voll abgedeckten Titeln
+    vergleichbar."""
+
+    financial = is_financial_sector(df)
     score_num = pd.Series(0.0, index=df.index)
     weight_sum = pd.Series(0.0, index=df.index)
-    total_weight = sum(weights.values())
+    total_weight = _relevant_weight_total(df, weights)
 
     for indicator, weight in weights.items():
         column = INDICATOR_TO_COLUMN[indicator]
@@ -182,11 +219,13 @@ def _factor_score(
         values = _clean_series(df, column)
         pct = _indicator_percentile(df, column, settings)
         mask = values.notna()
+        if indicator in FINANCIAL_IRRELEVANT_INDICATORS:
+            mask = mask & ~financial
         score_num = score_num + pct.fillna(0) * weight * mask
         weight_sum = weight_sum + weight * mask
 
-    min_weight = max(settings.min_factor_coverage * total_weight, 0.0)
-    enough = (weight_sum > 0) & (weight_sum >= min_weight)
+    min_weight = (settings.min_factor_coverage * total_weight).clip(lower=0.0)
+    enough = (weight_sum > 0) & (weight_sum >= min_weight) & (total_weight > 0)
     score = np.where(enough, score_num / weight_sum.where(weight_sum > 0), np.nan)
     return pd.Series(score, index=df.index)
 
@@ -207,7 +246,10 @@ def _classify(score: float) -> str:
     return "F - Schwach"
 
 
-def _recommendation(score: float, filter_ok: str) -> str:
+def _recommendation(score: float, filter_ok: str, settings: Settings) -> str:
+    """Empfehlung mit asymmetrischem HOLD-Band (BUY ≥ ``buy_threshold``,
+    SELL < ``sell_threshold``) — das breite Band verhindert, dass Titel an
+    einer einzelnen Schwelle bei jedem Import zwischen HOLD und SELL kippen."""
     if filter_ok == "-":
         return "-"
     if filter_ok == "NEIN":
@@ -216,18 +258,11 @@ def _recommendation(score: float, filter_ok: str) -> str:
         return "-"
     if score >= 80:
         return "STRONG BUY"
-    if score >= 70:
+    if score >= settings.buy_threshold:
         return "BUY"
-    if score >= 50:
+    if score >= settings.sell_threshold:
         return "HOLD"
     return "SELL"
-
-
-def _sma_signal(row: pd.Series) -> str:
-    state = classify_momentum(
-        row.get("last_price"), row.get("sma_50"), row.get("sma_200")
-    )
-    return _SMA_ICON_LABELS[state]
 
 
 def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
@@ -314,25 +349,33 @@ def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     # Klassifikation.
     df["classification"] = df["total_score"].apply(_classify)
 
-    # Filter. Für Financials wird das Altman-Z-Kriterium übersprungen — der
-    # Z-Score ist für Banken/Versicherer konzeptionell nicht definiert und
-    # würde den Sektor de facto vom Filter ausschließen.
+    # Filter. Für Financials und Real Estate wird das Altman-Z-Kriterium
+    # übersprungen — der Z-Score ist für Banken/Versicherer konzeptionell
+    # nicht definiert und für REITs auf eine sachfremde Bilanzstruktur
+    # kalibriert; beide Sektoren wären sonst de facto vom Filter
+    # ausgeschlossen. Die Piotroski-Schwelle wird auf die je Zeile bewertbare
+    # Skala umgerechnet: Financials werden auf 6 statt 9 Kriterien gescort
+    # (siehe ``piotroski``), min_piotroski = 5 von 9 entspricht dort 3,33.
     def _filter_row(r: pd.Series) -> str:
         piotr = r.get("piotroski")
         altman = r.get("altman_z")
         mcap = r.get("market_cap")
         sector = r.get("sector")
-        is_financial = (
-            isinstance(sector, str) and FINANCIAL_SECTOR_MARKER in sector.lower()
-        )
+        sector_lc = sector.lower() if isinstance(sector, str) else ""
+        is_financial = FINANCIAL_SECTOR_MARKER in sector_lc
+        skip_altman = is_financial or REAL_ESTATE_SECTOR_MARKER in sector_lc
         if pd.isna(piotr) or pd.isna(mcap):
             return "-"
-        if not is_financial and pd.isna(altman):
+        if not skip_altman and pd.isna(altman):
             return "-"
+        max_criteria = r.get("piotroski_max_criteria")
+        if pd.isna(max_criteria) or not max_criteria:
+            max_criteria = PIOTROSKI_MAX_CRITERIA
+        min_piotroski = settings.min_piotroski * max_criteria / PIOTROSKI_MAX_CRITERIA
         if (
-            piotr >= settings.min_piotroski
+            piotr >= min_piotroski
             and mcap >= settings.min_market_cap
-            and (is_financial or altman >= settings.min_altman_z)
+            and (skip_altman or altman >= settings.min_altman_z)
         ):
             return "JA"
         return "NEIN"
@@ -341,11 +384,31 @@ def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
 
     # Empfehlung.
     df["recommendation"] = df.apply(
-        lambda r: _recommendation(r["total_score"], r["filter_ok"]), axis=1
+        lambda r: _recommendation(r["total_score"], r["filter_ok"], settings), axis=1
     )
 
     # SMA-Signal & Abstand.
-    df["sma_signal"] = df.apply(_sma_signal, axis=1)
+    momentum_state = df.apply(
+        lambda r: classify_momentum(
+            r.get("last_price"), r.get("sma_50"), r.get("sma_200")
+        ),
+        axis=1,
+    )
+    df["sma_signal"] = momentum_state.map(_SMA_ICON_LABELS)
+
+    # Empfehlungs-Overlay: verschärft die Quant-Empfehlung um das
+    # Momentum-Regime — ein aktives Death Cross bei bestenfalls mittelmäßigem
+    # Score ist ein Deselektions-Signal, auch wenn der Score allein noch HOLD
+    # sagt. Bewusst separates Feld, damit die reine Quant-Sicht
+    # (``recommendation``) unverändert sichtbar bleibt.
+    escalate = (
+        (momentum_state == MOMENTUM_DEATH)
+        & (df["total_score"] < _DEATH_CROSS_ESCALATION_SCORE)
+        & (df["recommendation"] == "HOLD")
+    )
+    df["recommendation_overlay"] = df["recommendation"].where(
+        ~escalate, "SELL (Death Cross)"
+    )
     df["sma_200_distance"] = np.where(
         (df["sma_200"] > 0) & df["last_price"].notna(),
         (df["last_price"] - df["sma_200"]) / df["sma_200"],

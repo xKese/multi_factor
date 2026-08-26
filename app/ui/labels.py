@@ -62,6 +62,7 @@ INDICATOR_LABELS: dict[str, str] = {
     "classification": "Klassifikation",
     "filter_ok": "Filter",
     "recommendation": "Empfehlung",
+    "recommendation_overlay": "Empfehlung inkl. Momentum",
     "data_coverage": "Daten-Abdeckung",
     "sma_signal": "SMA-Signal",
     "sma_200_distance": "Abstand SMA-200 (%)",

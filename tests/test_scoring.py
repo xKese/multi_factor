@@ -375,6 +375,224 @@ def test_data_coverage_column():
     assert (scored["data_coverage"] >= 0).all()
 
 
+def test_financial_irrelevant_indicators_masked():
+    """Bankfremde Kennzahlen (z. B. EV/EBITDA) fließen nicht in Faktor-Scores
+    von Financials ein — auch wenn der Export Werte liefert."""
+    df = _universe(
+        pe=[10.0, 12.0, 14.0, 16.0, 18.0, 20.0],
+        pb=[1.0] * 6,
+    )
+    df["sector"] = ["Financials"] * 6
+    df["industry"] = ["Banks"] * 6
+    # EV/EBITDA gegenläufig zu P/E — würde sie eingehen, kippte das Ranking.
+    df["ev_ebitda"] = [10.0, 9.0, 8.0, 7.0, 6.0, 5.0]
+    settings = Settings()
+
+    with_ev = _factor_score(df, {"pe": 0.5, "ev_ebitda": 0.5}, settings)
+    pe_only = _factor_score(df, {"pe": 1.0}, settings)
+    assert with_ev.notna().all()
+    assert (with_ev - pe_only).abs().max() < 1e-9
+
+    # Kontrolle: bei Nicht-Financials geht EV/EBITDA ein.
+    df_ind = df.copy()
+    df_ind["sector"] = ["Materials"] * 6
+    with_ev_ind = _factor_score(df_ind, {"pe": 0.5, "ev_ebitda": 0.5}, settings)
+    pe_only_ind = _factor_score(df_ind, {"pe": 1.0}, settings)
+    assert (with_ev_ind - pe_only_ind).abs().max() > 1e-6
+
+
+def test_financial_coverage_basis_is_applicable_weights():
+    """Financials scheitern nicht an der Mindest-Abdeckung, nur weil
+    bankfremde Kennzahlen (Margen, Current Ratio, …) fehlen."""
+    df = _full_universe()
+    df["roe"] = [0.20, 0.18, 0.16, 0.14, 0.12, 0.10]
+    df["roic"] = [0.15, 0.14, 0.13, 0.12, 0.11, 0.10]
+    df["roa"] = [0.10, 0.09, 0.08, 0.07, 0.06, 0.05]
+
+    # Industrieunternehmen: 0,40 von 1,00 Quality-Gewicht < 50 % → NaN.
+    scored = compute_scores(df, Settings())
+    assert scored["quality_score"].isna().all()
+
+    # Banken: gleiche Datenlage, aber Basis sind die anwendbaren 0,45 —
+    # 0,40/0,45 ≈ 89 % Abdeckung → Score vorhanden.
+    df_fin = df.copy()
+    df_fin["sector"] = ["Financials"] * 6
+    df_fin["industry"] = ["Banks"] * 6
+    scored_fin = compute_scores(df_fin, Settings())
+    assert scored_fin["quality_score"].notna().all()
+
+
+def test_piotroski_financial_variant():
+    """Banken werden auf 6 statt 9 Kriterien gescort (ohne Debt-, Current-
+    Ratio- und Bruttomargen-Kriterium); die Filter-Schwelle skaliert mit."""
+    df = _full_universe()
+    df["sector"] = ["Financials"] * 3 + ["Materials"] * 3
+    df["net_income"] = [100.0] * 6
+    df["net_income_prev"] = [50.0] * 6
+    df["ocf"] = [150.0] * 6
+    df["total_assets"] = [1000.0] * 6
+    df["total_assets_prev"] = [1100.0] * 6
+    df["total_debt"] = [100.0] * 6
+    df["total_debt_prev"] = [200.0] * 6
+    df["current_assets"] = [500.0] * 6
+    df["current_liab"] = [200.0] * 6
+    df["current_assets_prev"] = [400.0] * 6
+    df["current_liab_prev"] = [250.0] * 6
+    df["shares_out"] = [100.0] * 6
+    df["shares_out_prev"] = [100.0] * 6
+    df["revenue"] = [800.0] * 6
+    df["revenue_prev"] = [700.0] * 6
+    df["cogs"] = [400.0] * 6
+    df["cogs_prev"] = [420.0] * 6
+    df["altman_z"] = [None] * 3 + [3.0] * 3
+
+    scored = compute_scores(df, Settings())
+    # Financials: Skala 6, alle 6 anwendbaren Kriterien erfüllt.
+    assert (scored.loc[:2, "piotroski_max_criteria"] == 6).all()
+    assert (scored.loc[:2, "piotroski"] == 6).all()
+    # Industrieunternehmen: volle Skala 9.
+    assert (scored.loc[3:, "piotroski_max_criteria"] == 9).all()
+    assert (scored.loc[3:, "piotroski"] == 9).all()
+    # 6 von 6 ≥ skalierte Schwelle (5 × 6/9 = 3,33) → Filter JA.
+    assert (scored.loc[:2, "filter_ok"] == "JA").all()
+
+
+def test_piotroski_financial_min_valid_criteria():
+    """Banken brauchen nur 4 (statt 6) bewertbare Kriterien für einen
+    aussagekräftigen F-Score — sonst fielen sie systematisch auf '-'."""
+    df = _full_universe()
+    df["sector"] = ["Financials"] * 6
+    df["industry"] = ["Banks"] * 6
+    # Nur p1-p4 bewertbar (NI, OCF, ROA-Trend, Accruals).
+    df["net_income"] = [100.0] * 6
+    df["net_income_prev"] = [50.0] * 6
+    df["ocf"] = [150.0] * 6
+    df["total_assets"] = [1000.0] * 6
+    df["total_assets_prev"] = [1100.0] * 6
+
+    scored = compute_scores(df, Settings())
+    assert scored["piotroski"].notna().all()
+    assert (scored["piotroski"] == 4).all()
+    # Als Industrieunternehmen wären 4 von 9 Kriterien zu wenig → NaN.
+    df_ind = df.copy()
+    df_ind["sector"] = ["Materials"] * 6
+    df_ind["industry"] = ["Chemicals"] * 6
+    scored_ind = compute_scores(df_ind, Settings())
+    assert scored_ind["piotroski"].isna().all()
+
+
+def test_altman_filter_skipped_for_real_estate():
+    """Real Estate: Altman-Z-Kriterium wird wie bei Financials übersprungen
+    (Z-Score auf Industrieunternehmen kalibriert)."""
+    df = _full_universe()
+    df["sector"] = ["Real Estate"] * 3 + ["Materials"] * 3
+    df["industry"] = ["REITs"] * 3 + ["Chemicals"] * 3
+    for col, prev in [
+        ("net_income", "net_income_prev"),
+        ("ocf", "ocf_prev"),
+    ]:
+        df[col] = [150.0] * 6
+        df[prev] = [100.0] * 6
+    df["total_assets"] = [1000.0] * 6
+    df["total_assets_prev"] = [1100.0] * 6
+    df["net_income_prev"] = [50.0] * 6
+    df["total_debt"] = [100.0] * 6
+    df["total_debt_prev"] = [200.0] * 6
+    df["current_assets"] = [500.0] * 6
+    df["current_liab"] = [200.0] * 6
+    df["current_assets_prev"] = [400.0] * 6
+    df["current_liab_prev"] = [250.0] * 6
+    df["shares_out"] = [100.0] * 6
+    df["shares_out_prev"] = [100.0] * 6
+    df["revenue"] = [800.0] * 6
+    df["revenue_prev"] = [700.0] * 6
+    df["cogs"] = [400.0] * 6
+    df["cogs_prev"] = [420.0] * 6
+    df["altman_z"] = [None] * 3 + [3.0] * 3
+
+    scored = compute_scores(df, Settings())
+    assert (scored.loc[:2, "filter_ok"] == "JA").all(), "REITs ohne Altman → JA"
+    assert (scored.loc[3:, "filter_ok"] == "JA").all()
+
+
+def test_recommendation_thresholds():
+    """Asymmetrisches HOLD-Band: SELL erst unter 45 (statt 50), BUY ab 70 —
+    Schwellen aus den Settings."""
+    from app.core.scoring import _recommendation
+
+    s = Settings()
+    assert _recommendation(81.0, "JA", s) == "STRONG BUY"
+    assert _recommendation(72.0, "JA", s) == "BUY"
+    assert _recommendation(55.0, "JA", s) == "HOLD"
+    # Früher SELL (< 50) — jetzt im HOLD-Band, kein Flackern an der Schwelle.
+    assert _recommendation(48.0, "JA", s) == "HOLD"
+    assert _recommendation(44.0, "JA", s) == "SELL"
+
+    s.sell_threshold = 50.0
+    assert _recommendation(48.0, "JA", s) == "SELL"
+
+
+def test_recommendation_overlay_death_cross():
+    """Death Cross + Gesamt-Score < 60 eskaliert HOLD im Overlay auf SELL;
+    die reine Quant-Empfehlung bleibt unverändert."""
+    df = _full_universe()
+    # Value / Quality / Momentum / Low-Vol wie in
+    # test_total_score_ok_when_one_factor_missing (T0 überall am besten).
+    df["pe"] = [10.0, 12.0, 14.0, 16.0, 18.0, 20.0]
+    df["pb"] = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+    df["ps"] = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+    df["ev_ebitda"] = [8.0, 9.0, 10.0, 11.0, 12.0, 13.0]
+    df["roe"] = [0.20, 0.18, 0.16, 0.14, 0.12, 0.10]
+    df["roic"] = [0.15, 0.14, 0.13, 0.12, 0.11, 0.10]
+    df["roa"] = [0.10, 0.09, 0.08, 0.07, 0.06, 0.05]
+    df["gross_margin"] = [0.60, 0.55, 0.50, 0.45, 0.40, 0.35]
+    df["op_margin"] = [0.30, 0.28, 0.26, 0.24, 0.22, 0.20]
+    df["debt_equity"] = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    df["ret_1m"] = [0.02] * 6
+    df["ret_3m"] = [0.06, 0.05, 0.04, 0.03, 0.02, 0.01]
+    df["ret_6m"] = [0.12, 0.10, 0.09, 0.05, 0.04, 0.03]
+    df["ret_12m"] = [0.35, 0.30, 0.28, 0.20, 0.18, 0.15]
+    df["eps_revisions_3m"] = [0.02, 0.01, 0.00, -0.01, -0.02, -0.03]
+    df["beta"] = [0.8, 0.9, 0.95, 1.0, 1.1, 1.2]
+    df["volatility_1y"] = [0.22, 0.25, 0.26, 0.28, 0.30, 0.35]
+    df["high_52w"] = [120.0] * 6
+    df["low_52w"] = [80.0] * 6
+    # Vollständige Piotroski-Daten (9 Punkte) + Altman → Filter JA.
+    df["net_income"] = [100.0] * 6
+    df["net_income_prev"] = [50.0] * 6
+    df["ocf"] = [150.0] * 6
+    df["total_assets"] = [1000.0] * 6
+    df["total_assets_prev"] = [1100.0] * 6
+    df["total_debt"] = [100.0] * 6
+    df["total_debt_prev"] = [200.0] * 6
+    df["current_assets"] = [500.0] * 6
+    df["current_liab"] = [200.0] * 6
+    df["current_assets_prev"] = [400.0] * 6
+    df["current_liab_prev"] = [250.0] * 6
+    df["shares_out"] = [100.0] * 6
+    df["shares_out_prev"] = [100.0] * 6
+    df["revenue"] = [800.0] * 6
+    df["revenue_prev"] = [700.0] * 6
+    df["cogs"] = [400.0] * 6
+    df["cogs_prev"] = [420.0] * 6
+    df["altman_z"] = [3.0] * 6
+    # Aktives Death Cross auf allen Titeln: Kurs < SMA-50 < SMA-200.
+    df["last_price"] = [80.0] * 6
+    df["sma_50"] = [90.0] * 6
+    df["sma_200"] = [100.0] * 6
+
+    scored = compute_scores(df, Settings())
+    assert "recommendation_overlay" in scored.columns
+
+    escalated = scored[
+        (scored["recommendation"] == "HOLD") & (scored["total_score"] < 60)
+    ]
+    assert not escalated.empty, "Testaufbau muss mindestens einen HOLD < 60 liefern"
+    assert (escalated["recommendation_overlay"] == "SELL (Death Cross)").all()
+    others = scored.drop(escalated.index)
+    assert (others["recommendation_overlay"] == others["recommendation"]).all()
+
+
 if __name__ == "__main__":
     test_full_pipeline()
     test_lower_better_percentile_inverted()

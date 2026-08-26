@@ -38,15 +38,52 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
   Forward-Indikatoren (EPS- und optional Umsatz-Schätzungen)
 - **Momentum** auf Basis des 12-1-Momentums (12M-Return ohne letzten Monat)
 - **Gesamt-Score 0 – 100** → Klassifikation A / B+ / B / C / D / F
-- **Filter**: Piotroski ≥ 5 · Altman Z ≥ 1,8 (übersprungen für Financials) ·
-  Market Cap ≥ 1 Mrd. Piotroski erfordert mindestens 6 von 9 bewertbare
-  Kriterien, sonst keine Filter-Aussage
-- **Empfehlung**: STRONG BUY / BUY / HOLD / SELL
-- **Piotroski F-Score** (9 Kriterien, 0 – 9 Punkte)
+- **Filter**: Piotroski ≥ 5 · Altman Z ≥ 1,8 (übersprungen für Financials
+  und Real Estate) · Market Cap ≥ 1 Mrd. Piotroski erfordert mindestens
+  6 von 9 bewertbare Kriterien (Financials: 4 von 6), sonst keine
+  Filter-Aussage
+- **Empfehlung**: STRONG BUY / BUY / HOLD / SELL mit editierbaren Schwellen
+  (BUY ab 70, SELL erst unter 45 — das breite HOLD-Band verhindert
+  Empfehlungs-Flackern an einer einzelnen Schwelle); zusätzlich
+  `Empfehlung inkl. Momentum` (Overlay): ein aktives Death Cross bei
+  Gesamt-Score < 60 eskaliert HOLD auf „SELL (Death Cross)", die reine
+  Quant-Empfehlung bleibt daneben sichtbar
+- **Piotroski F-Score** (9 Kriterien, 0 – 9 Punkte; Financials: 6 Kriterien,
+  0 – 6 Punkte — siehe Industriespezifika)
 - **SMA-50/SMA-200-Signal**: Golden Cross, Death Cross, Kurs ≷ SMA-200
 - **Momentum-Monitor**: Trend-Phasen (frisch/etabliert/ermüdet), Signalwechsel
   seit letztem Import (Signal-Historie je Aktie), 12-1-Momentum-Ranking,
   optional SMA-20 aus erweitertem Export
+
+## Industriespezifika (Financials & Real Estate)
+
+Für **Financials** (GICS-Sektor, Substring-Match „financ") gelten mehrere
+Kennzahlen konzeptionell nicht — Banken haben keine COGS, keine kurzfristige
+Bilanzgliederung, Einlagen sind Betriebsmittel statt Risikosignal, und
+EBITDA/FCF/OCF sind durch Bilanzbewegungen dominiert. Das Modell behandelt
+sie deshalb gesondert:
+
+- **Faktor-Scores**: EV/EBITDA, P/FCF, Brutto-/operative Marge, Zinsdeckung,
+  Current Ratio, OCF/NI, Debt/Equity und Altman Z fließen für Financials
+  nicht in Value/Quality ein (`FINANCIAL_IRRELEVANT_INDICATORS` in
+  `app/core/config.py`) — auch wenn der Export Werte liefert. Value stützt
+  sich dann auf P/B, P/E, P/S, PEG und Dividendenrendite, Quality auf
+  ROE, ROIC, ROA und Piotroski. Mindest-Abdeckung und `data_coverage`
+  bemessen sich an den verbleibenden, anwendbaren Indikatoren.
+- **Piotroski**: Financials werden auf 6 statt 9 Kriterien gescort (ohne
+  „Verschuldung gesunken", „Current Ratio gestiegen", „Bruttomarge
+  gestiegen"); mindestens 4 bewertbare Kriterien nötig. Die Filter-Schwelle
+  wird proportional umgerechnet (min. 5 von 9 ≙ 3,33 von 6).
+- **Altman Z**: Filterkriterium übersprungen für Financials **und Real
+  Estate** — der Z-Score ist auf Industrieunternehmen kalibriert.
+
+**Bekannte Grenze:** Bankspezifische Kennzahlen (CET1-Quote, Cost-Income-
+Ratio, Zinsmarge, NPL-Quote, P/TBV) sowie REIT-Kennzahlen (P/FFO,
+NAV-Discount) sind im Koyfin-57-Spalten-Export nicht enthalten und können
+daher nicht gescort werden. Banken werden über Industrie-Perzentile
+(Banken vs. Banken) plus die obigen Ausnahmen fair gerankt, aber nicht auf
+regulatorische Kapitalstärke geprüft — dafür ist die Agenten-Tiefenanalyse
+oder eine manuelle Prüfung gedacht.
 
 ## Installation & Start
 
