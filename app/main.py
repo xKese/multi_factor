@@ -195,7 +195,9 @@ def create_app() -> dash.Dash:
         df = STATE.scored
         if df.empty:
             return []
-        cols = [c for c in ("ticker", "name", "sector") if c in df.columns]
+        # ``uid`` ist das Navigationsziel (eindeutig auch bei
+        # Ticker-Kollisionen), ``ticker`` bleibt der angezeigte Text.
+        cols = [c for c in ("uid", "ticker", "name", "sector") if c in df.columns]
         return df[cols].fillna("").to_dict("records")
 
     # Clientside-Brücke: Store-Inhalt in ``window.msCmdk.items`` spiegeln.

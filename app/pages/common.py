@@ -115,19 +115,23 @@ def render_table(
     if columns is None:
         columns = [_column_def(c) for c in df.columns]
 
-    # Ticker-Spalte zu Markdown-Link auf /einzelanalyse?ticker=XYZ.
+    # Ticker-Spalte zu Markdown-Link auf /einzelanalyse?ticker=<uid> —
+    # Link-Ziel ist die uid (eindeutig bei Ticker-Kollisionen), sichtbar
+    # bleibt der Ticker.
     if "ticker" in df.columns and any(
         c.get("id") == "ticker" and c.get("presentation") == "markdown"
         for c in columns
     ):
         df = df.copy()
-        df["ticker"] = df["ticker"].apply(
-            lambda t: (
-                f"[{t}](/einzelanalyse?ticker={t})"
+        targets = df["uid"] if "uid" in df.columns else df["ticker"]
+        df["ticker"] = [
+            (
+                f"[{t}](/einzelanalyse?ticker={u if isinstance(u, str) and u else t})"
                 if isinstance(t, str) and t
                 else t
             )
-        )
+            for t, u in zip(df["ticker"], targets)
+        ]
 
     conditional = [
         {

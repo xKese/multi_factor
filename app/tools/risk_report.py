@@ -31,7 +31,13 @@ def _parse_asof(value: str | None) -> date | None:
 
 
 def _apply_manual_mappings(entries: list[str]) -> list[str]:
-    """``TICKER=AV_SYMBOL[:WÄHRUNG]`` als bestätigte Mappings speichern."""
+    """``TICKER=AV_SYMBOL[:WÄHRUNG]`` als bestätigte Mappings speichern.
+
+    Als Ticker ist auch eine uid erlaubt (``SAN~sanofi=SAN.PA:EUR``) — nur
+    der Symbolteil vor dem ``~`` wird groß geschrieben, der Namens-Slug
+    bleibt unverändert (er ist der Mapping-Schlüssel)."""
+
+    from app.core.uid import UID_SEPARATOR
 
     errors: list[str] = []
     for entry in entries:
@@ -43,26 +49,35 @@ def _apply_manual_mappings(entries: list[str]) -> list[str]:
         if not ticker.strip() or not symbol.strip():
             errors.append(entry)
             continue
+        key = ticker.strip()
+        if UID_SEPARATOR in key:
+            base, _, slug = key.partition(UID_SEPARATOR)
+            key = f"{base.upper()}{UID_SEPARATOR}{slug}"
+        else:
+            key = key.upper()
         av_store.save_av_mapping(
-            ticker.strip().upper(),
+            key,
             symbol.strip(),
             currency.strip().upper() or "USD",
             confirmed=True,
         )
-        print(f"Mapping gespeichert: {ticker.strip().upper()} → {symbol.strip()}")
+        print(f"Mapping gespeichert: {key} → {symbol.strip()}")
     return errors
 
 
 def _load_state() -> tuple[list[str], dict[str, float]] | None:
     STATE.load_from_db()
-    tickers = STATE.ms_portfolio
-    if not tickers:
+    if not STATE.ms_portfolio:
         print(
             "Kein M&S-Portfolio in der Datenbank — bitte zuerst auf "
             "/portfolios eine Watchlist importieren.",
             file=sys.stderr,
         )
         return None
+    # Positionen als uids (bei Ticker-Kollisionen eindeutig) — konsistent
+    # zu den Keys von portfolio_weights().
+    resolved = STATE.resolve_portfolio()
+    tickers = resolved["uid"].astype(str).tolist()
     return tickers, STATE.portfolio_weights()
 
 

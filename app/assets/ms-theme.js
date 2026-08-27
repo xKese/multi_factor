@@ -158,7 +158,7 @@ window.dash_clientside.ms = {
       var r = results[i];
       html +=
         '<div class="ms-cmdk-item' + (i === 0 ? " is-active" : "") +
-        '" role="option" data-ticker="' + escapeHtml(r.ticker) + '">' +
+        '" role="option" data-ticker="' + escapeHtml(r.uid || r.ticker) + '">' +
         '<span class="ms-cmdk-ticker">' + escapeHtml(r.ticker) + "</span>" +
         '<span class="ms-cmdk-name">' + escapeHtml(r.name || "") + "</span>" +
         (r.sector ? '<span class="ms-cmdk-sector">' + escapeHtml(r.sector) + "</span>" : "") +

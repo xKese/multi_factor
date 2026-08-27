@@ -157,6 +157,10 @@ def _universe_tag(symbol: str) -> tuple[str, bool]:
     base = (symbol or "").split(".")[0].upper()
     if base and not STATE.scored.empty:
         row = STATE.scored.loc[STATE.scored["ticker"].str.upper() == base]
+        if len(row) > 1:
+            # Ticker-Kollision (z. B. zwei "SAN"): keine Zeile ist eindeutig
+            # zuzuordnen — kein Quant-Score anzeigen statt eines falschen.
+            return "Im Universum · mehrdeutig", True
         if not row.empty:
             score = row.iloc[0].get("total_score")
             if pd.notna(score):
@@ -370,7 +374,10 @@ def _start(n_clicks, selected, query):
         if rows.empty:
             base = ticker.split(".")[0]
             rows = STATE.scored.loc[STATE.scored["ticker"].str.upper() == base]
-        if not rows.empty:
+        # Bei Ticker-Kollisionen (mehrere Universums-Zeilen mit demselben
+        # Symbol) ist keine Zeile eindeutig zuzuordnen — lieber ohne
+        # Quant-Kontext starten als mit dem der falschen Firma.
+        if len(rows) == 1:
             factor_context = agents_client.build_factor_context(rows.iloc[0])
             in_universe = True
 
@@ -406,10 +413,13 @@ def _delta_cell(row) -> html.Td:
 
 
 def _name_of(ticker: str) -> str:
+    """Anzeigename zu einem Verlaufs-Schlüssel (uid oder Alt-Ticker)."""
+    from app.core.uid import row_by_uid
+
     if not STATE.scored.empty:
-        row = STATE.scored.loc[STATE.scored["ticker"] == str(ticker)]
-        if not row.empty:
-            return str(row.iloc[0].get("name") or "–")
+        row = row_by_uid(STATE.scored, ticker)
+        if row is not None:
+            return str(row.get("name") or "–")
     return "–"
 
 
@@ -441,6 +451,7 @@ def _history_table(df: pd.DataFrame) -> html.Div:
 
         in_uni = bool(r.get("in_universe"))
         ticker = str(r["ticker"])
+        run_id = str(r.get("run_id") or "")
         rows.append(
             html.Tr(
                 [
@@ -475,7 +486,15 @@ def _history_table(df: pd.DataFrame) -> html.Div:
                                 # selbst (keine Score-Blöcke, kein Chip).
                                 html.Button(
                                     "PDF ›",
-                                    id={"type": "aa-hist-pdf", "ticker": ticker},
+                                    # ``run`` macht die Pattern-ID auch dann
+                                    # eindeutig, wenn derselbe Titel mehrfach
+                                    # im Verlauf steht (Dash verbietet
+                                    # doppelte Komponenten-IDs).
+                                    id={
+                                        "type": "aa-hist-pdf",
+                                        "ticker": ticker,
+                                        "run": run_id,
+                                    },
                                     n_clicks=0,
                                     className=(
                                         "ms-agent-histlink ms-agent-histlink-btn"
@@ -532,7 +551,7 @@ def _history(_fp):
 @callback(
     Output("aa-pdf-download", "data"),
     Output("aa-pdf-error", "children"),
-    Input({"type": "aa-hist-pdf", "ticker": ALL}, "n_clicks"),
+    Input({"type": "aa-hist-pdf", "ticker": ALL, "run": ALL}, "n_clicks"),
     prevent_initial_call=True,
 )
 def _export_history_pdf(n_clicks_list):

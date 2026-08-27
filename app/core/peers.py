@@ -24,6 +24,7 @@ FACTOR_COLUMNS: tuple[str, ...] = (
 )
 
 RETURN_COLUMNS: tuple[str, ...] = (
+    "uid",
     "ticker",
     "name",
     "sector",
@@ -43,7 +44,10 @@ def _select_pool(scored: pd.DataFrame, target: pd.Series, desired: int) -> pd.Da
     Treffer erhalten, auch wenn die Industrie zu klein für eine volle Liste ist.
     """
 
-    others = scored[scored["ticker"] != target["ticker"]]
+    # Ausschluss und Dedup über die uid: bei Ticker-Kollisionen bleibt die
+    # jeweils andere Aktie ein legitimer Peer-Kandidat.
+    key = "uid" if "uid" in scored.columns else "ticker"
+    others = scored[scored[key] != target.get(key, target["ticker"])]
     if others.empty:
         return others
 
@@ -51,10 +55,10 @@ def _select_pool(scored: pd.DataFrame, target: pd.Series, desired: int) -> pd.Da
     seen: set[str] = set()
 
     def _add(layer: pd.DataFrame) -> None:
-        layer = layer[~layer["ticker"].isin(seen)]
+        layer = layer[~layer[key].isin(seen)]
         if not layer.empty:
             layers.append(layer)
-            seen.update(layer["ticker"].tolist())
+            seen.update(layer[key].tolist())
 
     industry = target.get("industry")
     if pd.notna(industry) and industry != "":
@@ -98,10 +102,11 @@ def compute_peers(
     if scored is None or scored.empty or not ticker:
         return pd.DataFrame()
 
-    hit = scored[scored["ticker"] == ticker]
-    if hit.empty:
+    from .uid import row_by_uid
+
+    target = row_by_uid(scored, ticker)
+    if target is None:
         return pd.DataFrame()
-    target = hit.iloc[0]
 
     factors = [c for c in FACTOR_COLUMNS if c in scored.columns]
     if not factors:

@@ -130,10 +130,12 @@ def compute_rank(df: pd.DataFrame, ticker: str) -> dict[str, int | None]:
     if df is None or df.empty:
         return out
 
-    hit = df[df["ticker"] == ticker]
-    if hit.empty or "total_score" not in df.columns:
+    from .uid import rows_by_uid_index
+
+    idx = rows_by_uid_index(df, ticker)
+    if len(idx) == 0 or "total_score" not in df.columns:
         return out
-    target = hit.iloc[0]
+    target = df.loc[idx[0]]
 
     for kind, label in (("sector", "sector"), ("industry", "industry")):
         group_val = target.get(kind)
@@ -144,7 +146,7 @@ def compute_rank(df: pd.DataFrame, ticker: str) -> dict[str, int | None]:
             continue
         ranks = peers["total_score"].rank(ascending=False, method="min", na_option="bottom")
         try:
-            r = int(ranks.loc[hit.index[0]])
+            r = int(ranks.loc[idx[0]])
         except KeyError:
             continue
         out[f"{label}_rank"] = r
@@ -314,10 +316,11 @@ def build_context(
     if df is None or df.empty:
         raise ValueError("Keine Daten zum Rendern (STATE.scored ist leer).")
 
-    hit = df[df["ticker"] == ticker]
-    if hit.empty:
+    from .uid import row_by_uid
+
+    r = row_by_uid(df, ticker)
+    if r is None:
         raise ValueError(f"Ticker {ticker!r} nicht im Universum.")
-    r = hit.iloc[0]
 
     today = today or date.today()
     months_de = [
@@ -364,7 +367,7 @@ def build_context(
             pct_val: float = 0.0
             if pct_series is not None:
                 try:
-                    p = pct_series.loc[hit.index[0]]
+                    p = pct_series.loc[r.name]
                     if pd.notna(p):
                         pct_val = float(p)
                 except KeyError:

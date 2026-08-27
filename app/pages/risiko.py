@@ -319,7 +319,10 @@ def _quality_section(res: dict) -> list:
 
 
 def layout(**_) -> html.Div:
-    tickers = STATE.ms_portfolio
+    # Positionen als uids (bei Ticker-Kollisionen eindeutig; für alle
+    # anderen identisch zum Ticker) — konsistent zu portfolio_weights().
+    resolved = STATE.resolve_portfolio()
+    tickers = resolved["uid"].astype(str).tolist() if not resolved.empty else []
     if not tickers:
         return html.Div(
             [

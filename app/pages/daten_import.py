@@ -20,6 +20,7 @@ from app.core.persistence import (
 )
 from app.core.sector_momentum import aggregate_sectors, aggregates_to_history_records
 from app.core.signal_events import snapshot_date_from_universe
+from app.core.uid import duplicate_ticker_info
 from app.core.state import STATE
 from app.pages.common import page_title
 from app.ui import fmt_de, section_header
@@ -63,7 +64,14 @@ def _persist_signal_history(filename: str | None = None) -> None:
     if df is None or df.empty:
         return
     try:
-        frame = df.dropna(subset=["ticker"]).drop_duplicates("ticker").copy()
+        # Dedup auf uid statt Ticker: bei Ticker-Kollisionen (z. B. zwei
+        # "SAN") bekommt jede Aktie ihre eigene Historien-Zeile. Die
+        # ``ticker``-Spalte der History-Tabelle trägt die uid als Schlüssel —
+        # für eindeutige Ticker ist das identisch zum bisherigen Wert.
+        key = "uid" if "uid" in df.columns else "ticker"
+        frame = df.dropna(subset=["ticker"]).drop_duplicates(key).copy()
+        if key == "uid":
+            frame["ticker"] = frame["uid"]
         frame["momentum"] = frame.apply(
             lambda r: classify_momentum(
                 r.get("last_price"), r.get("sma_50"), r.get("sma_200")
@@ -139,6 +147,33 @@ def _handle(contents: str | None, filename: str | None):
                     color="success",
                 )
             ]
+            # Ticker-Kollisionen sichtbar machen: gleiche Symbole für
+            # verschiedene Firmen (z. B. "SAN" = Sanofi und Banco Santander)
+            # werden intern über eindeutige Kennungen getrennt geführt.
+            dupes = duplicate_ticker_info(df)
+            if dupes:
+                lines = [
+                    html.Li(
+                        f"{ticker}: "
+                        + " · ".join(
+                            f"{name or '(ohne Name)'} → {uid}" for uid, name in pairs
+                        )
+                    )
+                    for ticker, pairs in dupes
+                ]
+                alerts.append(
+                    dbc.Alert(
+                        [
+                            html.Strong(
+                                f"⚠ {len(dupes)} Ticker mehrfach vergeben — "
+                                "die Titel werden intern getrennt geführt "
+                                "(eindeutige Kennung in Links/Suche):"
+                            ),
+                            html.Ul(lines, className="mb-0 mt-2"),
+                        ],
+                        color="warning",
+                    )
+                )
             try:
                 save_universe(df)
             except Exception as exc:  # noqa: BLE001

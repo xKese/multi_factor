@@ -177,10 +177,20 @@ def join_signals(ranking: pd.DataFrame, scored: pd.DataFrame) -> pd.DataFrame:
         for col in signal_cols:
             out[col] = pd.NA
         return out
-    cols = ["ticker"] + [c for c in signal_cols if c in scored.columns]
+    # Die Ranking-Spalte ``ticker`` trägt die uid der Position; Join daher
+    # gegen die uid des Universums (Fallback Ticker für Alt-Universen) —
+    # sonst bekäme bei Ticker-Kollisionen die Position Score/Empfehlung
+    # der jeweils ersten Zeile.
+    key = "uid" if "uid" in scored.columns else "ticker"
+    cols = [key] + [c for c in signal_cols if c in scored.columns]
     merged = out.merge(
-        scored[cols].drop_duplicates("ticker"), on="ticker", how="left"
+        scored[cols].drop_duplicates(key),
+        left_on="ticker",
+        right_on=key,
+        how="left",
     )
+    if key != "ticker" and key in merged.columns:
+        merged = merged.drop(columns=[key])
     for col in signal_cols:
         if col not in merged.columns:
             merged[col] = pd.NA

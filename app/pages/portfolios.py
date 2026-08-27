@@ -135,10 +135,11 @@ def _import_str() -> str | None:
         return str(ts)
 
 
-def _ticker_link(ticker) -> html.Td:
+def _ticker_link(ticker, uid=None) -> html.Td:
     t = str(ticker or "—")
+    target = str(uid) if isinstance(uid, str) and uid else t
     return html.Td(
-        html.A(t, href=f"/einzelanalyse?ticker={t}", className="ms-tt-tk")
+        html.A(t, href=f"/einzelanalyse?ticker={target}", className="ms-tt-tk")
     )
 
 
@@ -226,22 +227,43 @@ def _mini_factor_bars(row: pd.Series) -> html.Td:
 
 # ── Datenaufbau ────────────────────────────────────────────────────────────
 
-def _portfolio_view(scored: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
-    """Scored-Zeilen der Portfolio-Ticker inkl. Signal-Events, formatiert."""
-    view = scored[scored["ticker"].isin(tickers)]
+def _portfolio_view(scored: pd.DataFrame, resolved: pd.DataFrame) -> pd.DataFrame:
+    """Scored-Zeilen der aufgelösten Portfolio-Positionen inkl. Signal-Events.
+
+    Match über die uid statt ``ticker.isin(...)`` — bei Ticker-Kollisionen
+    (z. B. zwei "SAN") zieht eine gehaltene Position sonst beide
+    Universums-Zeilen in die Portfolio-Sicht (Doppelzählung)."""
+    ok_uids = set(resolved.loc[resolved["status"] == "ok", "uid"].astype(str))
+    key = "uid" if "uid" in scored.columns else "ticker"
+    view = scored[scored[key].astype(str).isin(ok_uids)]
     events = load_signal_events(scored)
     if not events.empty:
+        event_key = "uid" if "uid" in events.columns else "ticker"
         view = view.merge(
-            events[["ticker", "is_new", "state_since", "days_in_state"]],
-            on="ticker",
+            events[[event_key, "is_new", "state_since", "days_in_state"]],
+            left_on=key,
+            right_on=event_key,
             how="left",
+            suffixes=("", "_ev"),
         )
+        if event_key != key and f"{event_key}_ev" in view.columns:
+            view = view.drop(columns=[f"{event_key}_ev"])
     return format_scored(view)
 
 
-def _missing_tickers(scored: pd.DataFrame, tickers: list[str]) -> list[str]:
-    known = set(scored["ticker"]) if not scored.empty else set()
-    return [t for t in tickers if t not in known]
+def _missing_tickers(resolved: pd.DataFrame) -> list[str]:
+    return resolved.loc[resolved["status"] == "missing", "ticker"].astype(str).tolist()
+
+
+def _ambiguous_entries(resolved: pd.DataFrame) -> list[str]:
+    """Positionen, deren Ticker mehrfach im Universum vorkommt und die per
+    Name nicht eindeutig zugeordnet werden konnten."""
+    rows = resolved.loc[resolved["status"] == "ambiguous"]
+    out = []
+    for _, r in rows.iterrows():
+        name = str(r.get("name") or "")
+        out.append(f"{r['ticker']} ({name})" if name else str(r["ticker"]))
+    return out
 
 
 def _missing_label(ticker: str) -> str:
@@ -282,11 +304,17 @@ def _upload_card() -> html.Div:
     )
 
 
-def _hero(scored: pd.DataFrame, view: pd.DataFrame, missing: list[str]) -> html.Div:
+def _hero(
+    scored: pd.DataFrame,
+    view: pd.DataFrame,
+    missing: list[str],
+    ambiguous: list[str] | None = None,
+) -> html.Div:
     n_pos = len(STATE.ms_portfolio)
     n_in_universe = len(view)
     flags = build_flags(view)
-    n_flagged = flags["ticker"].nunique() if not flags.empty else 0
+    flag_key = "uid" if "uid" in getattr(flags, "columns", []) else "ticker"
+    n_flagged = flags[flag_key].nunique() if not flags.empty else 0
 
     pf_avg = float(view["total_score"].dropna().mean()) if not view.empty else float("nan")
     uni_avg = float(scored["total_score"].dropna().mean()) if not scored.empty else float("nan")
@@ -313,6 +341,14 @@ def _hero(scored: pd.DataFrame, view: pd.DataFrame, missing: list[str]) -> html.
         meta.append(
             html.Span(
                 f"{fmt_int(len(missing))} fehlen im Universum",
+                className="ms-badge is-warn",
+            )
+        )
+    if ambiguous:
+        meta.append(html.Span("·", className="ms-sep"))
+        meta.append(
+            html.Span(
+                f"{fmt_int(len(ambiguous))} mehrdeutig (Ticker-Kollision)",
                 className="ms-badge is-warn",
             )
         )
@@ -445,7 +481,7 @@ def _flags_section(view: pd.DataFrame) -> list:
         rows.append(
             html.Tr(
                 [
-                    _ticker_link(r["ticker"]),
+                    _ticker_link(r["ticker"], r.get("uid")),
                     html.Td(str(r.get("name") or "—")),
                     _flag_chips(r["flags"]),
                     _score_pill(r.get("total_score")),
@@ -624,7 +660,9 @@ def _rec_compare_card(view: pd.DataFrame, scored: pd.DataFrame) -> html.Div:
     )
 
 
-def _positions_section(view: pd.DataFrame, missing: list[str]) -> list:
+def _positions_section(
+    view: pd.DataFrame, missing: list[str], ambiguous: list[str] | None = None
+) -> list:
     head = html.Div(
         [
             html.Div(
@@ -662,7 +700,7 @@ def _positions_section(view: pd.DataFrame, missing: list[str]) -> list:
             rows.append(
                 html.Tr(
                     [
-                        _ticker_link(r["ticker"]),
+                        _ticker_link(r["ticker"], r.get("uid")),
                         html.Td(str(r.get("name") or "—")),
                         html.Td(str(r.get("sector") or "—"), className="ms-tt-muted"),
                         _score_pill(r.get("total_score")),
@@ -711,6 +749,17 @@ def _positions_section(view: pd.DataFrame, missing: list[str]) -> list:
             shown += ", …"
         children.append(
             html.Div(f"Nicht im Universum: {shown}", className="ms-rrg-foot")
+        )
+    if ambiguous:
+        shown = ", ".join(ambiguous[:MISSING_LIST_CAP])
+        if len(ambiguous) > MISSING_LIST_CAP:
+            shown += ", …"
+        children.append(
+            html.Div(
+                "Mehrdeutig — Ticker mehrfach im Universum, per Name nicht "
+                f"zuzuordnen (Name in der Watchlist ergänzen): {shown}",
+                className="ms-rrg-foot",
+            )
         )
     return children
 
@@ -770,11 +819,13 @@ def _render_main() -> list:
             )
         ]
 
-    view = _portfolio_view(scored, tickers)
-    missing = _missing_tickers(scored, tickers)
+    resolved = STATE.resolve_portfolio()
+    view = _portfolio_view(scored, resolved)
+    missing = _missing_tickers(resolved)
+    ambiguous = _ambiguous_entries(resolved)
 
     return [
-        _hero(scored, view, missing),
+        _hero(scored, view, missing, ambiguous),
         html.Div(
             [
                 _factor_compare_card(view, scored),
@@ -784,7 +835,7 @@ def _render_main() -> list:
             style={"marginTop": "16px"},
         ),
         *_flags_section(view),
-        *_positions_section(view, missing),
+        *_positions_section(view, missing, ambiguous),
     ]
 
 
@@ -836,12 +887,22 @@ def _on_upload(contents: str | None, filename: str | None):
         parts.append("Kein Universum geladen — Kennzahlen folgen nach dem Import.")
         warn = True
     else:
-        missing = _missing_tickers(scored, STATE.ms_portfolio)
+        resolved = STATE.resolve_portfolio()
+        missing = _missing_tickers(resolved)
         if missing:
             shown = ", ".join(missing[:MISSING_LIST_CAP])
             if len(missing) > MISSING_LIST_CAP:
                 shown += ", …"
             parts.append(f"{fmt_int(len(missing))} nicht im Universum: {shown}")
+            warn = True
+        ambiguous = _ambiguous_entries(resolved)
+        if ambiguous:
+            shown = ", ".join(ambiguous[:MISSING_LIST_CAP])
+            if len(ambiguous) > MISSING_LIST_CAP:
+                shown += ", …"
+            parts.append(
+                f"{fmt_int(len(ambiguous))} mehrdeutig (Ticker-Kollision): {shown}"
+            )
             warn = True
 
     status_cls = f"{base} {'is-warn' if warn else 'is-ok'}"

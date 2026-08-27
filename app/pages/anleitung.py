@@ -42,6 +42,13 @@ Fehlt die Spalte `Export Date`, wird das Snapshot-Datum aus dem
 Koyfin-Dateinamen gelesen (`koyfin_..._JJJJ.MM.TT_...`), sonst das heutige
 Datum verwendet.
 
+**Doppelte Ticker**: Koyfin-Ticker tragen kein Börsensuffix — verschiedene
+Aktien können dasselbe Symbol haben (z. B. „SAN" = Sanofi und Banco
+Santander). Der Import warnt bei Kollisionen; intern bekommt jede Zeile eine
+eindeutige Kennung (`TICKER~namens-slug`, z. B. `SAN~sanofi`), sodass beide
+Titel getrennt ansteuerbar sind (Links, Suche, Historie, Agenten- und
+Kurs-Mappings). Angezeigt wird weiterhin der Ticker.
+
 4. CSV exportieren und im Tab **Daten-Import** hochladen.
 
 ## Scoring-Logik
@@ -119,7 +126,10 @@ klassische Momentum-Definition); Ranking inkl. Abstand zum 52-Wochen-Hoch.
 
 Das Portfolio wird als **Koyfin-Watchlist-CSV** auf der Portfolio-Seite
 hochgeladen — es genügt eine Ticker-Spalte (Header `Ticker`; Gruppen-Zeilen
-wie "Watch" werden ignoriert, Duplikate entfernt). Der Upload wird in der
+wie "Watch" werden ignoriert, identische Zeilen entfernt). Bei doppelt
+vergebenen Tickern im Universum entscheidet die Namensspalte der Watchlist,
+welche Firma gemeint ist; ohne auflösbaren Namen wird die Position als
+„mehrdeutig" markiert statt falsch oder doppelt gematcht. Der Upload wird in der
 Datenbank gespeichert und übersteht Neustarts; die Portfolio-Linse auf dem
 Momentum-Monitor nutzt automatisch die hochgeladene Liste.
 
