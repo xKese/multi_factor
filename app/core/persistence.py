@@ -71,6 +71,8 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "min_piotroski",
     "min_altman_z",
     "min_market_cap",
+    "buy_threshold",
+    "sell_threshold",
     "min_stocks_per_industry",
     "min_factor_coverage",
     "min_total_coverage",

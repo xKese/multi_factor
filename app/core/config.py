@@ -42,6 +42,39 @@ GROWTH_OUTLIER_INVALID: frozenset[str] = frozenset(
 # auf den Koyfin-GICS-Sektornamen ("Financials").
 FINANCIAL_SECTOR_MARKER: str = "financ"
 
+# Real Estate (REITs) hat dieselbe Altman-Z-Problematik: Die Z-Score-Gewichte
+# sind auf Industrieunternehmen kalibriert; die Bilanzstruktur von
+# Immobiliengesellschaften (hoher Anlagenanteil, hohe strukturelle
+# Verschuldung) macht die Schwelle bedeutungslos. Match per Substring auf den
+# GICS-Sektornamen ("Real Estate").
+REAL_ESTATE_SECTOR_MARKER: str = "real estate"
+
+# Indikatoren, die für Banken/Versicherer (GICS-Sektor Financials)
+# konzeptionell nicht definiert oder bedeutungslos sind und daher weder in
+# Faktor-Scores noch in die Daten-Abdeckung von Financials eingehen:
+# - ev_ebitda/pfcf: EBITDA bzw. FCF sind für Banken keine sinnvollen Größen
+#   (Zinsergebnis ist operatives Geschäft, OCF durch Bilanzbewegungen dominiert)
+# - gross_margin/op_margin: keine COGS, Margen nicht vergleichbar definiert
+# - int_coverage: Zinsaufwand ist Betriebsaufwand, keine Kapitaldienstlast
+# - current_ratio: kurzfristige Bilanzgliederung existiert bei Banken nicht
+# - ocf_ni: Cash-Conversion ohne Aussagekraft (siehe OCF)
+# - debt_equity: Fremdkapital (Einlagen) ist das Geschäftsmodell, kein Risiko-
+#   signal; die relevante Größe wäre regulatorisches Kapital (nicht im Export)
+# - altman_z: siehe FINANCIAL_SECTOR_MARKER
+FINANCIAL_IRRELEVANT_INDICATORS: frozenset[str] = frozenset(
+    {
+        "ev_ebitda",
+        "pfcf",
+        "gross_margin",
+        "op_margin",
+        "int_coverage",
+        "current_ratio",
+        "ocf_ni",
+        "debt_equity",
+        "altman_z",
+    }
+)
+
 
 @dataclass
 class Settings:
@@ -129,6 +162,13 @@ class Settings:
     min_piotroski: float = 5.0
     min_altman_z: float = 1.8
     min_market_cap: float = 1000.0
+    # Empfehlungs-Schwellen mit bewusst asymmetrischem HOLD-Band: BUY erst ab
+    # ``buy_threshold``, SELL erst unter ``sell_threshold``. Das breitere Band
+    # (Default 45–70 statt 50–70) wirkt als Hysterese-Ersatz — Titel, die um
+    # die alte 50er-Schwelle pendeln, flackern nicht bei jedem Import zwischen
+    # HOLD und SELL. STRONG BUY bleibt fix bei 80 (Klassifikation "A").
+    buy_threshold: float = 70.0
+    sell_threshold: float = 45.0
     min_stocks_per_industry: int = 5
     percentile_mode: PercentileMode = "Industrie"
     # Mindest-Datenabdeckung je Faktor: Liegt weniger als dieser Anteil der
