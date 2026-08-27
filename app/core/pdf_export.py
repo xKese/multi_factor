@@ -213,15 +213,17 @@ def _metrics(
 # ── Basis-Bausteine ────────────────────────────────────────────────────────
 
 def _scored_row(scored: pd.DataFrame | None, ticker: str) -> dict | None:
-    """Zeile aus ``STATE.scored`` — exakter Ticker, sonst ohne Suffix."""
+    """Zeile aus ``STATE.scored`` — uid/Ticker exakt, sonst ohne Suffix."""
+    from app.core.uid import row_by_uid
+
     if scored is None or scored.empty or not ticker:
         return None
-    hit = scored[scored["ticker"] == ticker]
-    if hit.empty and "." in ticker:
-        hit = scored[scored["ticker"] == ticker.split(".")[0]]
-    if hit.empty:
+    row = row_by_uid(scored, ticker)
+    if row is None and "." in ticker:
+        row = row_by_uid(scored, ticker.split(".")[0])
+    if row is None:
         return None
-    return hit.iloc[0].to_dict()
+    return row.to_dict()
 
 
 def _company_name(analysis: dict, fc: dict | None, row: dict | None) -> str:

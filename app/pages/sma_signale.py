@@ -111,6 +111,7 @@ PHASE_CLASS = {
 }
 
 SIGNAL_COLS = [
+    "uid",
     "ticker",
     "name",
     "sector",
@@ -130,6 +131,7 @@ SIGNAL_COLS = [
 WATCH_THRESHOLD = FRESH_GAP_THRESHOLD  # 3 %: |SMA-50 − SMA-200| / SMA-200
 WATCH_TOP_N = 20
 WATCH_COLS = [
+    "uid",
     "ticker",
     "name",
     "sector",
@@ -210,7 +212,12 @@ def _has_sma20(df: pd.DataFrame) -> bool:
 
 def _apply_portfolio_lens(df: pd.DataFrame, lens: str) -> pd.DataFrame:
     if lens == "ms":
-        return df[df["ticker"].isin(STATE.ms_portfolio)]
+        # Match über die aufgelösten uids — bei Ticker-Kollisionen zieht ein
+        # ``ticker.isin``-Match sonst beide Universums-Zeilen in die Sicht.
+        resolved = STATE.resolve_portfolio()
+        ok_uids = set(resolved.loc[resolved["status"] == "ok", "uid"].astype(str))
+        key = "uid" if "uid" in df.columns else "ticker"
+        return df[df[key].astype(str).isin(ok_uids)]
     return df
 
 
@@ -226,11 +233,17 @@ def _build_signals(
 
     events = load_signal_events(df)
     if not events.empty:
+        key = "uid" if "uid" in filtered.columns else "ticker"
+        event_key = "uid" if "uid" in events.columns else "ticker"
         filtered = filtered.merge(
-            events[["ticker", "is_new", "state_since", "days_in_state"]],
-            on="ticker",
+            events[[event_key, "is_new", "state_since", "days_in_state"]],
+            left_on=key,
+            right_on=event_key,
             how="left",
+            suffixes=("", "_ev"),
         )
+        if event_key != key and f"{event_key}_ev" in filtered.columns:
+            filtered = filtered.drop(columns=[f"{event_key}_ev"])
 
     signals = format_scored(filtered).copy()
     signals["priority"] = signals["sma_signal"].map(PRIORITY)
@@ -545,10 +558,11 @@ def _filters(signal: str, phase: str, lens: str) -> html.Div:
     )
 
 
-def _ticker_link(ticker) -> html.Td:
+def _ticker_link(ticker, uid=None) -> html.Td:
     t = str(ticker or "—")
+    target = str(uid) if isinstance(uid, str) and uid else t
     return html.Td(
-        html.A(t, href=f"/einzelanalyse?ticker={t}", className="ms-tt-tk")
+        html.A(t, href=f"/einzelanalyse?ticker={target}", className="ms-tt-tk")
     )
 
 
@@ -631,7 +645,7 @@ def _signals_table(table_df: pd.DataFrame, limit: int) -> list:
         rows.append(
             html.Tr(
                 [
-                    _ticker_link(r["ticker"]),
+                    _ticker_link(r["ticker"], r.get("uid")),
                     html.Td(str(r.get("name") or "—")),
                     html.Td(str(r.get("sector") or "—"), className="ms-tt-muted"),
                     _score_pill(r.get("total_score")),
@@ -821,7 +835,7 @@ def _ranking_section(df: pd.DataFrame, lens: str) -> list:
             html.Tr(
                 [
                     html.Td(fmt_int(rank), className="is-num ms-tt-muted"),
-                    _ticker_link(r["ticker"]),
+                    _ticker_link(r["ticker"], r.get("uid")),
                     html.Td(str(r.get("name") or "—")),
                     html.Td(str(r.get("sector") or "—"), className="ms-tt-muted"),
                     _phase_chip(r.get("trend_phase")),
@@ -917,7 +931,7 @@ def _watchlist_section(df: pd.DataFrame, lens: str) -> list:
         dir_cls = "is-up" if direction.startswith("↑") else "is-down"
         dir_label = direction.lstrip("↑↓ ")
         cells = [
-            _ticker_link(r["ticker"]),
+            _ticker_link(r["ticker"], r.get("uid")),
             html.Td(str(r.get("name") or "—")),
             html.Td(str(r.get("sector") or "—"), className="ms-tt-muted"),
             html.Td(html.Span(dir_label, className=f"ms-delta {dir_cls}")),

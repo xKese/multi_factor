@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 
 from . import persistence
+from .uid import UID_SEPARATOR, base_ticker
 
 # Substring-Hinweise für die Regions-Klassifikation. Koyfin-Exporte sind in
 # den Bezeichnungen nicht einheitlich ("US", "United States", "United States
@@ -113,13 +114,24 @@ def resolve(ticker: str, region=None) -> str | None:
     """
     if not isinstance(ticker, str) or not ticker.strip():
         return None
-    t = ticker.strip().upper()
+    uid = ticker.strip()
+    # Heuristiken arbeiten auf dem reinen Symbol; der Mapping-Schlüssel ist
+    # die uid (für eindeutige Ticker identisch zum Symbol).
+    t = base_ticker(uid).upper()
     if not _TICKER_RE.match(t):
         return None
 
-    stored = persistence.load_ticker_mapping(t)
+    stored = persistence.load_ticker_mapping(
+        uid if UID_SEPARATOR in uid else t
+    )
     if stored:
         return stored
+
+    if UID_SEPARATOR in uid:
+        # Ticker-Kollision (z. B. zwei "SAN"): nie heuristisch raten — beide
+        # Kandidaten teilen das Symbol, nur eine Nutzer-Bestätigung über die
+        # Symbol-Suche ist eindeutig.
+        return None
 
     # Ein bereits suffigierter Ticker (z. B. ``MBG.DE`` aus einem manuellen
     # Import) ist schon Yahoo-kompatibel.

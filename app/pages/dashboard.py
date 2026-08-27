@@ -430,7 +430,7 @@ def _movers_card(df: pd.DataFrame) -> html.Div:
                     className=f"ms-mv-v is-{tone}",
                 ),
             ],
-            href=f"/einzelanalyse?ticker={r['ticker']}",
+            href=f"/einzelanalyse?ticker={_uid_of(r)}",
             className="ms-mover",
         )
 
@@ -460,6 +460,12 @@ def _classification_short(class_str: str) -> str:
         return class_str or "–"
     code, _, label = class_str.partition("-")
     return f"{code.strip()} – {label.strip()}"
+
+
+def _uid_of(r: pd.Series) -> str:
+    """Link-/Schlüsselwert einer Zeile: uid, Fallback Ticker (eindeutig auch
+    bei Ticker-Kollisionen wie zwei "SAN")."""
+    return str(r.get("uid") or r.get("ticker") or "")
 
 
 _AGENT_RATING_CLASS = {
@@ -492,6 +498,10 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
 
     rows = []
     for _, r in src.iterrows():
+        uid = _uid_of(r)
+        # Rating-Lookup: uid zuerst (neue Analysen), Fallback bloßer Ticker
+        # (Bestandsanalysen von vor der uid-Einführung).
+        rating = agent_ratings.get(uid) or agent_ratings.get(str(r["ticker"]))
         cls = _class_of(float(r["total_score"]))
         rec = str(r.get("recommendation") or "–")
         rec_cls = _REC_CLASS.get(rec, "fail")
@@ -518,7 +528,7 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
             html.Tr(
                 [
                     html.Td(
-                        html.A(str(r["ticker"]), href=f"/einzelanalyse?ticker={r['ticker']}",
+                        html.A(str(r["ticker"]), href=f"/einzelanalyse?ticker={uid}",
                                className="ms-tt-tk"),
                     ),
                     html.Td(str(r.get("name") or "—")),
@@ -540,14 +550,12 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
                     ),
                     html.Td(
                         html.Span(
-                            agent_ratings.get(str(r["ticker"]), "–"),
+                            rating or "–",
                             className=(
                                 "ms-tt-rec is-"
-                                + _AGENT_RATING_CLASS.get(
-                                    agent_ratings.get(str(r["ticker"]), ""), "fail"
-                                )
+                                + _AGENT_RATING_CLASS.get(rating, "fail")
                             )
-                            if str(r["ticker"]) in agent_ratings
+                            if rating
                             else "ms-tt-muted",
                         ),
                     ),

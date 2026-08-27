@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from .schema import KOYFIN_COLUMNS, OPTIONAL_COLUMNS
+from .uid import assign_uids
 
 
 NUMERIC_COLUMNS = [
@@ -178,6 +179,11 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
         df = df.loc[~(df["name"].isna() & df["last_price"].isna())]
 
     df = df.dropna(subset=["ticker"]).reset_index(drop=True)
+
+    # Eindeutige interne Kennung je Zeile — Koyfin-Ticker sind ohne
+    # Börsensuffix nicht garantiert eindeutig (z. B. "SAN" = Sanofi UND
+    # Banco Santander). Details in app/core/uid.py.
+    df = assign_uids(df)
 
     problems = validate_universe_plausibility(df)
     if problems:

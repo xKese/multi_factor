@@ -509,7 +509,7 @@ def _drill_table(active: str) -> html.Div:
                     html.Td(
                         html.A(
                             str(r["ticker"]),
-                            href=f"/einzelanalyse?ticker={r['ticker']}",
+                            href=f"/einzelanalyse?ticker={r.get('uid') or r['ticker']}",
                             className="ms-tt-tk",
                         ),
                     ),

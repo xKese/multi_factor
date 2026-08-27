@@ -34,6 +34,7 @@ from app.core.indicators import INDICATOR_GROUPS
 from app.core.peers import compute_peers
 from app.core.scoring import _indicator_percentile
 from app.core.state import STATE
+from app.core.uid import base_ticker, row_by_uid, rows_by_uid_index
 from app.ui import (
     fmt_de,
     fmt_indicator,
@@ -42,6 +43,17 @@ from app.ui import (
     fmt_percent,
 )
 from app.ui.agent_report import fmt_local_dt, progress_checklist, result_view
+
+
+def _resolve_uid(key: str | None) -> str | None:
+    """Beliebigen Schlüssel (uid oder Alt-Ticker) auf die uid der Zeile
+    auflösen; ``None``, wenn kein Universum oder kein Treffer."""
+    if not key:
+        return None
+    row = row_by_uid(STATE.scored, key)
+    if row is None:
+        return None
+    return str(row.get("uid") or row.get("ticker"))
 
 
 # ── Score → Klassifikation (gespiegelt aus dashboard.py / data.js) ─────────
@@ -71,9 +83,13 @@ _FACTORS = [
 def layout(ticker: str = "", **_) -> html.Div:
     options = []
     if not STATE.scored.empty:
+        # Value ist die uid (nicht der Ticker): bei Ticker-Kollisionen
+        # (z. B. zwei "SAN") bleiben beide Einträge einzeln ansteuerbar.
         options = [
-            {"label": f"{t} – {n}", "value": t}
-            for t, n in STATE.scored[["ticker", "name"]].head(2000).itertuples(index=False)
+            {"label": f"{t} – {n}", "value": u}
+            for t, n, u in STATE.scored[["ticker", "name", "uid"]]
+            .head(2000)
+            .itertuples(index=False)
         ]
 
     return html.Div(
@@ -84,7 +100,8 @@ def layout(ticker: str = "", **_) -> html.Div:
                         dcc.Dropdown(
                             id="ea-ticker",
                             options=options,
-                            value=ticker or (options[0]["value"] if options else None),
+                            value=_resolve_uid(ticker)
+                            or (options[0]["value"] if options else None),
                             placeholder="Ticker wählen …",
                             searchable=True,
                             clearable=False,
@@ -359,9 +376,9 @@ def _verdict_block(r: pd.Series) -> html.Div:
 
 
 def _strengths_concerns(df: pd.DataFrame, ticker: str) -> html.Div:
-    """Top-3 / Bottom-3 Indikator-Perzentile für den Ticker."""
+    """Top-3 / Bottom-3 Indikator-Perzentile für den Ticker (uid)."""
     flat: list[dict] = []
-    idx = df.index[df["ticker"] == ticker]
+    idx = rows_by_uid_index(df, ticker)
     if len(idx) == 0:
         return html.Div()
     i = idx[0]
@@ -613,7 +630,7 @@ def _returns_block(r: pd.Series) -> html.Div:
 
 
 def _indicator_table_card(df: pd.DataFrame, ticker: str, group) -> html.Div:
-    idx = df.index[df["ticker"] == ticker]
+    idx = rows_by_uid_index(df, ticker)
     if len(idx) == 0:
         return html.Div()
     i = idx[0]
@@ -709,9 +726,10 @@ def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
         return html.Span(fmt_de(float(v), 0), className=f"ms-hm is-{cls}")
 
     rows = []
-    self_ticker = ticker
+    self_uid = _resolve_uid(ticker) or ticker
     for _, p in peers.iterrows():
-        is_self = str(p["ticker"]) == self_ticker
+        peer_uid = str(p.get("uid") or p["ticker"])
+        is_self = peer_uid == self_uid
         score = p.get("total_score")
         score_cls = _class_of(float(score))["cls"] if pd.notna(score) else "f"
         ret_12m = p.get("ret_12m")
@@ -727,7 +745,7 @@ def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
                 [
                     html.Td(
                         html.A(str(p["ticker"]),
-                               href=f"/einzelanalyse?ticker={p['ticker']}",
+                               href=f"/einzelanalyse?ticker={peer_uid}",
                                className="ms-peer-tk"),
                     ),
                     html.Td(name_cell),
@@ -801,7 +819,10 @@ def _comparables_controls() -> html.Div:
     prevent_initial_call=True,
 )
 def _sync_ticker_from_url(search: str | None):
-    """Ticker-Dropdown bei URL-Query-Wechsel nachziehen (Deep-Link)."""
+    """Ticker-Dropdown bei URL-Query-Wechsel nachziehen (Deep-Link).
+
+    Der Query-Wert ist die uid; alte Links mit bloßem Ticker werden auf die
+    passende uid aufgelöst (erste Zeile — bisheriges Verhalten)."""
     from urllib.parse import parse_qs
 
     if not search:
@@ -810,7 +831,7 @@ def _sync_ticker_from_url(search: str | None):
     tickers = qs.get("ticker")
     if not tickers or not tickers[0]:
         raise PreventUpdate
-    return tickers[0]
+    return _resolve_uid(tickers[0]) or tickers[0]
 
 
 @callback(Output("ea-content", "children"), Input("ea-ticker", "value"))
@@ -819,10 +840,9 @@ def _render(ticker: str | None):
         return dbc.Alert("Keine Daten verfügbar.", color="info")
 
     df = STATE.scored
-    row = df.loc[df["ticker"] == ticker]
-    if row.empty:
+    r = row_by_uid(df, ticker)
+    if r is None:
         return dbc.Alert(f"Ticker {ticker} nicht gefunden.", color="warning")
-    r = row.iloc[0]
 
     ranks = _ranks(df, r)
     industry_label = (
@@ -918,10 +938,9 @@ def _current_quant(ticker: str):
     """(total_score, klassifikations-kurzform) aus dem Universum, sonst None."""
     if STATE.scored.empty:
         return None, None
-    row = STATE.scored.loc[STATE.scored["ticker"] == ticker]
-    if row.empty:
+    r = row_by_uid(STATE.scored, ticker)
+    if r is None:
         return None, None
-    r = row.iloc[0]
     score = r.get("total_score")
     cls = _class_of(float(score)) if pd.notna(score) else None
     return (float(score) if pd.notna(score) else None), (cls["code"] if cls else None)
@@ -1091,7 +1110,9 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
     return (
         html.Div(
             [
-                _agent_section_head(f"Noch keine Analyse für {ticker}"),
+                _agent_section_head(
+                    f"Noch keine Analyse für {base_ticker(ticker) or ticker}"
+                ),
                 _agent_start_state(ticker, service_ok, error),
             ]
         ),
@@ -1104,9 +1125,9 @@ def _start_agent_run(ticker: str, agents_ticker: str) -> tuple[bool, str]:
     factor_context = None
     in_universe = False
     if not STATE.scored.empty:
-        row = STATE.scored.loc[STATE.scored["ticker"] == ticker]
-        if not row.empty:
-            factor_context = agents_client.build_factor_context(row.iloc[0])
+        row = row_by_uid(STATE.scored, ticker)
+        if row is not None:
+            factor_context = agents_client.build_factor_context(row)
             in_universe = True
     return agents_client.start_analysis(
         ticker,
@@ -1131,9 +1152,7 @@ def _agent_section(ticker: str | None, _n):
 
 def _universe_row(ticker: str):
     if not STATE.scored.empty:
-        rows = STATE.scored.loc[STATE.scored["ticker"] == ticker]
-        if not rows.empty:
-            return rows.iloc[0]
+        return row_by_uid(STATE.scored, ticker)
     return None
 
 

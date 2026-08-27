@@ -122,7 +122,12 @@ def load_portfolio_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
         if parsed is not None:
             out["weight"] = parsed
     out = out[(out["ticker"] != "") & (out["ticker"] != "NAN")]
-    out = out.drop_duplicates(subset="ticker", keep="first").reset_index(drop=True)
+    # Dedup auf (Ticker, Name): identische Zeilen sind echte Duplikate,
+    # aber zwei verschiedene Firmen mit demselben Symbol (z. B. "SAN" =
+    # Sanofi und Banco Santander) bleiben als getrennte Positionen erhalten.
+    out = out.drop_duplicates(subset=["ticker", "name"], keep="first").reset_index(
+        drop=True
+    )
     if out.empty:
         raise ValueError("Keine Ticker in der Datei gefunden")
     if "weight" in out.columns:

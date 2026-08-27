@@ -55,6 +55,37 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
   seit letztem Import (Signal-Historie je Aktie), 12-1-Momentum-Ranking,
   optional SMA-20 aus erweitertem Export
 
+## Doppelte Ticker (z. B. „SAN" = Sanofi und Banco Santander)
+
+Koyfin exportiert Ticker ohne Börsensuffix — verschiedene Aktien können
+dasselbe Symbol tragen. Die App erkennt Kollisionen beim Import (Warnung im
+Import-Bericht) und führt jede Zeile unter einer eindeutigen internen
+Kennung (`uid`, `app/core/uid.py`):
+
+- Eindeutiger Ticker → `uid == ticker` (der Normalfall; alle bestehenden
+  Links, Mappings und Historien bleiben gültig).
+- Kollision → `uid = TICKER~namens-slug`, z. B. `SAN~sanofi` und
+  `SAN~bancosantander`. Angezeigt wird weiterhin der Ticker; die uid steckt
+  nur in Links, Suche, Dropdown-Werten und Datenbank-Schlüsseln.
+
+Damit sind beide Titel getrennt ansteuerbar (Einzelanalyse, Cmd+K,
+Dashboard-Links), bekommen eigene Signal-Historien, eigene
+Agenten-Analysen und eigene Ticker-/Alpha-Vantage-Mappings (CLI:
+`--map "SAN~sanofi=SAN.PA:EUR"`). Für kollidierende Ticker wird nie
+heuristisch gemappt — die Zuordnung läuft über die namens-/regionsgerankte
+Symbol-Suche bzw. die Nutzer-Bestätigung.
+
+**Portfolio-Upload:** Enthält die Watchlist einen kollidierenden Ticker,
+entscheidet die Namensspalte (exakter oder Prefix-Match, z. B.
+„Santander" → „Banco Santander"). Ohne auflösbaren Namen wird die Position
+als *mehrdeutig* markiert und nicht gematcht (statt beide Kandidaten
+doppelt zu zählen) — Name in der Watchlist ergänzen.
+
+**Grenze:** Historie und Mappings, die vor dem ersten Auftreten einer
+Kollision unter dem bloßen Ticker gespeichert wurden, lassen sich
+nachträglich keiner der beiden Firmen sicher zuordnen; die kollidierenden
+Titel starten unter ihren neuen uids frisch.
+
 ## Industriespezifika (Financials & Real Estate)
 
 Für **Financials** (GICS-Sektor, Substring-Match „financ") gelten mehrere

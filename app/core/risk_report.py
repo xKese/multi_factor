@@ -78,9 +78,12 @@ def compute_risk_report(
 
     sectors: dict[str, str] = {}
     if scored is not None and not scored.empty and "sector" in scored.columns:
+        # Keyed by uid (Fallback Ticker): bei Ticker-Kollisionen würde ein
+        # Ticker-Key sonst den Sektor der jeweils letzten Zeile erhalten.
+        keys = scored["uid"] if "uid" in scored.columns else scored["ticker"]
         sectors = {
             str(t): s
-            for t, s in zip(scored["ticker"], scored["sector"])
+            for t, s in zip(keys, scored["sector"])
             if isinstance(s, str) and s
         }
 

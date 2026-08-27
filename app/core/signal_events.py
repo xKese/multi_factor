@@ -21,6 +21,7 @@ from .persistence import load_signal_history
 
 
 EVENT_COLUMNS = [
+    "uid",
     "ticker",
     "momentum",
     "momentum_prev",
@@ -95,12 +96,19 @@ def derive_signal_events(
     if current is None or current.empty:
         return _empty_events()
 
-    cur = current.dropna(subset=["ticker"]).drop_duplicates("ticker")
+    # Schlüssel ist die uid (Fallback Ticker für Frames ohne uid-Spalte):
+    # bei Ticker-Kollisionen bekommt so jede Aktie eigene Events. Die
+    # History-Tabelle speichert dieselbe uid in ihrer ``ticker``-Spalte.
+    key_col = "uid" if "uid" in current.columns else "ticker"
+    cur = current.dropna(subset=["ticker"]).drop_duplicates(key_col)
     states = {
-        str(r["ticker"]): classify_momentum(
+        str(r[key_col]): classify_momentum(
             r.get("last_price"), r.get("sma_50"), r.get("sma_200")
         )
         for _, r in cur.iterrows()
+    }
+    display_ticker = {
+        str(r[key_col]): str(r["ticker"]) for _, r in cur.iterrows()
     }
 
     past: dict[str, list[tuple[date, str]]] = {}
@@ -112,8 +120,8 @@ def derive_signal_events(
             )
 
     records: list[dict] = []
-    for ticker, state in states.items():
-        series = sorted(past.get(ticker, []), key=lambda t: t[0], reverse=True)
+    for uid, state in states.items():
+        series = sorted(past.get(uid, []), key=lambda t: t[0], reverse=True)
         prev_date, prev_state = (series[0] if series else (None, None))
         is_new = prev_state is not None and prev_state != state
 
@@ -134,7 +142,8 @@ def derive_signal_events(
 
         records.append(
             {
-                "ticker": ticker,
+                "uid": uid,
+                "ticker": display_ticker.get(uid, uid),
                 "momentum": state,
                 "momentum_prev": prev_state,
                 "is_new": bool(is_new),

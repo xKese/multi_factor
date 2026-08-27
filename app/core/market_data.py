@@ -119,12 +119,17 @@ def _fx_currency(currency: str) -> tuple[str, float]:
 
 
 def _universe_hint(universe: pd.DataFrame | None, ticker: str) -> dict:
+    """Name/Region der Universums-Zeile zu einem Schlüssel (uid oder Ticker).
+
+    uid-Treffer haben Vorrang — bei Ticker-Kollisionen (z. B. zwei "SAN")
+    liefert der Ticker-Fallback sonst die Hints der falschen Firma."""
+    from .uid import row_by_uid
+
     if universe is None or universe.empty or "ticker" not in universe.columns:
         return {}
-    rows = universe[universe["ticker"] == ticker]
-    if rows.empty:
+    row = row_by_uid(universe, ticker)
+    if row is None:
         return {}
-    row = rows.iloc[0]
     return {
         "name": str(row.get("name") or ""),
         "region": row.get("region"),
@@ -132,6 +137,11 @@ def _universe_hint(universe: pd.DataFrame | None, ticker: str) -> dict:
 
 
 def _heuristic_candidates(ticker: str) -> list[str]:
+    from .uid import base_ticker
+
+    # Suffix-/Share-Class-Heuristik arbeitet auf dem reinen Börsensymbol;
+    # ein uid-Namenszusatz (``SAN~sanofi``) ist kein AV-Symbolbestandteil.
+    ticker = base_ticker(ticker) or ticker
     out: list[str] = []
     if "." in ticker:
         base, _, suffix = ticker.rpartition(".")
@@ -147,11 +157,33 @@ def _heuristic_candidates(ticker: str) -> list[str]:
     return out
 
 
+def _name_match_bonus(entry_name: str, target_name: str) -> float:
+    """Namensähnlichkeits-Bonus (0 / 0,5 / 1,0) auf den AV-``match_score``.
+
+    Slug-Vergleich (nur [a-z0-9]) analog ``uid.slugify_name``: exakter Slug
+    zählt voll, Enthaltensein in eine Richtung halb. Erst dieser Bonus macht
+    die Auflösung bei geteilten Symbolen (Sanofi vs. Banco Santander, beide
+    "SAN") deterministisch — der reine ``match_score`` unterscheidet die
+    beiden Nicht-US-Treffer nicht."""
+    from .uid import slugify_name
+
+    a = slugify_name(entry_name)
+    b = slugify_name(target_name)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    if a in b or b in a:
+        return 0.5
+    return 0.0
+
+
 def _pick_search_match(
-    results: list[dict], region_hint: str
+    results: list[dict], region_hint: str, name_hint: str = ""
 ) -> dict | None:
     """Bester plausibler Treffer: nur Equity/ETF, Mindest-Score, bei
-    Non-US-Hinweis werden US-Listings (OTC-Doppellistings!) nachrangig."""
+    Non-US-Hinweis werden US-Listings (OTC-Doppellistings!) nachrangig;
+    Namensähnlichkeit zum Universums-Namen fließt als Bonus ein."""
 
     usable = [
         r
@@ -166,7 +198,13 @@ def _pick_search_match(
         non_us = [r for r in usable if r.get("region") != "United States"]
         if non_us:
             usable = non_us
-    return max(usable, key=lambda r: r.get("match_score", 0.0))
+    return max(
+        usable,
+        key=lambda r: (
+            r.get("match_score", 0.0)
+            + _name_match_bonus(str(r.get("name") or ""), name_hint)
+        ),
+    )
 
 
 def resolve_symbols(
@@ -182,6 +220,8 @@ def resolve_symbols(
     brauchen. API-Fehler bei der Suche machen den Ticker unauflösbar,
     brechen aber nicht den ganzen Lauf ab.
     """
+
+    from .uid import UID_SEPARATOR
 
     rpm = settings.risk_av_requests_per_minute
     resolved: dict[str, ResolvedSymbol] = {}
@@ -201,6 +241,11 @@ def resolve_symbols(
 
         hint = _universe_hint(universe, ticker)
         region_hint = classify_region(hint.get("region"))
+        name_hint = str(hint.get("name") or "")
+        # Bei Ticker-Kollisionen (uid mit Namenszusatz) ist ein exakter
+        # Symbol-Treffer NICHT beweisend — beide Firmen teilen das Symbol.
+        # Dann entscheidet ausschließlich das namensgerankte Matching.
+        is_collision = UID_SEPARATOR in str(ticker)
         found: ResolvedSymbol | None = None
         try:
             for candidate in _heuristic_candidates(ticker):
@@ -208,7 +253,7 @@ def resolve_symbols(
                 exact = next(
                     (r for r in results if r["symbol"] == candidate), None
                 )
-                if exact:
+                if exact and not is_collision:
                     found = ResolvedSymbol(
                         ticker=ticker,
                         av_symbol=exact["symbol"],
@@ -218,7 +263,7 @@ def resolve_symbols(
                     break
                 # Kein Zusatz-Call: die Kandidaten-Suche liefert bereits
                 # die Trefferliste für die freie Auswahl.
-                match = _pick_search_match(results, region_hint)
+                match = _pick_search_match(results, region_hint, name_hint)
                 if match:
                     found = ResolvedSymbol(
                         ticker=ticker,
