@@ -14,7 +14,7 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 | Einzelanalyse    | Ticker-Detailansicht                            |
 | SMA_Signale      | Momentum-Monitor (Trend-Phasen, Cross-Events, 12-1) |
 | M&S Portfolio    | Portfolio-Monitor: Koyfin-Watchlist-Upload, Handlungs-Flags, Vergleich zum Universum |
-| Factor_Timing    | Taktische Faktor-Allokation mit Makro-Regime    |
+| Factor_Timing    | Taktische Faktor-Allokation: Makro-Regime v2 + Faktor-Momentum aus dem Universum + Sentiment (siehe unten) |
 | Daten_Import     | CSV-Upload (Koyfin-Export, einziger Input)      |
 | Berechnungen     | automatisch (Scoring-Engine)                    |
 | Piotroski        | automatisch (F-Score-Engine)                    |
@@ -54,6 +54,38 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 - **Momentum-Monitor**: Trend-Phasen (frisch/etabliert/ermüdet), Signalwechsel
   seit letztem Import (Signal-Historie je Aktie), 12-1-Momentum-Ranking,
   optional SMA-20 aus erweitertem Export
+
+## Factor Timing (taktische Faktor-Allokation)
+
+Regelbasierte Tilts von max. ±10 % um die strategischen Faktor-Gewichte
+(Kern-Logik in `app/core/factor_timing.py`, UI auf `/factor-timing`).
+Signal-Hierarchie bewusst nach Evidenzstärke:
+
+1. **Faktor-Momentum** (±3 pp, Top 2 / Bottom 2): automatisch aus dem
+   geladenen Universum berechenbar — je Faktor Mittel des 6M-Returns im
+   Top-Quintil (nach Faktor-Score) minus Bottom-Quintil („Aus Universum
+   übernehmen"), manuell überschreibbar.
+2. **Value-Spread**: Median-P/E des Top-Value-Quintils vs. Universum als
+   Anzeige-Hinweis (kein eigener Tilt — ohne Historie kein z-Score).
+3. **Makro-Regime v2** (±4 pp): GOLDILOCKS / SLOWDOWN / STAGFLATION /
+   HEATING UP aus ISM-PMI (mit Hysterese-Band 49–51 gegen Regime-Flackern),
+   PMI-Trend, OECD CLI, CPI und Zinskurve (inverse 10Y−2Y-Kurve stuft
+   GOLDILOCKS auf HEATING UP herab). Stagflation wird vor Slowdown geprüft
+   (PMI sinkt + Inflation > 3 % → STAGFLATION).
+4. **Sentiment** (±1–2 pp, symmetrisch): VIX > 25 → Low Vol/Quality;
+   VIX < 15 → Momentum; Credit-OAS > 500 bp → Quality statt Value;
+   Put/Call als Kontra-Signal (> 1,2 Extremangst → Momentum).
+
+Spread und CPI lassen sich per Button aus der Alpha-Vantage-API übernehmen
+(`TREASURY_YIELD` 10y/2y, `CPI` — benötigt `ALPHAVANTAGE_API_KEY`);
+PMI/CLI/VIX bleiben manuelle Eingaben. Die Ergebnis-Tabelle zeigt die
+**Tilt-Zerlegung** je Faktor (Strategisch | Regime | Momentum | Sentiment |
+Taktisch) plus die aktiven Regeln; jede Regime-Entscheidung wird pro Tag
+persistiert (`factor_timing_history`) und als Verlauf angezeigt.
+
+Bewusste Grenze: Faktor-Timing hat schwache Out-of-Sample-Evidenz — die
+kleinen Tilts sind Absicht, das System ist Entscheidungsunterstützung,
+kein Auto-Trade.
 
 ## Doppelte Ticker (z. B. „SAN" = Sanofi und Banco Santander)
 

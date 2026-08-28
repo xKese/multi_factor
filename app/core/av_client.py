@@ -240,14 +240,31 @@ def _parse_macro_series(data: dict, context: str) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").sort_index()
 
 
+def fetch_treasury_yield(
+    maturity: str = "10year", requests_per_minute: int = 70
+) -> pd.Series:
+    """US-Treasury-Rendite einer Laufzeit (z. B. ``10year``, ``2year``),
+    täglich, in Prozentpunkten."""
+
+    data = _get(
+        {"function": "TREASURY_YIELD", "interval": "daily", "maturity": maturity},
+        requests_per_minute,
+    )
+    return _parse_macro_series(data, f"TREASURY_YIELD {maturity}")
+
+
 def fetch_treasury_yield_10y(requests_per_minute: int = 70) -> pd.Series:
     """10-jährige US-Treasury-Rendite, täglich, in Prozentpunkten."""
 
-    data = _get(
-        {"function": "TREASURY_YIELD", "interval": "daily", "maturity": "10year"},
-        requests_per_minute,
-    )
-    return _parse_macro_series(data, "TREASURY_YIELD 10y")
+    return fetch_treasury_yield("10year", requests_per_minute)
+
+
+def fetch_cpi(requests_per_minute: int = 70) -> pd.Series:
+    """US-CPI-Indexstand, monatlich (Basis für die YoY-Rate im
+    Factor-Timing)."""
+
+    data = _get({"function": "CPI", "interval": "monthly"}, requests_per_minute)
+    return _parse_macro_series(data, "CPI monthly")
 
 
 def fetch_wti(requests_per_minute: int = 70) -> pd.Series:

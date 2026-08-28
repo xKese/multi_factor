@@ -1,20 +1,32 @@
 """Factor-Timing-Modul (entspricht Sheet ``Factor_Timing``).
 
-Regelbasierte taktische Faktor-Allokation.
+Regelbasierte taktische Faktor-Allokation. Die Regeln selbst leben in
+``app/core/factor_timing`` (Regime v2 mit Hysterese und Zinskurve,
+symmetrische Sentiment-Tilts, Tilt-Zerlegung) — diese Seite ist nur noch
+UI: Eingaben, AV-Makro-Fetch, Universums-Momentum-Vorbelegung, Anzeige.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html, no_update, register_page
+from dash.exceptions import PreventUpdate
 
-from app.core.persistence import load_factor_timing_inputs, save_factor_timing_inputs
+from app.core import av_client
+from app.core import factor_timing as ft_core
+from app.core.persistence import (
+    load_factor_timing_history,
+    load_factor_timing_inputs,
+    save_factor_timing_inputs,
+    save_factor_timing_snapshot,
+)
 from app.core.state import STATE
 from app.pages.common import page_title
-from app.ui import MS_LIGHT, fmt_signed_percent, fmt_percent, ms_badge, section_header
+from app.ui import MS_LIGHT, fmt_de, fmt_percent, fmt_signed_percent, ms_badge, section_header
 
 
 log = logging.getLogger(__name__)
@@ -39,13 +51,6 @@ _SETTINGS_TO_STRATEGIC: dict[str, str] = {
     "lowvol": "Low Volatility",
 }
 
-REGIME_MATRIX = {
-    "GOLDILOCKS": {"Value": 1, "Quality": 0, "Growth": 1, "Momentum": 1, "Low Volatility": -1},
-    "SLOWDOWN":   {"Value": -1, "Quality": 1, "Growth": -1, "Momentum": 0, "Low Volatility": 1},
-    "STAGFLATION": {"Value": 0, "Quality": 1, "Growth": -1, "Momentum": -1, "Low Volatility": 1},
-    "HEATING UP":  {"Value": 1, "Quality": 0, "Growth": 0, "Momentum": 1, "Low Volatility": -1},
-}
-
 
 # ── Input-Defaults und Persistenz-Mapping ──────────────────────────────────
 # Die Defaults werden nur verwendet, wenn die Datenbank keinen gespeicherten
@@ -59,7 +64,6 @@ _DEFAULTS: dict[str, float] = {
     "ft-vix": 31.0,
     "ft-credit": 400.0,
     "ft-pcr": 0.96,
-    "ft-flows": -9.9,
     "ft-mom-value": 21.6,
     "ft-mom-quality": 5.7,
     "ft-mom-growth": -1.7,
@@ -78,7 +82,6 @@ _FIELD_TO_INPUT_ID: dict[str, str] = {
     "vix": "ft-vix",
     "credit": "ft-credit",
     "pcr": "ft-pcr",
-    "flows": "ft-flows",
     "mom_value": "ft-mom-value",
     "mom_quality": "ft-mom-quality",
     "mom_growth": "ft-mom-growth",
@@ -97,13 +100,21 @@ _INPUT_ORDER: tuple[str, ...] = (
     "ft-vix",
     "ft-credit",
     "ft-pcr",
-    "ft-flows",
     "ft-mom-value",
     "ft-mom-quality",
     "ft-mom-growth",
     "ft-mom-momentum",
     "ft-mom-lowvol",
 )
+
+# Faktor → Momentum-Input-ID (für die Universums-Vorbelegung).
+_FACTOR_TO_MOM_INPUT: dict[str, str] = {
+    "Value": "ft-mom-value",
+    "Quality": "ft-mom-quality",
+    "Growth": "ft-mom-growth",
+    "Momentum": "ft-mom-momentum",
+    "Low Volatility": "ft-mom-lowvol",
+}
 
 
 def _strategic_weights() -> dict[str, float]:
@@ -147,16 +158,6 @@ def _resolve_input_values() -> dict[str, float]:
     return resolved
 
 
-def _detect_regime(pmi: float, pmi_trend: float, cli: float, inflation: float) -> str:
-    if pmi > 50 and pmi_trend > 0 and cli > 0:
-        return "GOLDILOCKS"
-    if pmi < 50 and pmi_trend < 0:
-        return "SLOWDOWN"
-    if pmi < 50 and inflation > 3:
-        return "STAGFLATION"
-    return "HEATING UP"
-
-
 def _input(label: str, input_id: str, value: float, step: float = 0.1) -> dbc.Row:
     return dbc.Row(
         [
@@ -168,6 +169,15 @@ def _input(label: str, input_id: str, value: float, step: float = 0.1) -> dbc.Ro
         ],
         className="mb-2",
     )
+
+
+def _universe_momentum_hint() -> str:
+    """Kurztext der aus dem Universum berechneten Momentum-Proxys."""
+    vals = ft_core.factor_momentum_from_universe(STATE.scored)
+    if not vals:
+        return "Kein Universum geladen — Momentum manuell pflegen."
+    parts = [f"{f}: {fmt_de(v, 1)} pp" for f, v in vals.items()]
+    return "Aus Universum (Top−Bottom-Quintil, 6M): " + " · ".join(parts)
 
 
 def layout(**_) -> html.Div:
@@ -189,8 +199,20 @@ def layout(**_) -> html.Div:
                                         _input("ISM Manufacturing PMI", "ft-pmi", vals["ft-pmi"]),
                                         _input("ISM PMI Trend (MoM)", "ft-pmi-trend", vals["ft-pmi-trend"]),
                                         _input("OECD CLI (YoY %)", "ft-cli", vals["ft-cli"]),
-                                        _input("US 10Y-2Y Spread (bps)", "ft-spread", vals["ft-spread"]),
+                                        _input("US 10Y-2Y Spread (%-Pkt.)", "ft-spread", vals["ft-spread"]),
                                         _input("Inflation (CPI YoY %)", "ft-cpi", vals["ft-cpi"]),
+                                        dbc.Button(
+                                            "Spread & CPI via Alpha Vantage laden",
+                                            id="ft-av-fetch",
+                                            color="secondary",
+                                            outline=True,
+                                            size="sm",
+                                            className="mt-1",
+                                        ),
+                                        html.Div(
+                                            id="ft-av-status",
+                                            className="ms-tt-muted small mt-2",
+                                        ),
                                     ]
                                 ),
                             ]
@@ -206,7 +228,12 @@ def layout(**_) -> html.Div:
                                         _input("VIX Index", "ft-vix", vals["ft-vix"]),
                                         _input("Credit Spread (OAS bps)", "ft-credit", vals["ft-credit"]),
                                         _input("Put/Call Ratio", "ft-pcr", vals["ft-pcr"], step=0.01),
-                                        _input("Fund Flows (Mrd.)", "ft-flows", vals["ft-flows"]),
+                                        html.Div(
+                                            "Alle drei Signale fließen in die "
+                                            "Sentiment-Tilts ein (siehe Zerlegung "
+                                            "unten).",
+                                            className="ms-tt-muted small mt-2",
+                                        ),
                                     ]
                                 ),
                             ]
@@ -216,7 +243,7 @@ def layout(**_) -> html.Div:
                     dbc.Col(
                         dbc.Card(
                             [
-                                dbc.CardHeader("Factor Momentum 6M"),
+                                dbc.CardHeader("Factor Momentum 6M (pp)"),
                                 dbc.CardBody(
                                     [
                                         _input("Value", "ft-mom-value", vals["ft-mom-value"]),
@@ -224,6 +251,19 @@ def layout(**_) -> html.Div:
                                         _input("Growth", "ft-mom-growth", vals["ft-mom-growth"]),
                                         _input("Momentum", "ft-mom-momentum", vals["ft-mom-momentum"]),
                                         _input("Low Vol", "ft-mom-lowvol", vals["ft-mom-lowvol"]),
+                                        dbc.Button(
+                                            "Aus Universum übernehmen",
+                                            id="ft-mom-auto",
+                                            color="secondary",
+                                            outline=True,
+                                            size="sm",
+                                            className="mt-1",
+                                        ),
+                                        html.Div(
+                                            _universe_momentum_hint(),
+                                            id="ft-mom-hint",
+                                            className="ms-tt-muted small mt-2",
+                                        ),
                                     ]
                                 ),
                             ]
@@ -239,6 +279,29 @@ def layout(**_) -> html.Div:
     )
 
 
+def _regime_timeline() -> html.Div | None:
+    """Kleine Timeline der zuletzt persistierten Regime-Entscheidungen."""
+    history = load_factor_timing_history(limit=10)
+    if not history:
+        return None
+    parts = [
+        f"{h['snapshot_date']:%d.%m.} {h['regime']}"
+        for h in history
+    ]
+    return html.Div(
+        "Regime-Verlauf: " + " · ".join(parts),
+        className="ms-tt-muted small mt-2",
+    )
+
+
+def _fmt_tilt(value: float) -> str:
+    """Tilt in Prozentpunkten mit Vorzeichen (0 → '–')."""
+    if abs(value) < 1e-9:
+        return "–"
+    sign = "+" if value > 0 else "−"
+    return f"{sign}{fmt_de(abs(value) * 100, 1)} pp"
+
+
 @callback(
     Output("ft-output", "children"),
     Input("ft-pmi", "value"),
@@ -249,21 +312,27 @@ def layout(**_) -> html.Div:
     Input("ft-vix", "value"),
     Input("ft-credit", "value"),
     Input("ft-pcr", "value"),
-    Input("ft-flows", "value"),
     Input("ft-mom-value", "value"),
     Input("ft-mom-quality", "value"),
     Input("ft-mom-growth", "value"),
     Input("ft-mom-momentum", "value"),
     Input("ft-mom-lowvol", "value"),
 )
-def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
+def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr,
              v, q, g, m, lv):
     pmi = float(pmi or 0)
     pmi_trend = float(pmi_trend or 0)
     cli = float(cli or 0)
-    spread = float(spread or 0)
+    spread_val = None if spread is None else float(spread)
     cpi = float(cpi or 0)
-    regime = _detect_regime(pmi, pmi_trend, cli, cpi)
+
+    # Vorheriges Regime für die PMI-Hysterese aus der persistierten Timeline.
+    history = load_factor_timing_history(limit=1)
+    prev_regime = history[0]["regime"] if history else None
+
+    regime = ft_core.detect_regime(
+        pmi, pmi_trend, cli, cpi, spread=spread_val, prev_regime=prev_regime
+    )
 
     strategic = _strategic_weights()
 
@@ -274,31 +343,19 @@ def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
         "Momentum": float(m or 0),
         "Low Volatility": float(lv or 0),
     }
-    ranks = sorted(momentum, key=lambda k: momentum[k], reverse=True)
-    mom_signal = {
-        f: ("ÜBERGEWICHTEN" if ranks.index(f) < 2
-            else "UNTERGEWICHTEN" if ranks.index(f) >= 3 else "NEUTRAL")
-        for f in momentum
-    }
+    mom_signal = ft_core.momentum_signal(momentum)
+    sent_tilts, fired_rules = ft_core.sentiment_tilts(
+        float(vix or 0), float(credit or 0), None if pcr is None else float(pcr)
+    )
 
-    # Regime-Tilt + Momentum-Overlay kombinieren → Anpassung in ±10 %.
-    tactical = {}
-    for factor, strat in strategic.items():
-        regime_tilt = REGIME_MATRIX[regime][factor] * 0.04
-        mom_tilt = (
-            0.03
-            if mom_signal[factor] == "ÜBERGEWICHTEN"
-            else (-0.03 if mom_signal[factor] == "UNTERGEWICHTEN" else 0)
-        )
-        sentiment_tilt = 0.0
-        if factor == "Low Volatility" and float(vix or 0) > 25:
-            sentiment_tilt += 0.02
-        if factor == "Value" and float(credit or 0) > 500:
-            sentiment_tilt -= 0.01
-        tactical[factor] = max(0.05, min(0.45, strat + regime_tilt + mom_tilt + sentiment_tilt))
+    decomp = ft_core.tactical_weights(strategic, regime, mom_signal, sent_tilts)
+    tactical = {f: d["tactical"] for f, d in decomp.items()}
 
-    s = sum(tactical.values())
-    tactical = {k: v / s for k, v in tactical.items()}
+    # Tages-Snapshot für die Regime-Timeline (fail-open: UI läuft auch ohne DB).
+    try:
+        save_factor_timing_snapshot(date.today(), regime, tactical)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Factor-Timing-Snapshot nicht gespeichert: %s", exc)
 
     fig = go.Figure()
     fig.add_bar(
@@ -322,20 +379,43 @@ def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
     )
 
     regime_tone = {
-        "GOLDILOCKS": "up",
-        "HEATING UP": "warn",
-        "SLOWDOWN": "down",
-        "STAGFLATION": "down",
+        ft_core.REGIME_GOLDILOCKS: "up",
+        ft_core.REGIME_HEATING_UP: "warn",
+        ft_core.REGIME_SLOWDOWN: "down",
+        ft_core.REGIME_STAGFLATION: "down",
     }.get(regime)
-    regime_badge = html.Div(
-        ms_badge("Aktuelles Regime", regime, tone=regime_tone),
-        className="ms-badge-row",
-    )
+    badges = [ms_badge("Aktuelles Regime", regime, tone=regime_tone)]
+
+    # Value-Spread als reiner Anzeige-Hinweis (kein Tilt — ohne Historie
+    # kein z-Score möglich).
+    vs = ft_core.value_spread(STATE.scored)
+    if vs is not None:
+        badges.append(
+            ms_badge(
+                "Value-Spread",
+                f"Top-Value-P/E = {fmt_de(vs * 100, 0)} % des Universums-Medians",
+                tone="up" if vs < 0.6 else None,
+            )
+        )
+    badge_row = html.Div(badges, className="ms-badge-row")
+
     table = dbc.Table(
         [
             html.Thead(
                 html.Tr(
-                    [html.Th(x) for x in ["Faktor", "Strategisch", "Taktisch", "Δ", "Momentum-Signal"]]
+                    [
+                        html.Th(x)
+                        for x in [
+                            "Faktor",
+                            "Strategisch",
+                            "Regime",
+                            "Momentum",
+                            "Sentiment",
+                            "Taktisch",
+                            "Δ",
+                            "Momentum-Signal",
+                        ]
+                    ]
                 )
             ),
             html.Tbody(
@@ -343,13 +423,16 @@ def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
                     html.Tr(
                         [
                             html.Td(f),
-                            html.Td(fmt_percent(strategic[f], 1)),
-                            html.Td(fmt_percent(tactical[f], 1)),
-                            html.Td(fmt_signed_percent(tactical[f] - strategic[f], 1)),
+                            html.Td(fmt_percent(d["strategic"], 1)),
+                            html.Td(_fmt_tilt(d["regime_tilt"])),
+                            html.Td(_fmt_tilt(d["momentum_tilt"])),
+                            html.Td(_fmt_tilt(d["sentiment_tilt"])),
+                            html.Td(fmt_percent(d["tactical"], 1)),
+                            html.Td(fmt_signed_percent(d["tactical"] - d["strategic"], 1)),
                             html.Td(mom_signal[f]),
                         ]
                     )
-                    for f in strategic
+                    for f, d in decomp.items()
                 ]
             ),
         ],
@@ -358,14 +441,96 @@ def _compute(pmi, pmi_trend, cli, spread, cpi, vix, credit, pcr, flows,
         hover=True,
     )
 
-    return html.Div(
-        [
-            regime_badge,
-            section_header("Allokation", subtitle=f"Regime: {regime}"),
-            dcc.Graph(figure=fig, config={"displayModeBar": False}),
-            table,
-        ]
+    rules_line = html.Div(
+        "Aktive Sentiment-Regeln: "
+        + (" · ".join(fired_rules) if fired_rules else "keine"),
+        className="ms-tt-muted small mt-1",
     )
+    children = [
+        badge_row,
+        section_header("Allokation", subtitle=f"Regime: {regime}"),
+        dcc.Graph(figure=fig, config={"displayModeBar": False}),
+        table,
+        rules_line,
+    ]
+    timeline = _regime_timeline()
+    if timeline is not None:
+        children.append(timeline)
+    return html.Div(children)
+
+
+@callback(
+    Output("ft-spread", "value"),
+    Output("ft-cpi", "value"),
+    Output("ft-av-status", "children"),
+    Input("ft-av-fetch", "n_clicks"),
+    prevent_initial_call=True,
+)
+def _fetch_macro(n_clicks):
+    """Zinskurve (10Y−2Y) und CPI-YoY aus der Alpha-Vantage-API übernehmen.
+
+    PMI/CLI/VIX bleiben manuelle Eingaben — die AV-API führt sie nicht.
+    Die gefüllten Inputs werden über den normalen Persist-Callback
+    gespeichert."""
+    if not n_clicks:
+        raise PreventUpdate
+    rpm = int(getattr(STATE.settings, "risk_av_requests_per_minute", 70) or 70)
+    try:
+        y10 = av_client.fetch_treasury_yield("10year", rpm)
+        y2 = av_client.fetch_treasury_yield("2year", rpm)
+        cpi_series = av_client.fetch_cpi(rpm)
+    except av_client.AlphaVantageError as exc:
+        return no_update, no_update, f"⚠ {exc}"
+    except Exception as exc:  # noqa: BLE001 — Netzwerkfehler etc.
+        return no_update, no_update, f"⚠ Abruf fehlgeschlagen: {exc}"
+
+    spread = ft_core.spread_from_yields(y10, y2)
+    cpi = ft_core.cpi_yoy(cpi_series)
+    if spread is None and cpi is None:
+        return no_update, no_update, "⚠ Keine verwertbaren Makro-Daten erhalten."
+    parts = []
+    if spread is not None:
+        parts.append(f"Spread 10Y−2Y: {fmt_de(spread, 2)} %-Pkt.")
+    if cpi is not None:
+        parts.append(f"CPI YoY: {fmt_de(cpi, 1)} %")
+    status = "✓ Übernommen — " + " · ".join(parts)
+    return (
+        no_update if spread is None else spread,
+        no_update if cpi is None else cpi,
+        status,
+    )
+
+
+@callback(
+    Output("ft-mom-value", "value"),
+    Output("ft-mom-quality", "value"),
+    Output("ft-mom-growth", "value"),
+    Output("ft-mom-momentum", "value"),
+    Output("ft-mom-lowvol", "value"),
+    Output("ft-mom-hint", "children"),
+    Input("ft-mom-auto", "n_clicks"),
+    prevent_initial_call=True,
+)
+def _fill_momentum_from_universe(n_clicks):
+    """Momentum-Felder mit dem Universums-Proxy vorbelegen (überschreibbar)."""
+    if not n_clicks:
+        raise PreventUpdate
+    vals = ft_core.factor_momentum_from_universe(STATE.scored)
+    if not vals:
+        return (
+            no_update,
+            no_update,
+            no_update,
+            no_update,
+            no_update,
+            "⚠ Kein Universum geladen (oder zu wenige Titel) — bitte zuerst "
+            "einen Koyfin-Export importieren.",
+        )
+    out = [
+        vals.get(factor, no_update)
+        for factor in ("Value", "Quality", "Growth", "Momentum", "Low Volatility")
+    ]
+    return (*out, _universe_momentum_hint())
 
 
 @callback(
