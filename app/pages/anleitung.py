@@ -145,9 +145,30 @@ Die Seite überträgt die Modell-Kennzahlen auf den Bestand:
 
 ## Factor Timing
 
-Makro-, Bewertungs- und Sentiment-Signale ergeben ein Regime
-(GOLDILOCKS / SLOWDOWN / STAGFLATION / HEATING UP), das zusammen mit dem
-Factor Momentum die taktische Gewichtung bestimmt.
+Regelbasierte Tilts von max. ±10 % um die strategischen Faktor-Gewichte,
+nach Evidenzstärke geordnet:
+
+1. **Faktor-Momentum** (±3 pp): „Aus Universum übernehmen" berechnet je
+   Faktor den 6M-Return-Spread Top- minus Bottom-Quintil — objektiv statt
+   Schätzeingabe; manuell überschreibbar.
+2. **Makro-Regime** (±4 pp): GOLDILOCKS / SLOWDOWN / STAGFLATION /
+   HEATING UP aus PMI (Hysterese-Band 49–51), PMI-Trend, OECD CLI, CPI und
+   Zinskurve. PMI sinkt + CPI > 3 % → STAGFLATION; inverse Kurve
+   (10Y−2Y < 0) stuft GOLDILOCKS auf HEATING UP herab.
+3. **Sentiment** (±1–2 pp, symmetrisch): VIX > 25 → Low Vol/Quality,
+   VIX < 15 → Momentum; Credit-OAS > 500 bp → Quality statt Value;
+   Put/Call > 1,2 (Extremangst, Kontra) → Momentum.
+
+Spread (10Y−2Y) und CPI-YoY lassen sich per Button aus der
+Alpha-Vantage-API laden (benötigt `ALPHAVANTAGE_API_KEY`); PMI, CLI und
+VIX sind manuelle Eingaben. Die Tabelle zeigt die Tilt-Zerlegung je Faktor
+und die aktiven Regeln; jede Regime-Entscheidung wird pro Tag gespeichert
+und als Verlauf angezeigt. Der Value-Spread-Badge (Top-Value-P/E vs.
+Universums-Median) ist ein reiner Hinweis, kein Tilt.
+
+**Grenzen**: Faktor-Timing hat schwache Out-of-Sample-Evidenz — die
+kleinen Tilts sind Absicht; das System unterstützt die Entscheidung, es
+ersetzt sie nicht.
 """
 
 

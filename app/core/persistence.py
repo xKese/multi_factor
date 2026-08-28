@@ -39,11 +39,15 @@ _SETTINGS_TABLE = "app_settings"
 _FACTOR_TIMING_TABLE = "factor_timing_inputs"
 _AGENT_ANALYSES_TABLE = "agent_analyses"
 _TICKER_MAPPINGS_TABLE = "ticker_mappings"
+_FACTOR_TIMING_HISTORY_TABLE = "factor_timing_history"
 
 # Vollständige Liste der Eingabefelder der Factor-Timing-Seite (Makro-,
 # Sentiment- und Faktor-Momentum-Werte). Wird beim Persistieren als JSON-Text
 # abgelegt; unbekannte Keys werden beim Laden ignoriert, fehlende kehren als
 # ``None`` zurück (Aufrufer mergt mit Defaults).
+# ``flows`` (Fund Flows) wurde entfernt: das Signal floss nie in eine Regel
+# ein und hat keine verlässliche Datenquelle. Alte Persistenz-Payloads mit
+# dem Key werden beim Laden schlicht ignoriert.
 _FACTOR_TIMING_FIELDS: tuple[str, ...] = (
     "pmi",
     "pmi_trend",
@@ -53,7 +57,6 @@ _FACTOR_TIMING_FIELDS: tuple[str, ...] = (
     "vix",
     "credit",
     "pcr",
-    "flows",
     "mom_value",
     "mom_quality",
     "mom_growth",
@@ -840,6 +843,88 @@ def save_factor_timing_inputs(values: dict) -> None:
             ),
             {"data": payload},
         )
+
+
+def _ensure_factor_timing_history_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_FACTOR_TIMING_HISTORY_TABLE} ("
+            "snapshot_date DATE PRIMARY KEY, "
+            "regime TEXT NOT NULL, "
+            "weights_json TEXT NOT NULL, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
+
+
+def save_factor_timing_snapshot(
+    snapshot_date: date, regime: str, weights: dict[str, float]
+) -> None:
+    """UPSERT der Regime-/Gewichts-Entscheidung eines Tages (Timeline auf
+    der Factor-Timing-Seite). Raised bei DB-Problemen — der Aufrufer
+    entscheidet, ob die UI eine Warnung zeigt."""
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+
+    payload = json.dumps({str(k): float(v) for k, v in weights.items()})
+    with engine.begin() as conn:
+        _ensure_factor_timing_history_table(conn)
+        conn.execute(
+            text(
+                f"INSERT INTO {_FACTOR_TIMING_HISTORY_TABLE} "
+                "(snapshot_date, regime, weights_json, updated_at) "
+                "VALUES (:d, :r, :w, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (snapshot_date) DO UPDATE SET "
+                "regime = EXCLUDED.regime, "
+                "weights_json = EXCLUDED.weights_json, "
+                "updated_at = CURRENT_TIMESTAMP"
+            ),
+            {"d": snapshot_date, "r": str(regime), "w": payload},
+        )
+
+
+def load_factor_timing_history(limit: int = 30) -> list[dict]:
+    """Jüngste Regime-Snapshots, neueste zuerst: Liste von Dicts mit
+    ``snapshot_date`` (date), ``regime`` (str), ``weights`` (dict).
+    Leer bei DB-Fehlern. Raised nie."""
+
+    engine = get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            _ensure_factor_timing_history_table(conn)
+            rows = conn.execute(
+                text(
+                    f"SELECT snapshot_date, regime, weights_json "
+                    f"FROM {_FACTOR_TIMING_HISTORY_TABLE} "
+                    "ORDER BY snapshot_date DESC LIMIT :n"
+                ),
+                {"n": int(limit)},
+            ).fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Factor-Timing-Historie fehlgeschlagen: %s", exc)
+        return []
+
+    out: list[dict] = []
+    for row in rows:
+        weights: dict = {}
+        raw = row[2]
+        if isinstance(raw, str) and raw:
+            try:
+                weights = json.loads(raw)
+            except json.JSONDecodeError:
+                weights = {}
+        out.append(
+            {
+                "snapshot_date": pd.Timestamp(row[0]).date(),
+                "regime": str(row[1]),
+                "weights": weights,
+            }
+        )
+    return out
 
 
 def load_factor_timing_inputs() -> dict | None:
