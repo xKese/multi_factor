@@ -14,15 +14,25 @@ Das Tool ist eine deutschsprachige **Python/Dash-Webanwendung**, die das Excel-M
 `M&S_Multi-Faktor-Model.xlsx` (Meeder & Seifer) **1:1 repliziert** und um mehrere Module
 erweitert. Es handelt sich um ein **Aktien-Screening- und Scoring-System**:
 
-- **Input:** ein Koyfin-Screener-CSV-Export (~1.300 globale Aktien, 57 Spalten).
-- **Kern:** ein **Multi-Faktor-Qualitätsscore von 0–100** je Aktie aus 5 Faktoren
-  (Value, Quality, Growth, Momentum, Low Volatility) auf Basis von Perzentil-Rankings
-  innerhalb der GICS-Industrie (mit Fallback Sektor → Global).
-- **Output:** Klassifikation (A–F), Qualitätsfilter (Piotroski, Altman Z, Market Cap)
-  und Empfehlung (STRONG BUY / BUY / HOLD / SELL) je Aktie.
+- **Input:** ein Koyfin-Screener-CSV-Export (~1.300 globale Aktien, 57 Spalten
+  plus optionale Zusatzspalten per Header-Erkennung).
+- **Kern (primär, `scoring_version = "v2"`):** ein evidenzbasiertes
+  **4-Faktor-Composite** (Value, Quality, Momentum, Investment) auf Basis
+  Region×Sektor-neutraler Z-Scores (Abschnitt 11) plus eine **regelbasierte
+  Portfoliokonstruktion**, die ein verbindliches Zielportfolio von 35 Titeln
+  erzeugt (Abschnitt 12).
+- **Vergleichsmodus (v1):** der ursprüngliche **Multi-Faktor-Qualitätsscore
+  von 0–100** aus 5 Faktoren (Value, Quality, Growth, Momentum, Low
+  Volatility) auf Basis von Perzentil-Rankings innerhalb der GICS-Industrie
+  (Abschnitt 3). Beide Versionen werden bei jedem Import berechnet und im
+  PIT-Archiv gespeichert; `scoring_version` steuert nur die primäre Anzeige.
+- **Output v1:** Klassifikation (A–F), Qualitätsfilter (Piotroski, Altman Z,
+  Market Cap) und Empfehlung (STRONG BUY / BUY / HOLD / SELL) je Aktie.
+- **Output v2:** `composite_z`/`composite_score`, Klasse v2, Zone
+  (KANDIDAT/HALTEN/VERKAUFEN/FILTER), Zielportfolio mit Trade-Liste.
 - **Erweiterungsmodule:** Momentum-/SMA-Monitor, Sektor-Momentum, regelbasiertes
-  taktisches Faktor-Timing, Risiko- & Benchmark-Modul (Tracking Error), optionale
-  LLM-Tiefenanalyse („TradingAgents").
+  taktisches Faktor-Timing (seit v2 nur Monitoring), Risiko- & Benchmark-Modul
+  (Tracking Error), optionale LLM-Tiefenanalyse („TradingAgents").
 
 Tech-Stack: Python 3.11, Dash/Plotly, pandas/numpy, scikit-learn (Ledoit-Wolf),
 SQLAlchemy (SQLite oder Postgres), WeasyPrint (PDF-Factsheets), Alpha Vantage API
@@ -78,7 +88,12 @@ revenue, cogs, revenue_prev, cogs_prev, sma_50, sma_200, export_date
 
 ---
 
-## 3. Scoring-Methodik (Kern des Modells)
+## 3. Scoring v1 (Vergleichsmodus) — Perzentil-Scoring
+
+> Scoring v1 bleibt vollständig funktionsfähig und wird bei jedem Import
+> mitberechnet; seit Einführung von Composite v2 (Abschnitt 11) ist es der
+> **Vergleichsmodus** (`scoring_version = "v1"` bzw. der aufklappbare
+> Bereich „Scoring v1 (Vergleich)" in Dashboard/Einzelanalyse).
 
 Implementiert in `app/core/scoring.py`; alle Gewichte/Schwellen in
 `app/core/config.py` (Dataclass `Settings`).
@@ -508,7 +523,8 @@ tests/                   # 24 Testdateien + fixtures/ (pytest)
 | `/sma` | Momentum-Monitor (SMA-Signale, Trendphasen) |
 | `/sektor-momentum` | Sektor-Momentum |
 | `/portfolios` | M&S-Portfolio-Monitor (Watchlist-Upload, Aktions-Flags) |
-| `/factor-timing` | Taktisches Faktor-Timing |
+| `/modellportfolio` | Portfoliokonstruktion v2 (Zielportfolio, Diagnosen, Trade-Liste, Exposures, Override-Register, Historie) |
+| `/factor-timing` | Taktisches Faktor-Timing (Monitoring; fließt nicht ins Composite v2) |
 | `/risiko` | Risiko & Benchmark (aus Cache) |
 | `/daten-import` | Koyfin-CSV-Upload |
 | `/einstellungen` | Alle Gewichte/Schwellen (persistiert in `app_settings`) |
@@ -521,7 +537,10 @@ SQLAlchemy (SQLite Default, Postgres via `DATABASE_URL`), Tabellen u. a.:
 `universe_signal_history`, `sector_momentum_snapshots`,
 `sector_score_history`, `ms_portfolio`, `app_settings`,
 `factor_timing_inputs`, `factor_timing_history`, `agent_analyses`,
-`ticker_mappings`, `av_price_cache`, `av_symbol_meta`, `av_ticker_mappings`.
+`ticker_mappings`, `av_price_cache`, `av_symbol_meta`, `av_ticker_mappings`,
+sowie für Composite v2/Portfoliokonstruktion: `model_portfolio`,
+`model_portfolio_meta`, `override_register`,
+`risk_benchmark_region_weights` (Abschnitt 12.8).
 
 **PIT-Archiv (Punkt-in-Zeit):** Jeder CSV-Import archiviert das gescorte
 Universum (Rohkennzahlen + berechnete Scores) zusätzlich in
@@ -532,7 +551,12 @@ Ein Re-Import mit gleichem `snapshot_date` ersetzt nur diesen Snapshot
 (UPSERT auf Snapshot-Ebene); ältere Snapshots werden nie gelöscht oder
 überschrieben. Die Tabelle entsteht beim ersten Import (Bestands-DBs
 werden ohne Datenverlust erweitert); neue Spalten späterer Exporte werden
-per `ALTER TABLE` nachgerüstet (SQLite und Postgres). Die unveränderte
+per `ALTER TABLE` nachgerüstet (SQLite und Postgres). Seit Composite v2
+enthält jeder Snapshot zusätzlich alle v2-Spalten: `z_*`, `cov_*`,
+`composite_raw/z/pct/score`, `classification_v2`, `zone_v2`,
+`filter_pass`, `filter_reasons` (JSON-Text), `neut_level_*`,
+`data_coverage_v2`, `trend_warning`, `fcf_yield_source` u. a.;
+Listen-Spalten werden vor dem Schreiben JSON-serialisiert. Die unveränderte
 Roh-CSV wird unter `data/archive/koyfin_<snapshot_date>.csv` abgelegt
 (gleicher Dateiname wird überschrieben; Pfad via `KOYFIN_ARCHIVE_DIR`
 umlenkbar). Zugriff für Auswertungen:
@@ -549,6 +573,9 @@ umlenkbar). Zugriff für Auswertungen:
 4. Risikodaten per CLI aktualisieren:
    `python -m app.tools.risk_report update` und
    `python -m app.tools.risk_report report [--asof … --variante fest|buyhold]`.
+5. Zielportfolio auf */modellportfolio* berechnen (der Import meldet den
+   erkannten Rebalance-Modus) oder per CLI:
+   `python -m app.tools.model_portfolio build [--mode …] [--dry-run]`.
 
 ### 10.5 Start & Tests
 
@@ -562,7 +589,265 @@ python -m pytest tests -q              # Testsuite
 
 ---
 
-## 11. Bekannte Grenzen und bewusste Annahmen
+## 11. Composite v2 (primäres Scoring)
+
+Implementiert in `app/core/scoring_v2.py` (+ `app/core/universe_filter.py`,
+`app/core/diagnostics.py`). Vier Faktoren, Z-Score-basiert,
+Region×Sektor-neutral. Alle Parameter sind `Settings`-Felder
+(`app_settings`), Verfahrenskonstanten (`V2_CLEAN_BOUNDS`,
+`V2_NEGATIVE_IS_INVALID`, `PC_TE_STEP = 0,005`, `PC_TE_MAX_ITER = 40`,
+`PC_CAPFLOOR_MAX_ITER = 50`) liegen in `app/core/config.py`.
+Leitprinzip: **keine stillen Fallbacks** — jede nicht anwendbare Regel
+erzeugt einen Eintrag in der Diagnoseliste (`Diagnostic` mit Schweregrad
+Fehler/Warnung/Info), sichtbar in UI und Report. Determinismus: gleiche
+Eingaben und Settings ergeben identische Ausgaben (Tie-Break `uid`).
+
+### 11.1 Optionale Zusatzspalten (Header-Erkennung, Position beliebig)
+
+| Spalte | Bedeutung | Verwendung, falls vorhanden |
+|---|---|---|
+| `ev_ebit` | EV/EBIT | dritter Value-Indikator (Nicht-Financials); fehlt die Spalte, besteht Value aus 2 Indikatoren |
+| `net_debt_ebitda` | Nettoverschuldung/EBITDA | ersetzt den Leverage-Proxy in Quality |
+| `fcf_yield` | FCF/EV | primärer FCF-Value-Indikator; je Titel Fallback `1/pfcf` (FCF/Marktkap., `fcf_yield_source` ∈ {"ev","mcap"}, Anteil in der Diagnose) |
+| `adv_3m` | Ø Tagesumsatz 3M (Mio EUR) | Liquiditätsfilter |
+| `ipo_date` | Erstnotiz (ISO) | IPO-Filter |
+
+Fehlende optionale Spalten → dokumentierter Fallback + Info-Diagnose je Import.
+
+### 11.2 Abgeleitete Kennzahlen (`derive_v2_indicators`, Spec 1.3)
+
+| Spalte | Formel | Gültigkeit (sonst NaN) |
+|---|---|---|
+| `gp_ta` | `(revenue − cogs) / total_assets` | `total_assets > 0`, revenue und cogs vorhanden |
+| `accruals` | `(net_income − ocf) / total_assets` | `total_assets > 0` |
+| `ebit_proxy` | `revenue · op_margin` | beide vorhanden |
+| `debt_ebit` | `total_debt / ebit_proxy` | `ebit_proxy > 0`; bei `total_debt ≤ 0` → 0 |
+| `fcf_yield_calc` | `1 / pfcf` | `pfcf > 0`; nur wo `fcf_yield` (FCF/EV) fehlt oder je Titel NaN ist |
+| `asset_growth` | `total_assets / total_assets_prev − 1` | `total_assets_prev > 0` |
+| `share_issuance` | `shares_out / shares_out_prev − 1` | `shares_out_prev > 0` |
+| `mom_12_1` | `ret_12m − ret_1m` | — |
+| `mom_12_1_adj` | `mom_12_1 / volatility_1y` | `volatility_1y ≥ 0,05` (`v2_min_volatility`); fehlende Vola → Fallback `mom_12_1` (Info) |
+| `is_financial` / `is_real_estate` | Substring „financ" / „real estate" auf `sector` | — |
+
+Bereinigung vor der Standardisierung (nur auf internen Kopien, v1-Spalten
+bleiben unangetastet): negative Multiples → NaN für `pe, pb, pfcf,
+ev_ebitda, ev_ebit`; `fcf_yield` außerhalb [−0,5, 0,5] → NaN (negativer FCF
+bleibt gültig); `net_debt_ebitda` < −20 oder > 50 → NaN (Nettocash gültig);
+`debt_ebit` > 50 → NaN; `asset_growth`/`share_issuance` außerhalb
+[−0,9, 3,0] → NaN; `accruals` außerhalb [−1, 1] → NaN; `gp_ta` außerhalb
+[−1, 3] → NaN; `roic` außerhalb [−1, 2] → NaN; `eps_revisions_3m`
+außerhalb [−1, 1] → NaN; negative `debt_equity` → NaN (v1-Konvention).
+
+### 11.3 Faktor-Definitionen (Indikatoren gleichgewichtet; Richtung −1 = niedrig ist gut)
+
+**Nicht-Financials:**
+
+| Faktor | Indikatoren (Richtung) |
+|---|---|
+| Value | `ev_ebitda` (−1), `fcf_yield` (+1), `ev_ebit` (−1, optional) |
+| Quality | `gp_ta` (+1), `roic` (+1), `accruals` (−1), Leverage (−1): `net_debt_ebitda` → Fallback `debt_ebit` → `debt_equity` (Spaltenebene, Diagnose-Info) |
+| Momentum | `mom_12_1_adj` (+1), `eps_revisions_3m` (+1) |
+| Investment | `asset_growth` (−1), `share_issuance` (−1) |
+
+**Financials** (`is_financial`): Value `pb` (−1), `pe` (−1); Quality `roe`
+(+1, nur bei `debt_equity ≥ 0`), `accruals` (−1); Momentum wie oben;
+Investment `share_issuance` (−1). Alle Nicht-Fin-Indikatoren entfallen
+vollständig — auch im Abdeckungs-Nenner.
+
+**Real Estate:** wie Nicht-Financials, aber ohne `accruals`.
+
+**Strategische Faktorgewichte** (`v2_weight_*`, Validierung Summe
+1,0 ± 0,001, sonst Import-Fehler): Value 0,30 · Quality 0,30 ·
+Momentum 0,25 · Investment 0,15. Low Volatility ist kein Faktor mehr
+(wirkt nur in der Gewichtung, 12.3); Growth entfällt ersatzlos; Piotroski
+und Altman wandern vollständig in die Filter (12.1).
+
+### 11.4 Standardisierung und Aggregation
+
+1. **Neutralisierungsgruppen** (`assign_neutralization_group`, je
+   Indikator): Primärgruppe `region × sector`; hat sie weniger als
+   `v2_min_group_size = 20` gültige Werte → Fallback `sector` (global) →
+   `global`. Ebene je Titel/Indikator in `neut_level_<indikator>`
+   (`region_sector` | `sector` | `global`).
+2. **Winsorisierung + Z-Score** (`zscore_within_group`, je Indikator und
+   Gruppe): Clip auf die 3 %/97 %-Quantile (`v2_winsor_lower/upper`),
+   `z = (x_w − mean) / std(ddof=1)`, Clip ±3 (`v2_zscore_cap`), ·Richtung.
+   `std == 0` oder < 5 gültige Werte (`v2_min_group_valid`) → `z = 0` +
+   Diagnose. NaN bleibt NaN — **keine Median-Imputation**.
+3. **Faktor-Score** (`factor_zscore`): Mittel der gültigen Indikator-Z.
+   Mindestabdeckung (`v2_min_valid_nonfin` / `v2_min_valid_financial`):
+   Nicht-Fin Value 2 (bei nur 2 Indikatoren: 1), Quality 2, Momentum 1,
+   Investment 1; Financials je 1. Darunter → Faktor NaN. Zusätzlich
+   `cov_<faktor>` (Anteil gültiger Indikatoren).
+4. **Composite** (`composite_zscore`):
+   `composite_raw = Σ(z_f · W_f · vorhanden_f) / Σ(W_f · vorhanden_f)`;
+   NaN, wenn die Gewichte vorhandener Faktoren < 0,70
+   (`v2_min_factor_weight`) oder weder Value noch Quality vorhanden.
+   Danach zweite globale Standardisierung (Winsor 1 %/99 %, Z-Score, Cap
+   ±3) → `composite_z`; `composite_pct = rank(pct, average)`;
+   `composite_score = round(composite_pct · 100, 1)`.
+5. **Klassifikation v2** (nur Anzeige): A ≥ 0,90 · B+ ≥ 0,80 · B ≥ 0,667 ·
+   C ≥ 0,50 · D ≥ 0,33 · F < 0,33. Die v1-Empfehlung wird für v2 nicht
+   übernommen — stattdessen `zone_v2`.
+6. **Datenabdeckung v2:** `data_coverage_v2` = faktorgewichtetes Mittel der
+   `cov_*` (fehlende Faktoren zählen 0).
+
+### 11.5 Zonen (Spec 5.2)
+
+`zone_v2`: `FILTER` (nicht eligible) · `KANDIDAT` (eligible, `composite_pct
+≥ pc_entry_pct = 0,80`) · `HALTEN` (`pc_exit_pct = 0,667 ≤ pct <
+pc_entry_pct`) · `VERKAUFEN` (`pct < pc_exit_pct`). Gehaltene Titel:
+HALTEN bleibt im Portfolio (Pufferzone), VERKAUFEN/FILTER wird verkauft.
+
+---
+
+## 12. Portfoliokonstruktion (Modellportfolio)
+
+Implementiert in `app/core/portfolio_construction.py`; UI auf
+`/modellportfolio`, CLI `python -m app.tools.model_portfolio`.
+
+### 12.1 Universumsfilter (harte Ausschlüsse, `apply_universe_filters`)
+
+Alle verletzten Bedingungen werden in `filter_reasons` protokolliert
+(kein Abbruch bei der ersten); `filter_pass` = keine Verletzung:
+
+| # | Filter | Regel (Setting) | Fehlende Daten |
+|---|---|---|---|
+| 1 | Market Cap | ≥ 1.000 Mio EUR (`filter_min_market_cap`) | nicht eligible (`market_cap_na`) |
+| 2 | Piotroski | ≥ 5 von 9; Financials proportional ≥ 3,33 von 6 (`filter_min_piotroski`) | nicht eligible (`piotroski_na`) |
+| 3 | Altman Z | ≥ 1,8 (`filter_min_altman`); Skip für Financials und Real Estate | nicht eligible außer bei Skip |
+| 4 | Liquidität | `adv_3m ≥ 2,0` Mio EUR (`filter_min_adv`); nur wenn Spalte vorhanden | Spalte fehlt → übersprungen (Info) |
+| 5 | Abdeckung | `data_coverage_v2 ≥ 0,6` (`filter_min_coverage`) und `composite_z` nicht NaN | — |
+| 6 | IPO | `ipo_date` ≥ 365 Tage vor Snapshot (`filter_min_listing_days`); nur wenn Spalte vorhanden | Spalte fehlt → übersprungen |
+| 7 | Extremverschuldung | Nicht-Fin: `debt_equity > 3,0` UND `int_coverage < 2,0` (`filter_max_de`/`filter_min_icr`) | fehlende Werte → greift nicht |
+| 8 | Override | aktiver Override `direction = "exclude"` | — |
+
+### 12.2 Selektion (`select_portfolio`, Spec 5.4)
+
+Parameter: `pc_target_n = 35`, `pc_min_n = 25`, `pc_max_n = 40`,
+`pc_fill_pct = 0,70`, `pc_sector_band`/`pc_region_band = 0,10` (± pp),
+`pc_max_per_sector = 8`. Algorithmus: (1) `retained` = gehaltene Titel in
+KANDIDAT/HALTEN ∪ Include-Overrides, Rest = Verkäufe; (2) Kandidaten =
+KANDIDAT-Zone, `composite_z` absteigend, Tie-Break `uid`; (3–4) Aufnahme
+nur, wenn mit den vorläufigen Gewichten (12.3, ohne TE) Sektor- und
+Regions-Band sowie `pc_max_per_sector` eingehalten werden; (5) unter
+`pc_min_n` Notfüllzone `pc_fill_pct ≤ pct < pc_entry_pct` mit Warnung
+„Notfüllung"; (6) über `pc_max_n` (nur durch Includes) → Warnung, kein
+automatisches Entfernen; (7) unter `pc_min_n` → Fehler-Diagnose,
+Zielportfolio trotzdem ausgegeben. Das Modell **verkauft nie wegen einer
+Bandbreite** (Pufferzone hat Vorrang, Verletzung nur als Warnung).
+
+Benchmark-Gewichte: Sektoren aus `Settings.risk_benchmark_sector_weights`
+mit Stand `risk_benchmark_sector_weights_asof`; Regionen aus der Tabelle
+`risk_benchmark_region_weights` (`region`, `weight`, `asof`;
+Regionsnamen exakt wie Koyfin-Spalte `region`, unbekannte Regionen
+Benchmark 0 + Diagnose). Quelle fehlt oder älter als 120 Tage
+(`pc_benchmark_max_age_days`) → Band ausgesetzt + Warnung.
+
+### 12.3 Gewichtung (`compute_weights`, Spec 6.1–6.2)
+
+`tilt = 1 + clip(composite_z, 0, 3)`; `vol = clip(volatility_1y,
+pc_vol_floor = 0,10, pc_vol_cap = 0,60)` (fehlend → Portfolio-Median +
+Info); `w_raw = tilt / vol`, normiert. Dann iterativ (≤ 50 Iterationen):
+Clip auf [`pc_weight_floor = 0,02`, `pc_weight_cap = 0,05`],
+Überschuss/Defizit proportional auf nicht gebundene Titel, bis Σ = 1 ±
+1e−9. `floor·N > 1` oder `cap·N < 1` → Fehler-Diagnose.
+
+### 12.4 Ex-ante-TE-Kontrolle (`apply_te_constraint`, Spec 6.3)
+
+Nutzt `risk_mcte.compute_mcte` (Ledoit-Wolf, 504 Tage, ACWI in EUR, nur
+Kurs-Cache). Kursabdeckung < `pc_te_min_coverage = 0,60` des
+Portfoliogewichts → Schritt übersprungen, Warnung „TE nicht prüfbar".
+Solange `TE > pc_te_max = 0,060` oder `max(CTE_i/TE) > pc_max_cte_share =
+0,15` (max. 40 Iterationen): Titel mit höchstem CTE um 0,005 reduzieren
+(nicht unter floor), gleichmäßig auf die drei Titel mit niedrigstem CTE
+verteilen (nicht über cap); Weight-Overrides ausgenommen. Nach 40
+Iterationen unerfüllt → letzter Zustand + **Fehler-Diagnose**
+„TE-Restriktion nicht erfüllbar" (Pflichtpunkt Investmentkomitee, kein
+Abbruch). `TE < pc_te_target_low = 0,045` → Info. Zielband
+0,045–0,055 (`pc_te_target_low/high`).
+
+### 12.5 Rebalancing-Kalender und Turnover (`detect_rebalance_mode`, `build_trade_list`, Spec 7)
+
+Modi: `full` (erster Import nach dem letzten Handelstag der Monate
+`pc_rebalance_months = [3, 9]`; Näherung: letzter Werktag Mo–Fr, kein
+Feiertagskalender), `interim` (analog `pc_interim_months = [6, 12]`; nur
+Verkäufe und deren Ersatz aus KANDIDAT, bestehende Gewichte bleiben bis
+auf Renormierung — das freiwerdende Gewicht geht gleichmäßig an die
+Ersatztitel), `monitor` (kein Zielportfolio-Update; Filter-Fails
+gehaltener Titel als „Sofortmaßnahme-Vorschlag"-Diagnose). Modus wird aus
+`snapshot_date` und der letzten `model_portfolio`-Version abgeleitet, auf
+`/modellportfolio` manuell überschreibbar (protokolliert); ohne
+Vorversion `full`; sind Full- und Interim-Trigger überfällig, hat `full`
+Vorrang.
+
+Turnover-Budget (einseitig = `0,5 · Σ|Δw|`): full 0,20, interim 0,10
+(`pc_turnover_budget_*`). Bei Überschreitung werden Trades in dieser
+Priorität behalten, alle weiteren als `VERSCHOBEN` gestrichen (im Budget
+verbleibende günstigere Trades werden weiter befüllt): (1) Verkäufe wegen
+FILTER (Pflicht), (2) Verkäufe wegen Override-Exclude (Pflicht), (3)
+Verkäufe VERKAUFEN aufsteigend nach `composite_z`, (4) Käufe KANDIDAT
+absteigend nach `composite_z`, (5) Gewichtsanpassungen absteigend nach
+`|Δw|`; danach Renormierung auf die umgesetzten Positionen. Aktionen:
+KAUF/VERKAUF/AUFSTOCKEN/REDUZIEREN/HALTEN/VERSCHOBEN mit `reason`;
+`|Δw| < pc_min_trade_size = 0,005` ist kein Trade. `build_trade_list`
+besitzt einen (derzeit ignorierten) Parameter `tax_lots` als
+Schnittstelle für spätere steuerliche Optimierung.
+
+### 12.6 Override-Register (Tabelle `override_register`, Spec 8)
+
+Spalten: `id, uid, direction (exclude|include|weight), target_weight
+(nur weight), reason (Pflicht, ≥ 20 Zeichen), owner (Pflicht),
+created_at, expires_at (Pflicht, ≤ created_at + 180 Tage), status
+(active|expired|closed), closed_at/closed_by/close_note`. Validierung im
+Writer (`save_override`) UND als DDL-Constraints. Abgelaufene Overrides
+werden bei jedem Import auf `expired` gesetzt und nicht mehr angewendet
+(Diagnose „Override abgelaufen — erneuern oder schließen"). `exclude` →
+Filter 8; `include` → Titel wird in `retained` aufgenommen; `weight` →
+Gewicht fixiert (nimmt nicht an Cap/Floor und TE teil), Rest renormiert
+auf `1 − Σ Override-Gewichte`. Historisiert werden **beide** Gewichte:
+`weight_model` (ohne) und `weight_effective` (mit Overrides).
+
+### 12.7 Zurückstufung Faktor-Timing und SMA-Overlay (Spec 9)
+
+`factor_timing_mode` (`monitor` Default | `active`): im Monitor-Modus
+werden die taktischen Gewichte weiterhin berechnet und auf
+`/factor-timing` angezeigt, fließen aber **nicht** in `composite_z` ein.
+Im Active-Modus (nur Backtests) ersetzen sie die strategischen Gewichte;
+Mapping (`map_tactical_to_v2`): Value/Quality/Momentum übernommen,
+Investment behält sein strategisches Gewicht (kein v1-Pendant),
+Renormierung auf 1,0, Info-Diagnose. Das v1-Feld `recommendation_overlay`
+wird für v2 nicht übernommen; stattdessen `trend_warning` (bool, aktives
+Death Cross) als reine Information in Trade-Liste und Diagnose — ein
+Death Cross löst **keinen** Verkauf aus. Der Portfolio-Monitor erhält die
+Zonen als zusätzliche Flags (`V2: FILTER`, `V2: VERKAUFEN`), die
+v1-Severity-Logik bleibt unverändert.
+
+### 12.8 Persistenz und CLI
+
+Tabellen (12.6 plus): `model_portfolio` (je `snapshot_date`/`uid`:
+`composite_z, composite_pct, zone_v2, weight_model, weight_effective,
+cte, action, reason, rebalance_mode, override_id`; Unique
+(`snapshot_date`, `uid`), Snapshot-UPSERT wie im PIT-Archiv),
+`model_portfolio_meta` (`rebalance_mode, n_titles, te_ex_ante,
+te_coverage, turnover_oneway, n_trades, n_deferred, settings_hash,
+diagnostics` JSON), `risk_benchmark_region_weights`. `settings_hash` =
+SHA-256 über die JSON-serialisierten, sortierten v2-/pc-/filter-Settings.
+
+CLI: `python -m app.tools.indicator_correlation [--snapshot]`
+(Spearman-Matrix aller `z_*`- und v1-Perzentil-Indikatoren, getrennt
+Nicht-Fin/Financials; Average-Linkage-Clustering auf `1 − |ρ|`, Schwelle
+|ρ| ≥ 0,8; Abdeckung; Report `reports/indikator_korrelation_<datum>.md` +
+CSV — vor Produktivsetzung von v2 einmal auszuführen) und
+`python -m app.tools.model_portfolio build [--snapshot] [--mode
+full|interim|monitor] [--dry-run]` (Report
+`reports/modellportfolio_<datum>.md`; Exit 0 ohne Fehler-Diagnosen, 1 bei
+Warnungen, 2 bei Fehlern) bzw. `… compare --v1 --v2` (Spearman v1/v2,
+Rangänderungen > 30 Perzentilpunkte, Sektorverteilung der Top-35).
+
+---
+
+## 13. Bekannte Grenzen und bewusste Annahmen
 
 - **Ein-Zeitpunkt-Scoring, aber PIT-Archiv:** Das Scoring basiert auf dem
   jeweils letzten CSV-Export. Seit Einführung des PIT-Archivs (Abschnitt 10.3)
@@ -582,3 +867,19 @@ python -m pytest tests -q              # Testsuite
   Daten (bewusste Trennung von API-Last und Bedienung).
 - **Perzentil-Scores sind relativ zum geladenen Universum** — ein anderes Universum
   ergibt andere Scores; Vergleichbarkeit setzt konsistente Exporte voraus.
+- **Composite v2 — Werktags-Näherung:** Der Rebalance-Kalender approximiert den
+  „letzten Handelstag" eines Monats als letzten Werktag (Mo–Fr), ohne
+  Feiertagskalender.
+- **Composite v2 — FCF-Yield-Fallback:** Fehlt die optionale Spalte `fcf_yield`
+  (FCF/EV), wird je Titel `1/pfcf` (FCF/Marktkapitalisierung) verwendet —
+  konzeptionell abweichend; der Ursprung wird je Titel (`fcf_yield_source`)
+  und als Anteil in der Diagnose ausgewiesen. Das EV-Vorzeichen ist aus der
+  gelieferten Ratio nicht beobachtbar; durchsetzbar ist nur das Band
+  [−0,5, 0,5].
+- **Faktor-Timing-Active-Mapping:** Die v1-Faktoren decken v2 nicht 1:1 —
+  im Modus `active` werden Value/Quality/Momentum taktisch ersetzt,
+  Investment behält sein strategisches Gewicht (Renormierung auf 1,0).
+- **ACWI-Sektorgewichte mit `asof` statt Tabelle:** Die Sektorgewichte bleiben
+  ein Settings-Dict; der 120-Tage-Staleness-Check läuft über das Feld
+  `risk_benchmark_sector_weights_asof`. Die Regionsgewichte liegen dagegen in
+  der Tabelle `risk_benchmark_region_weights`.
