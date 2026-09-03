@@ -17,10 +17,10 @@ import json
 import logging
 import os
 from dataclasses import fields as dataclass_fields
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Date, DateTime, create_engine, inspect, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -30,7 +30,14 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_URL = "sqlite:///data/multifactor.db"
 _UNIVERSE_TABLE = "koyfin_universe"
+_UNIVERSE_HISTORY_TABLE = "koyfin_universe_history"
 _META_TABLE = "koyfin_meta"
+
+# Ablageort der unveränderten Roh-CSVs des PIT-Archivs. Über die
+# Umgebungsvariable kann der Pfad (z. B. für Tests oder Docker-Volumes)
+# umgelenkt werden; gelesen wird sie bei jedem Aufruf, nicht beim Import.
+_ARCHIVE_DIR_ENV = "KOYFIN_ARCHIVE_DIR"
+_DEFAULT_ARCHIVE_DIR = os.path.join("data", "archive")
 _SECTOR_SNAPSHOT_TABLE = "sector_momentum_snapshots"
 _SECTOR_SCORE_HISTORY_TABLE = "sector_score_history"
 _SIGNAL_HISTORY_TABLE = "universe_signal_history"
@@ -133,16 +140,139 @@ def get_engine() -> Engine | None:
     return _engine
 
 
-def save_universe(df: pd.DataFrame) -> None:
+def _snapshot_date_fallback(df: pd.DataFrame) -> date:
+    """Snapshot-Datum aus ``export_date`` des Frames, Fallback Importdatum.
+
+    Bewusst ohne Dateinamen-Fallback (der lebt in
+    ``signal_events.snapshot_date_from_universe`` — ein Import hier wäre
+    zirkulär); Aufrufer mit Dateinamen-Kontext übergeben ``snapshot_date``
+    explizit.
+    """
+    if df is not None and "export_date" in df.columns:
+        parsed = pd.to_datetime(df["export_date"], errors="coerce").dropna()
+        if not parsed.empty:
+            return parsed.max().date()
+    return date.today()
+
+
+def _sql_type_for(dtype) -> str:
+    """DDL-Typ für ``ALTER TABLE ADD COLUMN`` im SQLite∩Postgres-Dialekt."""
+    if pd.api.types.is_bool_dtype(dtype):
+        return "BOOLEAN"
+    if pd.api.types.is_integer_dtype(dtype):
+        return "BIGINT"
+    if pd.api.types.is_float_dtype(dtype):
+        return "DOUBLE PRECISION"
+    if pd.api.types.is_datetime64_any_dtype(dtype):
+        return "TIMESTAMP"
+    return "TEXT"
+
+
+def _archive_universe_snapshot(conn, df: pd.DataFrame, snapshot_date: date) -> None:
+    """Schreibt ``df`` als Punkt-in-Zeit-Snapshot in die Historientabelle.
+
+    Semantik: UPSERT auf Snapshot-Ebene — existieren bereits Zeilen mit
+    demselben ``snapshot_date``, wird genau dieser Snapshot ersetzt
+    (DELETE + Append in derselben Transaktion); ältere Snapshots bleiben
+    unangetastet. Die Tabelle entsteht beim ersten Import (bestehende
+    Datenbanken werden so ohne Datenverlust erweitert); neue Spalten
+    späterer Exporte/Scorings werden per ``ALTER TABLE`` nachgerüstet,
+    Altbestände tragen dort NULL.
+    """
+    frame = df.copy()
+    if "uid" not in frame.columns:
+        # Bestands-Frames vor Einführung der uid-Spalte (analog STATE.set_raw).
+        from .uid import assign_uids
+
+        frame = assign_uids(frame)
+    frame["snapshot_date"] = snapshot_date
+    frame["imported_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    insp = inspect(conn)
+    if insp.has_table(_UNIVERSE_HISTORY_TABLE):
+        existing = {c["name"] for c in insp.get_columns(_UNIVERSE_HISTORY_TABLE)}
+        for col in frame.columns:
+            if col not in existing:
+                conn.execute(
+                    text(
+                        f'ALTER TABLE {_UNIVERSE_HISTORY_TABLE} '
+                        f'ADD COLUMN "{col}" {_sql_type_for(frame[col].dtype)}'
+                    )
+                )
+        conn.execute(
+            text(
+                f"DELETE FROM {_UNIVERSE_HISTORY_TABLE} "
+                "WHERE snapshot_date = :d"
+            ),
+            {"d": snapshot_date},
+        )
+
+    frame.to_sql(
+        _UNIVERSE_HISTORY_TABLE,
+        conn,
+        if_exists="append",
+        index=False,
+        dtype={"snapshot_date": Date(), "imported_at": DateTime()},
+    )
+    # Unique-Constraint (snapshot_date, uid) — als Unique-Index, damit die
+    # von pandas erzeugte Tabelle nachträglich abgesichert werden kann
+    # (identische Syntax in SQLite und Postgres).
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_kuh_snapshot_uid "
+            f"ON {_UNIVERSE_HISTORY_TABLE} (snapshot_date, uid)"
+        )
+    )
+
+
+def archive_raw_csv(raw: bytes, snapshot_date: date) -> str | None:
+    """Legt die unveränderte Roh-CSV unter
+    ``data/archive/koyfin_<snapshot_date>.csv`` ab (bestehende Datei wird
+    überschrieben). Fail-open: Liefert den Pfad oder ``None`` bei Fehler —
+    ein Dateisystemproblem darf den Import nicht blockieren.
+    """
+    try:
+        archive_dir = os.getenv(_ARCHIVE_DIR_ENV, _DEFAULT_ARCHIVE_DIR)
+        os.makedirs(archive_dir, exist_ok=True)
+        path = os.path.join(
+            archive_dir, f"koyfin_{snapshot_date.isoformat()}.csv"
+        )
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        return path
+    except OSError as exc:
+        log.warning("Roh-CSV-Archivierung fehlgeschlagen: %s", exc)
+        return None
+
+
+def save_universe(
+    df: pd.DataFrame,
+    *,
+    snapshot_date: date | None = None,
+    archive_df: pd.DataFrame | None = None,
+    raw_csv: bytes | None = None,
+) -> None:
     """Ersetzt den Inhalt von ``koyfin_universe`` durch ``df`` und aktualisiert
     die Meta-Zeile. Raised bei Fehler — der Aufrufer zeigt eine UI-Warnung.
+
+    Zusätzlich (PIT-Archiv) wird in derselben Transaktion ein
+    Punkt-in-Zeit-Snapshot nach ``koyfin_universe_history`` geschrieben:
+    ``archive_df`` (typisch das gescorte Universum — Rohkennzahlen plus
+    berechnete Scores), Fallback ``df``. ``snapshot_date`` ist das
+    Export-Datum des CSV; ohne Angabe wird es aus ``export_date`` des Frames
+    abgeleitet, Fallback ist das Importdatum. Ist ``raw_csv`` gesetzt, wird
+    die unveränderte Roh-CSV unter ``data/archive/`` abgelegt (fail-open).
     """
 
     engine = get_engine()
     if engine is None:
         raise RuntimeError("Datenbank-Engine nicht verfügbar")
 
+    snap = snapshot_date or _snapshot_date_fallback(df)
+    hist = archive_df if archive_df is not None and not archive_df.empty else df
+
     with engine.begin() as conn:
+        _archive_universe_snapshot(conn, hist, snap)
         df.to_sql(_UNIVERSE_TABLE, conn, if_exists="replace", index=False)
         conn.execute(
             text(
@@ -159,6 +289,9 @@ def save_universe(df: pd.DataFrame) -> None:
             ),
             {"n": len(df)},
         )
+
+    if raw_csv is not None:
+        archive_raw_csv(raw_csv, snap)
 
 
 def load_universe() -> pd.DataFrame | None:
@@ -177,6 +310,74 @@ def load_universe() -> pd.DataFrame | None:
     except SQLAlchemyError as exc:
         log.warning("Laden aus Datenbank fehlgeschlagen: %s", exc)
         return None
+
+
+def _coerce_snapshot_date(value) -> date | None:
+    """SQLite liefert DATE-Spalten als ISO-String, Postgres als ``date``."""
+    if isinstance(value, date):
+        return value
+    try:
+        return pd.to_datetime(value).date()
+    except (ValueError, TypeError):
+        return None
+
+
+def load_universe_snapshot(snapshot_date: date) -> pd.DataFrame | None:
+    """Lädt einen archivierten Punkt-in-Zeit-Snapshot des Universums.
+
+    Gibt ``None`` zurück, wenn das Datum nicht archiviert ist, die Tabelle
+    fehlt oder die DB nicht erreichbar ist. Raised nie.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            if not inspect(conn).has_table(_UNIVERSE_HISTORY_TABLE):
+                return None
+            df = pd.read_sql(
+                text(
+                    f"SELECT * FROM {_UNIVERSE_HISTORY_TABLE} "
+                    "WHERE snapshot_date = :d"
+                ),
+                conn,
+                params={"d": snapshot_date},
+            )
+        return df if not df.empty else None
+    except SQLAlchemyError as exc:
+        log.warning("Laden des Universum-Snapshots fehlgeschlagen: %s", exc)
+        return None
+
+
+def list_snapshots() -> list[tuple[date, int]]:
+    """Liefert alle archivierten Universum-Snapshots als
+    ``(snapshot_date, zeilenanzahl)``, absteigend sortiert (neuestes zuerst).
+    Bei DB-Fehler oder fehlender Tabelle → leere Liste. Raised nie.
+    """
+    engine = get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            if not inspect(conn).has_table(_UNIVERSE_HISTORY_TABLE):
+                return []
+            rows = conn.execute(
+                text(
+                    f"SELECT snapshot_date, COUNT(*) AS n "
+                    f"FROM {_UNIVERSE_HISTORY_TABLE} "
+                    "GROUP BY snapshot_date "
+                    "ORDER BY snapshot_date DESC"
+                )
+            ).fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Auflisten der Universum-Snapshots fehlgeschlagen: %s", exc)
+        return []
+    result: list[tuple[date, int]] = []
+    for row in rows:
+        parsed = _coerce_snapshot_date(row[0])
+        if parsed is not None:
+            result.append((parsed, int(row[1])))
+    return result
 
 
 def _ensure_sector_snapshot_table(conn) -> None:
