@@ -14,6 +14,7 @@ from app.core import signal_events
 from app.core.data_loader import load_koyfin_csv
 from app.core.momentum import classify_momentum
 from app.core.persistence import (
+    list_snapshots,
     save_sector_score_history,
     save_signal_history,
     save_universe,
@@ -175,7 +176,26 @@ def _handle(contents: str | None, filename: str | None):
                     )
                 )
             try:
-                save_universe(df)
+                # PIT-Archiv: gescortes Universum (Rohkennzahlen + Scores)
+                # wird zusätzlich als Punkt-in-Zeit-Snapshot archiviert,
+                # die Roh-CSV unverändert unter data/archive/ abgelegt.
+                snap = snapshot_date_from_universe(df, filename)
+                save_universe(
+                    df,
+                    snapshot_date=snap,
+                    archive_df=STATE.scored,
+                    raw_csv=raw,
+                )
+                snapshots = list_snapshots()
+                if snapshots:
+                    alerts.append(
+                        dbc.Alert(
+                            f"PIT-Archiv: {fmt_de(len(snapshots), 0)} Snapshot"
+                            f"{'s' if len(snapshots) != 1 else ''} archiviert "
+                            f"(dieser Import: {snap:%d.%m.%Y}).",
+                            color="info",
+                        )
+                    )
             except Exception as exc:  # noqa: BLE001
                 alerts.append(
                     dbc.Alert(

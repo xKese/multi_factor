@@ -517,11 +517,27 @@ tests/                   # 24 Testdateien + fixtures/ (pytest)
 ### 10.3 Persistenz
 
 SQLAlchemy (SQLite Default, Postgres via `DATABASE_URL`), Tabellen u. a.:
-`koyfin_universe`, `koyfin_meta`, `universe_signal_history`,
-`sector_momentum_snapshots`, `sector_score_history`, `ms_portfolio`,
-`app_settings`, `factor_timing_inputs`, `factor_timing_history`,
-`agent_analyses`, `ticker_mappings`, `av_price_cache`, `av_symbol_meta`,
-`av_ticker_mappings`.
+`koyfin_universe`, `koyfin_universe_history`, `koyfin_meta`,
+`universe_signal_history`, `sector_momentum_snapshots`,
+`sector_score_history`, `ms_portfolio`, `app_settings`,
+`factor_timing_inputs`, `factor_timing_history`, `agent_analyses`,
+`ticker_mappings`, `av_price_cache`, `av_symbol_meta`, `av_ticker_mappings`.
+
+**PIT-Archiv (Punkt-in-Zeit):** Jeder CSV-Import archiviert das gescorte
+Universum (Rohkennzahlen + berechnete Scores) zusätzlich in
+`koyfin_universe_history` — Spalten wie `koyfin_universe` plus
+`snapshot_date` (DATE, Export-Datum des CSV, Fallback Importdatum) und
+`imported_at` (TIMESTAMP), Unique-Index auf `(snapshot_date, uid)`.
+Ein Re-Import mit gleichem `snapshot_date` ersetzt nur diesen Snapshot
+(UPSERT auf Snapshot-Ebene); ältere Snapshots werden nie gelöscht oder
+überschrieben. Die Tabelle entsteht beim ersten Import (Bestands-DBs
+werden ohne Datenverlust erweitert); neue Spalten späterer Exporte werden
+per `ALTER TABLE` nachgerüstet (SQLite und Postgres). Die unveränderte
+Roh-CSV wird unter `data/archive/koyfin_<snapshot_date>.csv` abgelegt
+(gleicher Dateiname wird überschrieben; Pfad via `KOYFIN_ARCHIVE_DIR`
+umlenkbar). Zugriff für Auswertungen:
+`persistence.load_universe_snapshot(snapshot_date)` und
+`persistence.list_snapshots()`.
 
 ### 10.4 Typischer Workflow
 
@@ -548,8 +564,12 @@ python -m pytest tests -q              # Testsuite
 
 ## 11. Bekannte Grenzen und bewusste Annahmen
 
-- **Ein-Zeitpunkt-Daten:** Das Scoring basiert auf dem jeweils letzten CSV-Export;
-  es gibt keine Punkt-in-Zeit-Datenbank für Backtests der Scores.
+- **Ein-Zeitpunkt-Scoring, aber PIT-Archiv:** Das Scoring basiert auf dem
+  jeweils letzten CSV-Export. Seit Einführung des PIT-Archivs (Abschnitt 10.3)
+  wird jedoch jeder Import als Punkt-in-Zeit-Snapshot in
+  `koyfin_universe_history` archiviert (inkl. Roh-CSV unter `data/archive/`) —
+  Backtests der Scores werden damit ab dem ersten archivierten Import möglich;
+  für Zeiträume davor existiert weiterhin keine Historie.
 - **Faktor-Momentum ist ein Querschnitts-Proxy** (Quintils-Spread der 6M-Returns),
   keine echte Faktor-Return-Zeitreihe.
 - **Value-Spread** liefert bewusst keinen Tilt (keine Historie → kein z-Score).
