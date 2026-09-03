@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .config import FINANCIAL_SECTOR_MARKER
+from .config import FINANCIAL_SECTOR_MARKER, REAL_ESTATE_SECTOR_MARKER
 
 # Mindestanzahl bewertbarer Kriterien, damit der F-Score als aussagekräftig
 # gilt. Darunter: NaN → der Filter liefert "-" (keine Aussage) statt "NEIN".
@@ -49,6 +49,18 @@ def is_financial_sector(df: pd.DataFrame) -> pd.Series:
         .astype(str)
         .str.lower()
         .str.contains(FINANCIAL_SECTOR_MARKER, na=False)
+    )
+
+
+def is_real_estate_sector(df: pd.DataFrame) -> pd.Series:
+    """Boolesche Maske: Zeile gehört zum GICS-Sektor Real Estate."""
+    if "sector" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return (
+        df["sector"]
+        .astype(str)
+        .str.lower()
+        .str.contains(REAL_ESTATE_SECTOR_MARKER, na=False)
     )
 
 

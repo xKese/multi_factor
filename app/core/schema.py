@@ -67,7 +67,22 @@ KOYFIN_COLUMNS: list[str] = [
 # Basisspalten ist positional und würde sich sonst verschieben.
 # ``fwd_rev_growth``: erwartetes Umsatzwachstum (Koyfin "Est. Revenue CAGR" /
 # "Revenue Est. Growth NTM") als zweiter Forward-Growth-Indikator.
-OPTIONAL_COLUMNS: tuple[str, ...] = ("sma_20", "fwd_rev_growth")
+# Composite v2 (Spec 1.2): ``ev_ebit`` (dritter Value-Indikator),
+# ``net_debt_ebitda`` (Leverage in Quality), ``fcf_yield`` (FCF/EV),
+# ``adv_3m`` (Tagesumsatz 3M in Mio EUR, Liquiditätsfilter),
+# ``ipo_date`` (Erstnotiz ISO, IPO-Filter — einzige nicht-numerische).
+OPTIONAL_COLUMNS: tuple[str, ...] = (
+    "sma_20",
+    "fwd_rev_growth",
+    "ev_ebit",
+    "net_debt_ebitda",
+    "fcf_yield",
+    "adv_3m",
+    "ipo_date",
+)
+
+# Optionale Spalten, die NICHT numerisch koerziert werden dürfen.
+OPTIONAL_TEXT_COLUMNS: frozenset[str] = frozenset({"ipo_date"})
 
 PERCENT_COLUMNS: set[str] = {
     "div_yield",

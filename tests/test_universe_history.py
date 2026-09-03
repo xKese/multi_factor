@@ -153,3 +153,35 @@ def test_fail_open_without_engine(monkeypatch):
     monkeypatch.setattr(persistence, "get_engine", lambda: None)
     assert persistence.load_universe_snapshot(date(2026, 8, 1)) is None
     assert persistence.list_snapshots() == []
+
+
+def test_import_archives_v1_and_v2_scores(tmp_path, monkeypatch):
+    """Ein Import erzeugt v1- UND v2-Scores, beide landen im PIT-Archiv
+    (Spec 0.1/16); Listen-Spalten werden als JSON-Text abgelegt."""
+    from pathlib import Path
+
+    from app.core.config import Settings
+    from app.core.data_loader import load_koyfin_csv
+    from app.core.scoring import compute_scores
+    from app.core.scoring_v2 import compute_scores_v2
+
+    p = _fresh_db(tmp_path, monkeypatch)
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "koyfin_sample.csv"
+    raw = load_koyfin_csv(str(fixture))
+    settings = Settings()
+    scored = compute_scores(raw, settings)
+    scored, _ = compute_scores_v2(scored, settings)
+
+    p.save_universe(raw, snapshot_date=date(2026, 9, 1), archive_df=scored)
+
+    snap = p.load_universe_snapshot(date(2026, 9, 1))
+    assert snap is not None and len(snap) == len(raw)
+    for col in ("total_score", "composite_z", "composite_pct", "zone_v2",
+                "filter_pass", "data_coverage_v2"):
+        assert col in snap.columns, col
+    assert snap["composite_z"].notna().any()
+    # filter_reasons als JSON-Text (leere Liste → "[]").
+    assert snap["filter_reasons"].iloc[0] in ("[]",) or snap[
+        "filter_reasons"
+    ].iloc[0].startswith("[")

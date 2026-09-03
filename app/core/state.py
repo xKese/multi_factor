@@ -11,11 +11,23 @@ from .config import Settings
 from .scoring import compute_scores
 
 
+def _load_overrides_safe() -> pd.DataFrame | None:
+    """Override-Register fail-open laden (DB-Fehler blockieren keinen Import)."""
+    try:
+        from .persistence import load_overrides
+
+        return load_overrides()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @dataclass
 class AppState:
     settings: Settings = field(default_factory=Settings)
     raw: pd.DataFrame = field(default_factory=pd.DataFrame)
     scored: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Diagnoseliste des letzten v2-Laufs (Spec 0.2) — für UI und Reports.
+    v2_diagnostics: list = field(default_factory=list)
     # Fallback-Liste, solange kein Portfolio hochgeladen/persistiert wurde.
     # Gepflegt wird das Portfolio über den Koyfin-Watchlist-Upload auf
     # /portfolios (→ set_ms_portfolio + save_ms_portfolio).
@@ -40,8 +52,24 @@ class AppState:
         with self._lock:
             if self.raw.empty:
                 self.scored = pd.DataFrame()
-            else:
-                self.scored = compute_scores(self.raw, self.settings)
+                self.v2_diagnostics = []
+                return
+            scored = compute_scores(self.raw, self.settings)
+            # Composite v2 wird bei jedem Import zusätzlich berechnet
+            # (Parallelbetrieb, Spec 0.1) und landet über ``save_universe``
+            # mit im PIT-Archiv. Eine ungültige Gewichtssumme ist ein
+            # Import-Fehler und propagiert (Spec 2.4).
+            from .scoring_v2 import compute_scores_v2
+            from .signal_events import snapshot_date_from_universe
+
+            scored, diags = compute_scores_v2(
+                scored,
+                self.settings,
+                overrides=_load_overrides_safe(),
+                snapshot_date=snapshot_date_from_universe(self.raw, None),
+            )
+            self.scored = scored
+            self.v2_diagnostics = diags
 
     def set_raw(self, df: pd.DataFrame) -> None:
         # uid nachrüsten für Universen aus Bestands-DBs (vor Einführung der

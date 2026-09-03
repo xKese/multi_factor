@@ -290,3 +290,41 @@ def test_volatility_scaled_to_decimal():
 
     # 28,4 (Prozent) → 0,284 (Dezimalanteil)
     assert df["volatility_1y"].iloc[0] == 0.284
+
+
+def test_v2_optional_columns_detected_without_shifting_base_columns():
+    """Die fünf v2-Zusatzspalten (Spec 1.2) werden per Header erkannt und
+    verschieben die positionalen Basisspalten nicht; ``ipo_date`` bleibt
+    Text."""
+    headers, values = _base_57_row()
+    extra_headers = [
+        "EV / EBIT (LTM)",
+        "Net Debt / EBITDA (LTM)",
+        "FCF Yield (EV)",
+        "ADV (3M)",
+        "IPO Date",
+    ]
+    extra_values = ["18.5", "1.4", "0.04", "12.3", "2001-05-15"]
+    headers = headers[:20] + extra_headers + headers[20:]
+    values = values[:20] + extra_values + values[20:]
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    df = load_koyfin_csv(csv.encode("utf-8"))
+
+    assert df["ev_ebit"].iloc[0] == 18.5
+    assert df["net_debt_ebitda"].iloc[0] == 1.4
+    assert df["fcf_yield"].iloc[0] == 0.04
+    assert df["adv_3m"].iloc[0] == 12.3
+    assert df["ipo_date"].iloc[0] == "2001-05-15"
+    # Basisspalten unverschoben.
+    assert df["sma_50"].iloc[0] == 375
+    assert df["sma_200"].iloc[0] == 340
+    assert df["export_date"].iloc[0] == "2026-07-14"
+
+
+def test_v2_optional_columns_absent_yield_nan():
+    csv = "Ticker,Name,Last Price\nMSFT,Microsoft,380\n"
+    df = load_koyfin_csv(csv.encode("utf-8"))
+    for col in ("ev_ebit", "net_debt_ebitda", "fcf_yield", "adv_3m", "ipo_date"):
+        assert col in df.columns
+        assert df[col].isna().all()

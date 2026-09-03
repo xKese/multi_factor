@@ -103,6 +103,57 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "risk_benchmark_sector_weights",
     "risk_scenario_windows",
     "risk_factor_shocks",
+    # Composite v2 und Portfoliokonstruktion (Spec Composite v2).
+    "scoring_version",
+    "factor_timing_mode",
+    "v2_weight_value",
+    "v2_weight_quality",
+    "v2_weight_momentum",
+    "v2_weight_investment",
+    "v2_min_factor_weight",
+    "v2_min_group_size",
+    "v2_min_group_valid",
+    "v2_winsor_lower",
+    "v2_winsor_upper",
+    "v2_zscore_cap",
+    "v2_composite_winsor_lower",
+    "v2_composite_winsor_upper",
+    "v2_min_volatility",
+    "v2_min_valid_nonfin",
+    "v2_min_valid_financial",
+    "filter_min_market_cap",
+    "filter_min_piotroski",
+    "filter_min_altman",
+    "filter_min_adv",
+    "filter_min_coverage",
+    "filter_min_listing_days",
+    "filter_max_de",
+    "filter_min_icr",
+    "pc_target_n",
+    "pc_min_n",
+    "pc_max_n",
+    "pc_entry_pct",
+    "pc_exit_pct",
+    "pc_fill_pct",
+    "pc_sector_band",
+    "pc_region_band",
+    "pc_max_per_sector",
+    "pc_benchmark_max_age_days",
+    "risk_benchmark_sector_weights_asof",
+    "pc_vol_floor",
+    "pc_vol_cap",
+    "pc_weight_cap",
+    "pc_weight_floor",
+    "pc_te_target_low",
+    "pc_te_target_high",
+    "pc_te_max",
+    "pc_max_cte_share",
+    "pc_te_min_coverage",
+    "pc_rebalance_months",
+    "pc_interim_months",
+    "pc_turnover_budget_full",
+    "pc_turnover_budget_interim",
+    "pc_min_trade_size",
 )
 
 _engine: Engine | None = None
@@ -185,6 +236,17 @@ def _archive_universe_snapshot(conn, df: pd.DataFrame, snapshot_date: date) -> N
         from .uid import assign_uids
 
         frame = assign_uids(frame)
+    # Listen-/Dict-Spalten (z. B. ``filter_reasons`` aus Composite v2) sind
+    # nicht SQL-fähig — als JSON-Text ablegen.
+    for col in frame.columns:
+        if frame[col].dtype == object and frame[col].map(
+            lambda v: isinstance(v, (list, dict))
+        ).any():
+            frame[col] = frame[col].map(
+                lambda v: json.dumps(v, ensure_ascii=False)
+                if isinstance(v, (list, dict))
+                else v
+            )
     frame["snapshot_date"] = snapshot_date
     frame["imported_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
