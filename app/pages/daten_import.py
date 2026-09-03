@@ -14,6 +14,7 @@ from app.core import signal_events
 from app.core.data_loader import load_koyfin_csv
 from app.core.momentum import classify_momentum
 from app.core.persistence import (
+    expire_overrides,
     list_snapshots,
     save_sector_score_history,
     save_signal_history,
@@ -204,6 +205,20 @@ def _handle(contents: str | None, filename: str | None):
                         color="warning",
                     )
                 )
+            try:
+                # Abgelaufene Overrides bei jedem Import deaktivieren (Spec 8).
+                expired = expire_overrides(snapshot_date_from_universe(df, filename))
+                if expired:
+                    alerts.append(
+                        dbc.Alert(
+                            f"{len(expired)} Override(s) abgelaufen — erneuern "
+                            "oder schließen (siehe /modellportfolio): "
+                            + ", ".join(str(e["uid"]) for e in expired),
+                            color="warning",
+                        )
+                    )
+            except Exception:  # noqa: BLE001
+                log.warning("Override-Ablaufprüfung beim Import fehlgeschlagen")
             _persist_sector_score_history(filename)
             _persist_signal_history(filename)
             status = html.Div(alerts)
