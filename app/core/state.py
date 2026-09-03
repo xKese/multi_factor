@@ -21,6 +21,18 @@ def _load_overrides_safe() -> pd.DataFrame | None:
         return None
 
 
+def _load_tactical_safe() -> dict[str, float] | None:
+    """Jüngste taktische Faktor-Timing-Gewichte, fail-open (nur relevant im
+    Modus ``factor_timing_mode = "active"``, Spec 9)."""
+    try:
+        from .persistence import load_factor_timing_history
+
+        history = load_factor_timing_history(limit=1)
+        return history[0]["weights"] if history else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @dataclass
 class AppState:
     settings: Settings = field(default_factory=Settings)
@@ -59,14 +71,20 @@ class AppState:
             # (Parallelbetrieb, Spec 0.1) und landet über ``save_universe``
             # mit im PIT-Archiv. Eine ungültige Gewichtssumme ist ein
             # Import-Fehler und propagiert (Spec 2.4).
-            from .scoring_v2 import compute_scores_v2
+            from .scoring_v2 import compute_scores_v2, map_tactical_to_v2
             from .signal_events import snapshot_date_from_universe
 
+            tactical = None
+            if self.settings.factor_timing_mode == "active":
+                tactical = map_tactical_to_v2(
+                    _load_tactical_safe(), self.settings
+                )
             scored, diags = compute_scores_v2(
                 scored,
                 self.settings,
                 overrides=_load_overrides_safe(),
                 snapshot_date=snapshot_date_from_universe(self.raw, None),
+                tactical_weights=tactical,
             )
             self.scored = scored
             self.v2_diagnostics = diags

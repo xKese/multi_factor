@@ -918,8 +918,8 @@ def build_trade_list(
         trades.loc[deferred_mask, "action"] = ACTION_DEFERRED
         trades.loc[deferred_mask, "reason"] = (
             trades.loc[deferred_mask, "reason"].astype(str)
-            + " | turnover_budget"
-        ).str.lstrip(" |")
+            + " · turnover_budget"
+        ).str.lstrip(" ·")
 
         # Zielgewichte auf die tatsächlich umgesetzten Positionen
         # renormieren: verschobene Trades behalten ihr aktuelles Gewicht.

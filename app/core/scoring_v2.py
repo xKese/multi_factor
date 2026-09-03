@@ -385,6 +385,34 @@ def assign_zones(df: pd.DataFrame, settings: Settings) -> pd.Series:
     return zone
 
 
+def map_tactical_to_v2(
+    tactical: dict[str, float] | None, settings: Settings
+) -> dict[str, float] | None:
+    """Mappt taktische Faktor-Timing-Gewichte auf die v2-Faktoren (Spec 9,
+    Modus ``active``).
+
+    Die v1-Faktoren decken v2 nicht 1:1: Value/Quality/Momentum werden
+    übernommen, Investment behält sein strategisches Gewicht (kein
+    v1-Pendant), anschließend Renormierung auf 1,0. Liefert ``None``, wenn
+    keine brauchbaren taktischen Gewichte vorliegen.
+    """
+    if not tactical:
+        return None
+    mapped = {
+        "value": tactical.get("Value"),
+        "quality": tactical.get("Quality"),
+        "momentum": tactical.get("Momentum"),
+    }
+    if any(v is None for v in mapped.values()):
+        return None
+    weights = {k: float(v) for k, v in mapped.items()}
+    weights["investment"] = settings.v2_weight_investment
+    total = sum(weights.values())
+    if total <= 0:
+        return None
+    return {k: v / total for k, v in weights.items()}
+
+
 def _resolve_leverage_indicator(df: pd.DataFrame) -> tuple[str, str | None]:
     """Leverage-Indikator für Quality Nicht-Financials (Spec 2.1).
 

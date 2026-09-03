@@ -28,6 +28,63 @@ FACTOR_FIELDS = [
     ("lowvol", label_for("lowvol")),
 ]
 
+# Composite-v2-Settings: (Feldname, Label, Schrittweite, int?). Die Inputs
+# nutzen Pattern-Matching-IDs {"type": "v2-set", "index": Feldname}, damit
+# der Save-Callback nicht jedes Feld einzeln aufzählen muss.
+V2_SETTINGS_FIELDS: list[tuple[str, str, float, bool]] = [
+    ("v2_weight_value", "Gewicht Value", 0.01, False),
+    ("v2_weight_quality", "Gewicht Quality", 0.01, False),
+    ("v2_weight_momentum", "Gewicht Momentum", 0.01, False),
+    ("v2_weight_investment", "Gewicht Investment", 0.01, False),
+    ("v2_min_factor_weight", "Min. Faktorgewichts-Summe", 0.05, False),
+    ("v2_min_group_size", "Min. Gruppengröße (Neutralisierung)", 1, True),
+    ("v2_min_group_valid", "Min. gültige Werte je Gruppe", 1, True),
+    ("v2_winsor_lower", "Winsorisierung unten", 0.01, False),
+    ("v2_winsor_upper", "Winsorisierung oben", 0.01, False),
+    ("v2_zscore_cap", "Z-Score-Cap (±)", 0.5, False),
+    ("v2_composite_winsor_lower", "Composite-Winsor unten", 0.01, False),
+    ("v2_composite_winsor_upper", "Composite-Winsor oben", 0.01, False),
+    ("v2_min_volatility", "Vola-Floor für mom_12_1_adj", 0.01, False),
+]
+
+# Portfoliokonstruktion (alle pc_*- und Filter-Settings der Spec).
+PC_SETTINGS_FIELDS: list[tuple[str, str, float, bool]] = [
+    ("filter_min_market_cap", "Filter: Min. Market Cap (Mio EUR)", 100, False),
+    ("filter_min_piotroski", "Filter: Min. Piotroski (von 9)", 0.5, False),
+    ("filter_min_altman", "Filter: Min. Altman Z", 0.1, False),
+    ("filter_min_adv", "Filter: Min. ADV 3M (Mio EUR)", 0.5, False),
+    ("filter_min_coverage", "Filter: Min. Datenabdeckung v2", 0.05, False),
+    ("filter_min_listing_days", "Filter: Min. Tage seit IPO", 5, True),
+    ("filter_max_de", "Filter: Max. Debt/Equity", 0.1, False),
+    ("filter_min_icr", "Filter: Min. Interest Coverage", 0.1, False),
+    ("pc_target_n", "Zielanzahl Titel", 1, True),
+    ("pc_min_n", "Mindestanzahl Titel", 1, True),
+    ("pc_max_n", "Höchstanzahl Titel", 1, True),
+    ("pc_entry_pct", "Einstiegszone (Perzentil)", 0.01, False),
+    ("pc_exit_pct", "Ausstiegszone (Perzentil)", 0.001, False),
+    ("pc_fill_pct", "Notfüllzone (Perzentil)", 0.01, False),
+    ("pc_sector_band", "Sektor-Band (± pp)", 0.01, False),
+    ("pc_region_band", "Regions-Band (± pp)", 0.01, False),
+    ("pc_max_per_sector", "Max. Titel je Sektor", 1, True),
+    ("pc_benchmark_max_age_days", "Max. Alter Benchmark-Gewichte (Tage)", 5, True),
+    ("pc_vol_floor", "Vola-Floor (Gewichtung)", 0.01, False),
+    ("pc_vol_cap", "Vola-Cap (Gewichtung)", 0.01, False),
+    ("pc_weight_floor", "Gewichts-Floor", 0.005, False),
+    ("pc_weight_cap", "Gewichts-Cap", 0.005, False),
+    ("pc_te_target_low", "TE-Zielband unten", 0.005, False),
+    ("pc_te_target_high", "TE-Zielband oben", 0.005, False),
+    ("pc_te_max", "TE-Maximum", 0.005, False),
+    ("pc_max_cte_share", "Max. CTE-Anteil", 0.01, False),
+    ("pc_te_min_coverage", "Min. Kursabdeckung für TE", 0.05, False),
+    ("pc_turnover_budget_full", "Turnover-Budget full", 0.01, False),
+    ("pc_turnover_budget_interim", "Turnover-Budget interim", 0.01, False),
+    ("pc_min_trade_size", "Min. Trade-Größe (|Δw|)", 0.001, False),
+]
+
+_V2_INT_FIELDS = {f for f, _, _, is_int in V2_SETTINGS_FIELDS if is_int} | {
+    f for f, _, _, is_int in PC_SETTINGS_FIELDS if is_int
+}
+
 
 def _weight_row(fid: str, label: str, value: float, step: float = 0.01) -> dbc.Row:
     return dbc.Row(
@@ -361,6 +418,195 @@ def _agents_card() -> dbc.Card:
     )
 
 
+def _numeric_row(id_obj: dict, label: str, value, step, is_int: bool) -> dbc.Row:
+    return dbc.Row(
+        [
+            dbc.Col(html.Label(label), md=7),
+            dbc.Col(
+                dbc.Input(
+                    id=id_obj,
+                    type="number",
+                    value=value,
+                    step=step,
+                    min=0 if is_int else None,
+                ),
+                md=5,
+            ),
+        ],
+        className="mb-2",
+    )
+
+
+def _v2_card() -> dbc.Card:
+    """Einstellungs-Block „Composite v2" (Spec 11.2)."""
+    s = STATE.settings
+    rows = [
+        _numeric_row(
+            {"type": "v2-set", "index": field}, label, getattr(s, field), step, is_int
+        )
+        for field, label, step, is_int in V2_SETTINGS_FIELDS
+    ]
+    minvalid_rows = []
+    for segment, table in (("nonfin", s.v2_min_valid_nonfin),
+                           ("fin", s.v2_min_valid_financial)):
+        seg_label = "Nicht-Financials" if segment == "nonfin" else "Financials"
+        for factor in ("value", "quality", "momentum", "investment"):
+            minvalid_rows.append(
+                _numeric_row(
+                    {"type": "v2-minvalid", "index": f"{segment}:{factor}"},
+                    f"Min. gültige Indikatoren {seg_label} · {factor}",
+                    table.get(factor, 1),
+                    1,
+                    True,
+                )
+            )
+    return dbc.Card(
+        [
+            dbc.CardHeader("Composite v2"),
+            dbc.CardBody(
+                [
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("Primäre Score-Version"), md=7),
+                            dbc.Col(
+                                dbc.Select(
+                                    id="v2-scoring-version",
+                                    options=[
+                                        {"label": "v2 (Composite)", "value": "v2"},
+                                        {"label": "v1 (Perzentile)", "value": "v1"},
+                                    ],
+                                    value=s.scoring_version,
+                                ),
+                                md=5,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("Faktor-Timing-Modus"), md=7),
+                            dbc.Col(
+                                dbc.Select(
+                                    id="v2-timing-mode",
+                                    options=[
+                                        {"label": "monitor (empfohlen)",
+                                         "value": "monitor"},
+                                        {"label": "active (Backtests)",
+                                         "value": "active"},
+                                    ],
+                                    value=s.factor_timing_mode,
+                                ),
+                                md=5,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    *rows,
+                    html.Div(id="v2-weight-sum", className="ms-weight-sum"),
+                    html.Hr(),
+                    html.Div("Mindestabdeckungen je Faktor",
+                             className="fw-bold small mb-2"),
+                    *minvalid_rows,
+                ]
+            ),
+        ],
+        className="mb-3",
+    )
+
+
+def _pc_card() -> dbc.Card:
+    """Einstellungs-Block „Portfoliokonstruktion" (Spec 11.2)."""
+    s = STATE.settings
+    rows = [
+        _numeric_row(
+            {"type": "pc-set", "index": field}, label, getattr(s, field), step, is_int
+        )
+        for field, label, step, is_int in PC_SETTINGS_FIELDS
+    ]
+    from app.core.persistence import load_region_weights
+
+    region_weights, region_asof = load_region_weights()
+    region_text = "\n".join(
+        f"{name}={weight}" for name, weight in sorted(region_weights.items())
+    )
+    return dbc.Card(
+        [
+            dbc.CardHeader("Portfoliokonstruktion"),
+            dbc.CardBody(
+                [
+                    *rows,
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("Rebalancing-Monate (full)"), md=7),
+                            dbc.Col(
+                                dbc.Input(
+                                    id="pc-rebalance-months",
+                                    value=", ".join(
+                                        str(m) for m in s.pc_rebalance_months
+                                    ),
+                                ),
+                                md=5,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("Interim-Monate"), md=7),
+                            dbc.Col(
+                                dbc.Input(
+                                    id="pc-interim-months",
+                                    value=", ".join(
+                                        str(m) for m in s.pc_interim_months
+                                    ),
+                                ),
+                                md=5,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Label("Stand ACWI-Sektorgewichte (ISO)"),
+                                md=7,
+                            ),
+                            dbc.Col(
+                                dbc.Input(
+                                    id="pc-sector-asof",
+                                    value=s.risk_benchmark_sector_weights_asof,
+                                    placeholder="YYYY-MM-DD",
+                                ),
+                                md=5,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
+                    html.Hr(),
+                    html.Div(
+                        "Benchmark-Regionsgewichte (eine Zeile je Region: "
+                        "Region=Gewicht; Namen exakt wie in der Koyfin-Spalte "
+                        "„region“)",
+                        className="small mb-1",
+                    ),
+                    dbc.Textarea(
+                        id="pc-region-weights",
+                        value=region_text,
+                        rows=5,
+                        className="mb-2",
+                    ),
+                    html.Div(
+                        f"Stand: {region_asof.isoformat() if region_asof else '–'} "
+                        "(Speichern setzt den Stand auf heute)",
+                        className="small text-muted",
+                    ),
+                ]
+            ),
+        ],
+        className="mb-3",
+    )
+
+
 def layout(**_) -> html.Div:
     s = STATE.settings
     factor_rows = [
@@ -528,6 +774,26 @@ def layout(**_) -> html.Div:
                 className="mb-3",
             ),
             indicator_cards,
+            dbc.Row(
+                [
+                    dbc.Col(_v2_card(), md=6),
+                    dbc.Col(_pc_card(), md=6),
+                ],
+                className="mb-3",
+            ),
+            html.Div(
+                [
+                    dbc.Button(
+                        "Composite v2 & Portfoliokonstruktion speichern",
+                        id="save-v2-settings",
+                        color="dark",
+                        size="sm",
+                        n_clicks=0,
+                    ),
+                ],
+                className="mb-2",
+            ),
+            html.Div(id="v2-settings-status", className="mb-3"),
             _agents_card(),
             _snapshot_card(),
             html.Div(
@@ -700,6 +966,139 @@ def _save(
             )
         )
     return html.Div(alerts)
+
+
+def _parse_months(raw: str | None, fallback: list[int]) -> list[int]:
+    if not raw:
+        return list(fallback)
+    try:
+        months = sorted(
+            {int(x) for x in str(raw).replace(";", ",").split(",") if x.strip()}
+        )
+    except ValueError:
+        return list(fallback)
+    return [m for m in months if 1 <= m <= 12] or list(fallback)
+
+
+@callback(
+    Output("v2-settings-status", "children"),
+    Input("save-v2-settings", "n_clicks"),
+    State({"type": "v2-set", "index": ALL}, "value"),
+    State({"type": "v2-set", "index": ALL}, "id"),
+    State({"type": "v2-minvalid", "index": ALL}, "value"),
+    State({"type": "v2-minvalid", "index": ALL}, "id"),
+    State({"type": "pc-set", "index": ALL}, "value"),
+    State({"type": "pc-set", "index": ALL}, "id"),
+    State("v2-scoring-version", "value"),
+    State("v2-timing-mode", "value"),
+    State("pc-rebalance-months", "value"),
+    State("pc-interim-months", "value"),
+    State("pc-sector-asof", "value"),
+    State("pc-region-weights", "value"),
+    prevent_initial_call=True,
+)
+def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
+             scoring_version, timing_mode, rebalance_months, interim_months,
+             sector_asof, region_weights_text):
+    if not n_clicks:
+        raise PreventUpdate
+    s = STATE.settings
+    defaults = Settings()
+
+    for vals, ids in ((v2_vals, v2_ids), (pc_vals, pc_ids)):
+        for val, ident in zip(vals or [], ids or [], strict=False):
+            field = ident["index"]
+            if val is None:
+                val = getattr(defaults, field)
+            setattr(
+                s, field, int(val) if field in _V2_INT_FIELDS else float(val)
+            )
+    for val, ident in zip(mv_vals or [], mv_ids or [], strict=False):
+        segment, factor = ident["index"].split(":", 1)
+        table = (
+            s.v2_min_valid_nonfin if segment == "nonfin"
+            else s.v2_min_valid_financial
+        )
+        table[factor] = float(int(val)) if val is not None else table.get(factor, 1.0)
+
+    s.scoring_version = scoring_version or "v2"
+    s.factor_timing_mode = timing_mode or "monitor"
+    s.pc_rebalance_months = _parse_months(
+        rebalance_months, defaults.pc_rebalance_months
+    )
+    s.pc_interim_months = _parse_months(interim_months, defaults.pc_interim_months)
+    s.risk_benchmark_sector_weights_asof = (sector_asof or "").strip()
+
+    # Validierung der v2-Faktorgewichte (Summe 1,0 ± 0,001, Spec 2.4).
+    try:
+        s.validate_v2_weights()
+    except ValueError as exc:
+        return dbc.Alert(f"Nicht gespeichert: {exc}", color="danger")
+
+    alerts = []
+    # Regionsgewichte in die Tabelle risk_benchmark_region_weights schreiben.
+    region_weights: dict[str, float] = {}
+    for line in str(region_weights_text or "").splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        try:
+            region_weights[name.strip()] = float(value.strip().replace(",", "."))
+        except ValueError:
+            alerts.append(
+                dbc.Alert(
+                    f"Regionsgewicht unlesbar, ignoriert: „{line}“",
+                    color="warning",
+                )
+            )
+    try:
+        from app.core.persistence import save_region_weights
+
+        if region_weights:
+            save_region_weights(region_weights, date.today())
+    except Exception as exc:  # noqa: BLE001
+        alerts.append(
+            dbc.Alert(
+                f"Warnung: Regionsgewichte nicht gespeichert ({exc}).",
+                color="warning",
+            )
+        )
+
+    STATE.recompute()
+    alerts.insert(
+        0,
+        dbc.Alert(
+            "Composite v2 / Portfoliokonstruktion gespeichert. Scores wurden "
+            "neu berechnet.",
+            color="success",
+            duration=4000,
+        ),
+    )
+    try:
+        save_settings(s)
+    except Exception as exc:  # noqa: BLE001
+        alerts.append(
+            dbc.Alert(
+                f"Warnung: Datenbank-Speicherung fehlgeschlagen ({exc}).",
+                color="warning",
+            )
+        )
+    return html.Div(alerts)
+
+
+@callback(
+    Output("v2-weight-sum", "children"),
+    Input({"type": "v2-set", "index": ALL}, "value"),
+    Input({"type": "v2-set", "index": ALL}, "id"),
+)
+def _v2_weight_sum(values, ids):
+    total = 0.0
+    for val, ident in zip(values or [], ids or [], strict=False):
+        if ident["index"].startswith("v2_weight_") and val is not None:
+            total += float(val)
+    note = "" if abs(total - 1.0) <= 0.001 else " — muss 1,0 ± 0,001 ergeben!"
+    return f"Summe Faktorgewichte: {fmt_de(total, 2)}{note}"
 
 
 @callback(

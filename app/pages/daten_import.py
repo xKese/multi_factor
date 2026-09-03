@@ -219,6 +219,33 @@ def _handle(contents: str | None, filename: str | None):
                     )
             except Exception:  # noqa: BLE001
                 log.warning("Override-Ablaufprüfung beim Import fehlgeschlagen")
+            try:
+                # Hinweis, welcher Rebalance-Modus erkannt wurde (Spec 11.2).
+                from app.core.persistence import load_model_portfolio_meta
+                from app.core.portfolio_construction import detect_rebalance_mode
+
+                mode = detect_rebalance_mode(
+                    snapshot_date_from_universe(df, filename),
+                    STATE.settings,
+                    load_model_portfolio_meta(),
+                )
+                alerts.append(
+                    dbc.Alert(
+                        [
+                            "Erkannter Rebalance-Modus: ",
+                            html.Strong(mode),
+                            " — ",
+                            dcc.Link(
+                                "zum Modellportfolio",
+                                href="/modellportfolio",
+                            ),
+                            ".",
+                        ],
+                        color="info",
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                log.warning("Rebalance-Modus-Erkennung beim Import fehlgeschlagen")
             _persist_sector_score_history(filename)
             _persist_signal_history(filename)
             status = html.Div(alerts)

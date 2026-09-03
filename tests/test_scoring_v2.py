@@ -281,3 +281,40 @@ def test_zones():
     )
     zones = assign_zones(df, settings)
     assert zones.tolist() == [ZONE_CANDIDATE, ZONE_HOLD, ZONE_SELL, ZONE_FILTER]
+
+
+def test_factor_timing_mode(monkeypatch):
+    """Modus active: taktische Gewichte ersetzen Value/Quality/Momentum
+    (Investment strategisch, renormiert); monitor: keine Wirkung (Spec 9)."""
+    from app.core.scoring_v2 import map_tactical_to_v2
+
+    settings = Settings()
+    tactical = {
+        "Value": 0.40, "Quality": 0.20, "Growth": 0.10,
+        "Momentum": 0.20, "Low Volatility": 0.10,
+    }
+    mapped = map_tactical_to_v2(tactical, settings)
+    assert mapped is not None
+    total = 0.40 + 0.20 + 0.20 + settings.v2_weight_investment
+    assert mapped["value"] == pytest.approx(0.40 / total)
+    assert mapped["investment"] == pytest.approx(settings.v2_weight_investment / total)
+    assert sum(mapped.values()) == pytest.approx(1.0)
+    assert map_tactical_to_v2(None, settings) is None
+    assert map_tactical_to_v2({"Value": 0.5}, settings) is None
+
+    raw = load_koyfin_csv(str(FIXTURE))
+    scored = compute_scores(raw, settings)
+
+    # monitor (Default): tactical_weights werden ignoriert.
+    settings.factor_timing_mode = "monitor"
+    out_monitor, _ = compute_scores_v2(scored, settings, tactical_weights=mapped)
+    out_plain, _ = compute_scores_v2(scored, settings)
+    pd.testing.assert_series_equal(
+        out_monitor["composite_raw"], out_plain["composite_raw"]
+    )
+
+    # active: Composite nutzt die gemappten Gewichte, Info-Diagnose vorhanden.
+    settings.factor_timing_mode = "active"
+    out_active, diags = compute_scores_v2(scored, settings, tactical_weights=mapped)
+    assert any(d.code == "factor_timing_active" for d in diags)
+    assert not out_active["composite_raw"].equals(out_plain["composite_raw"])

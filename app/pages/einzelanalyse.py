@@ -834,6 +834,87 @@ def _sync_ticker_from_url(search: str | None):
     return _resolve_uid(tickers[0]) or tickers[0]
 
 
+def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
+    """Composite-v2-Abschnitt: Score, Klasse, Zone, Faktor-Z und je
+    Indikator z_* mit Neutralisierungsebene (Spec 11.2)."""
+    from app.core.scoring_v2 import V2_FACTOR_NAMES
+    from app.pages.common import render_basic_table
+    from app.ui.theme import ms_badge
+
+    def _num(value, decimals=2):
+        return fmt_de(float(value), decimals) if pd.notna(value) else "–"
+
+    badges = [
+        ms_badge("COMPOSITE v2", _num(r.get("composite_score"), 1)),
+        ms_badge("KLASSE", str(r.get("classification_v2") or "–")),
+        ms_badge(
+            "ZONE",
+            str(r.get("zone_v2") or "–"),
+            tone={
+                "KANDIDAT": "up",
+                "VERKAUFEN": "down",
+                "FILTER": "warn",
+            }.get(str(r.get("zone_v2"))),
+        ),
+        ms_badge(
+            "ABDECKUNG v2",
+            _num((r.get("data_coverage_v2") or 0) * 100, 0) + " %",
+        ),
+    ]
+    if bool(r.get("trend_warning")):
+        badges.append(ms_badge("TREND", "⚠ Death Cross", tone="warn"))
+    reasons = r.get("filter_reasons")
+    if isinstance(reasons, list) and reasons:
+        badges.append(ms_badge("FILTER", ", ".join(reasons), tone="down"))
+
+    factor_rows = pd.DataFrame(
+        [
+            {
+                "Faktor": name,
+                "Z-Score": _num(r.get(f"z_{name}")),
+                "Abdeckung": _num((r.get(f"cov_{name}") or 0) * 100, 0) + " %",
+            }
+            for name in V2_FACTOR_NAMES
+        ]
+    )
+    indicator_rows = []
+    for col in sorted(c for c in df.columns if c.startswith("neut_level_")):
+        indicator = col.removeprefix("neut_level_")
+        z = r.get(f"z_{indicator}")
+        level = r.get(col)
+        if pd.isna(z) and (level is None or pd.isna(level)):
+            continue
+        indicator_rows.append(
+            {
+                "Indikator": indicator,
+                "Z-Score": _num(z),
+                "Neutralisierung": str(level) if pd.notna(level) else "–",
+            }
+        )
+    children: list = [
+        html.Div(
+            [
+                html.Div("Composite v2", className="ms-eyebrow"),
+                html.H2("Faktor-Z-Scores (Region×Sektor-neutral)"),
+            ],
+            className="ms-dash-section",
+        ),
+        html.Div(badges, className="d-flex gap-2 flex-wrap mb-2"),
+        html.Div(
+            [
+                html.Div(render_basic_table(factor_rows)),
+                html.Div(
+                    render_basic_table(pd.DataFrame(indicator_rows))
+                    if indicator_rows
+                    else html.Div(),
+                ),
+            ],
+            className="ms-row ms-r-2",
+        ),
+    ]
+    return html.Div(children, className="mb-3")
+
+
 @callback(Output("ea-content", "children"), Input("ea-ticker", "value"))
 def _render(ticker: str | None):
     if not ticker or STATE.scored.empty:
@@ -866,32 +947,57 @@ def _render(ticker: str | None):
             html.Div([pair_a[-1], html.Div()], className="ms-row ms-r-2"),
         )
 
+    # v1-Scoring-Blöcke; bei scoring_version = "v2" wandern sie in einen
+    # aufklappbaren Vergleichsbereich (Spec 11.2).
+    v1_scoring_blocks = [
+        _verdict_block(r),
+        _strengths_concerns(df, ticker),
+        _factor_decomposition(r),
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.Div("Kennzahlen", className="ms-eyebrow"),
+                        html.H2("Indikatoren mit Perzentil-Rang"),
+                    ]
+                ),
+                html.Div(
+                    f"Referenz: {STATE.settings.percentile_mode}",
+                    className="ms-meta",
+                ),
+            ],
+            className="ms-dash-section",
+        ),
+        *indicator_rows,
+    ]
+    v2_active = (
+        STATE.settings.scoring_version == "v2"
+        and "composite_score" in df.columns
+    )
+    if v2_active:
+        scoring_blocks: list = [
+            _v2_block(df, r),
+            dbc.Accordion(
+                [
+                    dbc.AccordionItem(
+                        v1_scoring_blocks, title="Scoring v1 (Vergleich)"
+                    )
+                ],
+                start_collapsed=True,
+                className="mb-3",
+            ),
+        ]
+    else:
+        scoring_blocks = v1_scoring_blocks
+
     return html.Div(
         [
             _hero_block(r, ranks),
-            _verdict_block(r),
-            _strengths_concerns(df, ticker),
-            _factor_decomposition(r),
+            *scoring_blocks,
             html.Div(
                 [_price_block(r), _returns_block(r)],
                 className="ms-row ms-r-2",
             ),
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Div("Kennzahlen", className="ms-eyebrow"),
-                            html.H2("Indikatoren mit Perzentil-Rang"),
-                        ]
-                    ),
-                    html.Div(
-                        f"Referenz: {STATE.settings.percentile_mode}",
-                        className="ms-meta",
-                    ),
-                ],
-                className="ms-dash-section",
-            ),
-            *indicator_rows,
             html.Div(
                 [
                     html.Div(
