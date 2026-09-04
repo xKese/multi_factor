@@ -136,3 +136,32 @@ def test_snapshot_date_filename_fallback():
     )
     # Weder Spalte noch Dateiname → heute.
     assert snapshot_date_from_universe(pd.DataFrame(), "export.csv") == date.today()
+
+
+def test_snapshot_date_rejects_implausible_export_dates():
+    """Numerische oder unplausible export_date-Werte dürfen nicht als
+    Epoche (01.01.1970) fehlinterpretiert werden — die Fallback-Kette
+    (Dateiname → heute) greift stattdessen."""
+    from datetime import timedelta
+
+    filename = "koyfin_MSCI World_2026.08.07_08.31.02.300.csv"
+
+    # Numerische Spalte (z. B. durch verschobene Spaltenzuordnung).
+    df_num = pd.DataFrame({"export_date": [46200.0, 46200.0]})
+    assert snapshot_date_from_universe(df_num, filename) == date(2026, 8, 7)
+    assert snapshot_date_from_universe(df_num, None) == date.today()
+
+    # Datum vor 2000 (Epoche) → verworfen.
+    df_epoch = pd.DataFrame({"export_date": ["1970-01-01"]})
+    assert snapshot_date_from_universe(df_epoch, filename) == date(2026, 8, 7)
+
+    # Datum weit in der Zukunft → verworfen.
+    far = (date.today() + timedelta(days=400)).isoformat()
+    assert (
+        snapshot_date_from_universe(pd.DataFrame({"export_date": [far]}), None)
+        == date.today()
+    )
+
+    # Gültige Strings bleiben führend, auch gemischt mit Zahlen.
+    df_mixed = pd.DataFrame({"export_date": [46200.0, "2026-07-14"]})
+    assert snapshot_date_from_universe(df_mixed, filename) == date(2026, 7, 14)

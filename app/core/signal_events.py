@@ -12,7 +12,7 @@ zweiten Import bleiben die Event-Felder leer (fail-open, raised nie).
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -59,6 +59,28 @@ def parse_koyfin_filename_date(filename: str | None) -> date | None:
         return None
 
 
+def parse_export_dates(series: pd.Series) -> pd.Series:
+    """Robuste Datums-Interpretation der ``export_date``-Spalte.
+
+    Numerische Werte werden verworfen, bevor ``pd.to_datetime`` sie als
+    Nanosekunden seit der Unix-Epoche fehlinterpretiert (Ergebnis wäre
+    01.01.1970 — z. B. wenn eine unbekannte Zusatzspalte im Export die
+    positionale Zuordnung verschiebt und eine Kennzahl in ``export_date``
+    landet). Zusätzlich werden unplausible Daten verworfen (vor 2000 oder
+    mehr als 7 Tage in der Zukunft), damit die Fallback-Kette
+    (Dateiname → Importdatum) greift statt eines Artefakt-Datums.
+    """
+    values = series.where(
+        series.map(lambda v: isinstance(v, str) or hasattr(v, "year"))
+    )
+    parsed = pd.to_datetime(values, errors="coerce").dropna()
+    if parsed.empty:
+        return parsed
+    lower = pd.Timestamp("2000-01-01")
+    upper = pd.Timestamp(date.today() + timedelta(days=7))
+    return parsed[(parsed >= lower) & (parsed <= upper)]
+
+
 def snapshot_date_from_universe(
     df: pd.DataFrame, filename: str | None = None
 ) -> date:
@@ -67,9 +89,10 @@ def snapshot_date_from_universe(
 
     ``export_date`` bleibt führend (Datenstands-Datum aus dem Export selbst);
     der Dateiname trägt den Download-Zeitpunkt und greift nur, wenn die
-    Spalte fehlt oder leer ist."""
+    Spalte fehlt, leer oder unplausibel ist (siehe
+    :func:`parse_export_dates`)."""
     if df is not None and "export_date" in df.columns:
-        parsed = pd.to_datetime(df["export_date"], errors="coerce").dropna()
+        parsed = parse_export_dates(df["export_date"])
         if not parsed.empty:
             return parsed.max().date()
     from_name = parse_koyfin_filename_date(filename)
