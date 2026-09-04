@@ -355,8 +355,16 @@ class Settings:
     pc_sector_band: float = 0.10
     pc_region_band: float = 0.10
     pc_max_per_sector: int = 8
+    # Quelle der Benchmark-Gewichte für Sektor-/Regions-Bandbreiten und
+    # Exposures: "universe" = marktkapitalisierungsgewichtete Anteile des
+    # importierten Universums (immer aktuell, keine manuelle Pflege);
+    # "static" = manuell gepflegte ACWI-Gewichte (Settings-Dict bzw.
+    # Tabelle risk_benchmark_region_weights) mit 120-Tage-Check.
+    # Die Ex-ante-TE-Kontrolle rechnet unabhängig davon weiter gegen die
+    # ACWI-Kurszeitreihe.
+    pc_benchmark_source: str = "universe"
     # Benchmark-Gewichte älter als diese Anzahl Tage → Bandbreiten-
-    # Restriktion ausgesetzt, Warnung (Spec 5.3).
+    # Restriktion ausgesetzt, Warnung (Spec 5.3; nur Quelle "static").
     pc_benchmark_max_age_days: int = 120
     # Stand (ISO-Datum) der manuell gepflegten ACWI-Sektorgewichte
     # ``risk_benchmark_sector_weights``. Leer = unbekannt → Restriktion

@@ -138,6 +138,7 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "pc_sector_band",
     "pc_region_band",
     "pc_max_per_sector",
+    "pc_benchmark_source",
     "pc_benchmark_max_age_days",
     "risk_benchmark_sector_weights_asof",
     "pc_vol_floor",

@@ -49,17 +49,117 @@ class BenchmarkWeights:
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
 
+def universe_benchmark_weights(
+    universe: pd.DataFrame,
+) -> BenchmarkWeights:
+    """Benchmark-Gewichte aus dem importierten Universum (Quelle
+    ``pc_benchmark_source = "universe"``).
+
+    Sektor- und Regionsgewichte = marktkapitalisierungsgewichtete Anteile
+    über die Gesamtheit des Daten-Imports (alle Zeilen, nicht nur
+    eligible). Titel ohne Marktkapitalisierung zählen mit Gewicht 0 und
+    werden als Info ausgewiesen; trägt kein Titel eine Marktkapitalisierung,
+    wird gleichgewichtet (Warnung).
+    """
+    diags: list[Diagnostic] = []
+    if universe is None or universe.empty:
+        diags.append(
+            Diagnostic(
+                SEV_WARNING,
+                "benchmark_universe_empty",
+                "Benchmark-Quelle 'universe': kein Universum geladen — "
+                "Bandbreiten-Restriktionen nicht angewendet",
+            )
+        )
+        return BenchmarkWeights(sector=None, region=None, diagnostics=diags)
+
+    if "market_cap" in universe.columns:
+        mcap = pd.to_numeric(universe["market_cap"], errors="coerce").clip(lower=0)
+    else:
+        mcap = pd.Series(np.nan, index=universe.index, dtype=float)
+    n_missing = int(mcap.isna().sum())
+    if float(mcap.fillna(0).sum()) <= 0:
+        weights = pd.Series(1.0, index=universe.index)
+        diags.append(
+            Diagnostic(
+                SEV_WARNING,
+                "benchmark_universe_equal_weight",
+                "Benchmark-Quelle 'universe': keine Marktkapitalisierungen "
+                "vorhanden — Gewichte gleichgewichtet berechnet",
+            )
+        )
+    else:
+        weights = mcap.fillna(0.0)
+        if n_missing:
+            diags.append(
+                Diagnostic(
+                    SEV_INFO,
+                    "benchmark_universe_mcap_missing",
+                    f"Benchmark-Quelle 'universe': {n_missing} Titel ohne "
+                    "Marktkapitalisierung (Gewicht 0 in der Benchmark)",
+                )
+            )
+    total = float(weights.sum())
+
+    def _dim_weights(column: str) -> dict[str, float] | None:
+        if column not in universe.columns or total <= 0:
+            return None
+        groups = universe[column].fillna("Unbekannt").astype(str)
+        return (weights.groupby(groups).sum() / total).to_dict()
+
+    sector = _dim_weights("sector")
+    region = _dim_weights("region")
+    diags.append(
+        Diagnostic(
+            SEV_INFO,
+            "benchmark_universe",
+            "Benchmark = Universum (marktkapitalisierungsgewichtet, "
+            f"{len(universe)} Titel)",
+        )
+    )
+    return BenchmarkWeights(sector=sector, region=region, diagnostics=diags)
+
+
 def load_benchmark_weights(
     settings: Settings,
     universe_regions: list[str] | None = None,
     asof: date | None = None,
+    universe: pd.DataFrame | None = None,
 ) -> BenchmarkWeights:
-    """Lädt Sektor- (Settings-Dict + asof) und Regionsgewichte (Tabelle).
+    """Benchmark-Gewichte je nach Quelle (``pc_benchmark_source``).
 
-    Fehlt eine Quelle oder ist sie älter als ``pc_benchmark_max_age_days``,
-    wird die zugehörige Bandbreiten-Restriktion NICHT angewendet (Warnung).
-    Unbekannte Regionen erhalten Benchmark-Gewicht 0 und werden gelistet.
+    ``"universe"``: marktkapitalisierungsgewichtete Anteile des übergebenen
+    Universums (:func:`universe_benchmark_weights`) — kein Staleness-Check.
+    ``"static"`` (oder fehlendes Universum): Sektoren aus dem Settings-Dict
+    + asof, Regionen aus der Tabelle; fehlt eine Quelle oder ist sie älter
+    als ``pc_benchmark_max_age_days``, wird die zugehörige Bandbreiten-
+    Restriktion NICHT angewendet (Warnung). Unbekannte Regionen erhalten
+    Benchmark-Gewicht 0 und werden gelistet.
     """
+    if settings.pc_benchmark_source == "universe":
+        if universe is not None and not universe.empty:
+            return universe_benchmark_weights(universe)
+        # Ohne Universums-Frame (z. B. Alt-Aufrufer) auf die statische
+        # Quelle zurückfallen — mit Hinweis, keine stillen Fallbacks.
+        fallback = _static_benchmark_weights(settings, universe_regions, asof)
+        fallback.diagnostics.insert(
+            0,
+            Diagnostic(
+                SEV_WARNING,
+                "benchmark_universe_unavailable",
+                "Benchmark-Quelle 'universe' gewählt, aber kein Universum "
+                "übergeben — statische Gewichte verwendet",
+            ),
+        )
+        return fallback
+    return _static_benchmark_weights(settings, universe_regions, asof)
+
+
+def _static_benchmark_weights(
+    settings: Settings,
+    universe_regions: list[str] | None = None,
+    asof: date | None = None,
+) -> BenchmarkWeights:
     diags: list[Diagnostic] = []
     today = asof or date.today()
     max_age = timedelta(days=settings.pc_benchmark_max_age_days)
@@ -348,10 +448,30 @@ def _band_ok(
     groups: pd.Series,
     benchmark: dict[str, float] | None,
     band: float,
+    candidate_group: str | None = None,
+    cap: float | None = None,
 ) -> bool:
+    """Bandprüfung bei der Kandidaten-Aufnahme (Spec 5.4).
+
+    Geprüft wird nur die Gruppe des Kandidaten (``candidate_group``): Die
+    Gewichte aller anderen Gruppen können durch die Aufnahme nur sinken
+    (Verwässerung) — eine bereits bestehende Verletzung aus der Pufferzone
+    darf Zukäufe in anderen Sektoren nicht blockieren ("das Modell verkauft
+    nie wegen einer Bandbreite, es kauft nur nicht nach"). Solange das
+    Portfolio kleiner als ``1/cap`` Titel ist, ist ein Band mathematisch
+    unerfüllbar (das kleinste Einzelgewicht liegt über der Benchmark-
+    Spanne) — dann wird nicht geprüft; verbleibende Verletzungen werden am
+    Ende als Warnung ausgewiesen. Ohne ``candidate_group`` (finale
+    Kontrolle) werden alle Gruppen geprüft.
+    """
     if benchmark is None:
         return True
+    if cap is not None and len(w) * cap < 1.0 - 1e-9:
+        return True
     agg = _group_weights(w, groups)
+    if candidate_group is not None:
+        weight = float(agg.get(candidate_group, 0.0))
+        return abs(weight - float(benchmark.get(candidate_group, 0.0))) <= band + 1e-9
     for name, weight in agg.items():
         bm = float(benchmark.get(name, 0.0))
         if abs(weight - bm) > band + 1e-9:
@@ -477,12 +597,22 @@ def select_portfolio(
                 skipped.append({"uid": uid, "reason": "max_per_sector"})
                 continue
             if not _band_ok(
-                w, sectors, benchmark_weights.sector, settings.pc_sector_band
+                w,
+                sectors,
+                benchmark_weights.sector,
+                settings.pc_sector_band,
+                candidate_group=str(sectors.loc[uid]),
+                cap=settings.pc_weight_cap,
             ):
                 skipped.append({"uid": uid, "reason": "sector_band"})
                 continue
             if not _band_ok(
-                w, regions, benchmark_weights.region, settings.pc_region_band
+                w,
+                regions,
+                benchmark_weights.region,
+                settings.pc_region_band,
+                candidate_group=str(regions.loc[uid]),
+                cap=settings.pc_weight_cap,
             ):
                 skipped.append({"uid": uid, "reason": "region_band"})
                 continue
@@ -1037,6 +1167,7 @@ def build_model_portfolio(
         settings,
         universe_regions=sorted(uni.get("region", pd.Series(dtype=str)).dropna().unique()),
         asof=snap,
+        universe=uni,
     )
 
     if mode == MODE_INTERIM:

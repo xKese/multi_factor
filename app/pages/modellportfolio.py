@@ -311,6 +311,7 @@ def _exposures_block(portfolio: pd.DataFrame, universe: pd.DataFrame,
             uni.get("region", pd.Series(dtype=str)).dropna().unique()
         ),
         asof=snap,
+        universe=uni,
     )
     blocks: list = []
     for dim, bm, band in (
