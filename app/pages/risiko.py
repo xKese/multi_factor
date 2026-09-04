@@ -20,7 +20,7 @@ from dash.dash_table.Format import Format, Scheme, Symbol
 from app.core.risk_report import compute_risk_report
 from app.core.state import STATE
 from app.pages.common import page_title, render_basic_table, render_table
-from app.ui import fmt_de, fmt_percent, fmt_signed_percent, kpi_band, section_header
+from app.ui import fmt_de, fmt_percent, fmt_signed_percent, kpi_band, panel
 from app.ui.formatters import fmt_int
 from app.ui.theme import LIGHT
 
@@ -34,18 +34,10 @@ _UPDATE_CMD = "python -m app.tools.risk_report update"
 
 
 def _hint_card(text: str) -> html.Div:
-    return html.Div(
-        [
-            html.Div("Keine Daten", className="ms-kpi-label"),
-            html.P(text, className="mb-2"),
-            html.Code(_UPDATE_CMD),
-        ],
-        className="ms-card p-4",
-        style={
-            "border": "1px solid var(--ms-border)",
-            "borderRadius": "4px",
-            "background": "var(--ms-surface)",
-        },
+    # Rahmen und Fläche kommen aus .ms-panel, nicht aus Inline-Styles (R3).
+    return panel(
+        "Keine Daten",
+        [html.P(text, className="mb-2"), html.Code(_UPDATE_CMD)],
     )
 
 
@@ -158,18 +150,16 @@ def _mcte_columns() -> list[dict]:
 
 
 def _mcte_section(res: dict) -> list:
-    children: list = [
-        section_header(
-            "Risikobeiträge je Einzeltitel (MCTE)",
-            "Aktive Renditen, 2 Jahre, Ledoit-Wolf-Kovarianz — Σ CTE = TE.",
-        )
-    ]
+    _MCTE_TITLE = "Risikobeiträge je Einzeltitel (MCTE)"
+    _MCTE_META = "Aktive Renditen, 2 Jahre, Ledoit-Wolf-Kovarianz · Σ CTE = TE"
+
     if res["mcte"] is None:
-        children.append(html.P(res["mcte_fehler"]))
-        return children
+        return [panel(_MCTE_TITLE, html.P(res["mcte_fehler"]), meta=_MCTE_META)]
+
     mcte = res["mcte"]
+    body: list = []
     if mcte.ausgeschlossen:
-        children.append(
+        body.append(
             html.P(
                 f"⚠ Ohne ausreichende Historie: {', '.join(mcte.ausgeschlossen)} "
                 f"({fmt_percent(mcte.ausgeschlossen_gewicht)} Gewicht) — "
@@ -181,9 +171,11 @@ def _mcte_section(res: dict) -> list:
         c for c in _mcte_columns() if c["id"] in res["ranking"].columns
     ]
     ranking = res["ranking"][[c["id"] for c in mcte_columns]]
-    children.append(
-        render_table(ranking, columns=mcte_columns, id="risk-mcte-table")
-    )
+    body.append(render_table(ranking, columns=mcte_columns, id="risk-mcte-table"))
+
+    # flush: die DataTable bringt ihren Rahmen selbst mit (R2).
+    children: list = [panel(_MCTE_TITLE, body, meta=_MCTE_META, flush=True)]
+
     if not res["sektor_cte"].empty:
         sektor = res["sektor_cte"].copy()
         sektor["gewicht"] = sektor["gewicht"].map(fmt_percent)
@@ -193,10 +185,7 @@ def _mcte_section(res: dict) -> list:
         sektor = sektor.drop(columns=["cte"]).rename(
             columns={"sektor": "Sektor", "gewicht": "Gewicht", "cte_bp": "CTE"}
         )
-        children += [
-            section_header("CTE je GICS-Sektor"),
-            render_basic_table(sektor),
-        ]
+        children.append(panel("CTE je GICS-Sektor", render_basic_table(sektor)))
     return children
 
 
@@ -228,8 +217,11 @@ def _sector_chart(res: dict) -> list:
         "gepflegt)."
     )
     return [
-        section_header("Aktive Sektorallokation", subtitle),
-        dcc.Graph(figure=fig, config={"displayModeBar": False}),
+        panel(
+            "Aktive Sektorallokation",
+            dcc.Graph(figure=fig, config={"displayModeBar": False}),
+            meta=subtitle,
+        )
     ]
 
 
@@ -250,29 +242,31 @@ def _scenario_section(res: dict) -> list:
             }
         )
     return [
-        section_header(
+        panel(
             "Historische Szenarien",
-            "Replay der heutigen Gewichte; Gewichte auf verfügbare Titel "
-            "renormalisiert, Abdeckung < 60 % → nicht belastbar.",
-        ),
-        render_basic_table(pd.DataFrame(rows)),
+            render_basic_table(pd.DataFrame(rows)),
+            meta="Gewichte renormalisiert · Abdeckung < 60 % → nicht belastbar",
+        )
     ]
 
 
 def _shock_section(res: dict) -> list:
-    children: list = [
-        section_header(
-            "Hypothetische Faktor-Schocks",
-            "Wochenrenditen (3 Jahre) auf Markt, Δ10Y (bp), WTI, EURUSD "
-            "regressiert; Schocks über Betas propagiert.",
-        )
-    ]
+    _TITLE = "Hypothetische Faktor-Schocks"
+    _META = (
+        "Wochenrenditen (3 Jahre) auf Markt, Δ10Y (bp), WTI, EURUSD "
+        "regressiert · über Betas propagiert"
+    )
     if res["schock_fehler"]:
-        children.append(html.P(res["schock_fehler"]))
-        return children
+        return [panel(_TITLE, html.P(res["schock_fehler"]), meta=_META)]
     if res["schocks"].empty:
-        children.append(html.P("Keine Schock-Szenarien konfiguriert."))
-        return children
+        return [
+            panel(
+                _TITLE,
+                html.P("Keine Schock-Szenarien konfiguriert."),
+                meta=_META,
+            )
+        ]
+    children: list = []
     schocks = res["schocks"].copy()
     schocks = pd.DataFrame(
         {
@@ -297,7 +291,7 @@ def _shock_section(res: dict) -> list:
                 className="ms-page-subtitle mt-2",
             )
         )
-    return children
+    return [panel(_TITLE, children, meta=_META)]
 
 
 def _quality_section(res: dict) -> list:
@@ -323,9 +317,10 @@ def _quality_section(res: dict) -> list:
         if quality.fetched_at
         else "unbekannt"
     )
-    return [
-        section_header("Datenqualität", f"Cache-Stand: {stand}"),
-        html.Ul(items) if items else html.P("Keine Auffälligkeiten."),
+    body: list = [
+        html.Ul(items, className="ms-diag-list")
+        if items
+        else html.P("Keine Auffälligkeiten."),
         html.P(
             [
                 "Cache aktualisieren: ",
@@ -336,6 +331,7 @@ def _quality_section(res: dict) -> list:
             className="ms-page-subtitle",
         ),
     ]
+    return [panel("Datenqualität", body, meta=f"Cache-Stand: {stand}")]
 
 
 def layout(**_) -> html.Div:
@@ -379,11 +375,11 @@ def layout(**_) -> html.Div:
                 "renditebasierte Schätzung, rückwärtsgerichtet.",
             ),
             _kpis(res),
-            section_header(
+            panel(
                 "Rollierender Tracking Error",
-                "Std(aktive Tagesrendite) × √252 — Fenster 1 und 3 Jahre.",
+                _te_chart(res),
+                meta="Std(aktive Tagesrendite) × √252 · Fenster 1 und 3 Jahre",
             ),
-            _te_chart(res),
             *_mcte_section(res),
             *_sector_chart(res),
             *_scenario_section(res),

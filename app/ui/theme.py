@@ -123,6 +123,34 @@ def section_header(title: str, subtitle: str | None = None) -> html.Div:
     return html.Div(children, className="ms-section")
 
 
+def panel(
+    title: str,
+    body,
+    meta: str | None = None,
+    flush: bool = False,
+) -> html.Div:
+    """Inhaltsblock im Design-Stil: Karte + gesperrte Kopfzeile (R2).
+
+    Im Design sitzt jeder Block (Tabelle, Chart, Liste) in einer Karte mit
+    eigener Überschrift; nackte Bausteine im Seitenfluss sind der häufigste
+    Design-Bruch.
+
+    ``flush=True`` für Inhalte, die ihren Rahmen selbst mitbringen
+    (``dash_table``) — dann rendert nur die Kopfzeile, ohne zweite
+    Umrandung.
+    """
+    head_children: list = [html.Span(title)]
+    if meta:
+        head_children.append(html.Span(meta, className="ms-panel-meta"))
+    return html.Div(
+        [
+            html.Div(head_children, className="ms-panel-head"),
+            body if not isinstance(body, list) else html.Div(body),
+        ],
+        className="ms-panel is-flush" if flush else "ms-panel",
+    )
+
+
 def kpi_band(cells: Iterable[dict]) -> html.Div:
     """Horizontales KPI-Band (Morningstar-Signatur).
 

@@ -339,8 +339,7 @@ def _upload_card() -> html.Div:
             ),
             html.Div(id="pf-upload-status", className="ms-portfolio-feedback"),
         ],
-        className="ms-card",
-        style={"marginTop": "16px"},
+        className="ms-card ms-stack-top",
     )
 
 
@@ -521,8 +520,7 @@ def _flags_section(view: pd.DataFrame) -> list:
             head,
             html.Div(
                 "Keine Handlungs-Flags — alle Positionen unauffällig.",
-                className="ms-empty-eyebrow",
-                style={"padding": "16px 0"},
+                className="ms-empty-eyebrow ms-section-empty",
             ),
             foot,
         ]
@@ -766,8 +764,7 @@ def _positions_section(
         children.append(
             html.Div(
                 "Keine Portfolio-Position im Universum gefunden.",
-                className="ms-empty-eyebrow",
-                style={"padding": "16px 0"},
+                className="ms-empty-eyebrow ms-section-empty",
             )
         )
     else:
@@ -914,8 +911,7 @@ def _render_main() -> list:
                 _factor_compare_card(view, scored),
                 _rec_compare_card(view, scored),
             ],
-            className="ms-row ms-r-2",
-            style={"marginTop": "16px"},
+            className="ms-row ms-r-2 ms-stack-top",
         ),
         *_flags_section(view),
         *_positions_section(view, missing, ambiguous),

@@ -751,10 +751,10 @@ def _indicator_table_card(df: pd.DataFrame, ticker: str, group) -> html.Div:
 def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
     peers = compute_peers(scored, ticker, n=6, mode=mode)
     if peers.empty:
+        # Rahmen/Abstand aus .ms-panel statt Inline-Padding (R3).
         return html.Div(
             "Keine Comparables verfügbar.",
-            className="ms-tt-muted",
-            style={"padding": "16px"},
+            className="ms-panel ms-tt-muted",
         )
 
     def _hm(v) -> html.Span:
@@ -1443,8 +1443,7 @@ def _agent_mapping_confirm(n_confirm, n_cancel, choice, custom, ticker):
 def _render_comparables(ticker: str | None, mode: str | None):
     if not ticker or STATE.scored.empty:
         return html.Div("Keine Comparables verfügbar.",
-                        className="ms-tt-muted",
-                        style={"padding": "16px"})
+                        className="ms-panel ms-tt-muted")
     return _peer_heatmap(STATE.scored, ticker, mode or "similar")
 
 
