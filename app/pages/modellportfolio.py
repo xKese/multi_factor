@@ -97,13 +97,10 @@ def _controls() -> html.Div:
 
 
 def layout(**_) -> html.Div:
+    # Der Quote-Hero (v1-Designvorlage) wird datenabhängig in mp-content
+    # gerendert; die Alert-Pfade tragen einen page_title-Fallback.
     return html.Div(
         [
-            page_title(
-                "Modellportfolio",
-                "Regelbasierte Portfoliokonstruktion (Composite v2): "
-                "Selektion, Gewichtung, TE-Kontrolle, Overrides.",
-            ),
             _controls(),
             html.Div(id="mp-status"),
             dcc.Loading(html.Div(id="mp-content")),
@@ -119,11 +116,12 @@ def layout(**_) -> html.Div:
     )
 
 
-def _override_form() -> dbc.Card:
-    return dbc.Card(
-        dbc.CardBody(
-            [
-                html.Div("Override anlegen", className="fw-bold mb-2"),
+def _override_form() -> html.Div:
+    # ms-card statt dbc.Card — gleiche Kartensprache wie die v1-Seiten (R3).
+    return html.Div(
+        [
+            html.H3("Override anlegen", className="ms-card-h"),
+            *(
                 html.Div(
                     [
                         dbc.Input(id="mp-ov-uid", placeholder="uid / Ticker",
@@ -177,13 +175,107 @@ def _override_form() -> dbc.Card:
                     ],
                     className="d-flex gap-2 align-items-center",
                 ),
-            ]
-        ),
-        className="mb-4",
+            ),
+        ],
+        className="ms-card mb-4",
     )
 
 
 # ── Render-Bausteine ────────────────────────────────────────────────────
+
+
+def _hero_mp(
+    meta: dict, snap: date, portfolio: pd.DataFrame, diags: list[Diagnostic]
+) -> html.Div:
+    """Quote-Hero im v1-Dashboard-Stil für das Zielportfolio."""
+    from app.ui.score_context import class_of_score
+
+    counts = count_by_severity(diags)
+    n_titles = int(meta.get("n_titles") or 0)
+    mode = str(meta.get("rebalance_mode") or "–")
+
+    # Ø Composite-Score des Zielportfolios, gewichtet mit weight_effective.
+    avg_score = float("nan")
+    if portfolio is not None and not portfolio.empty and "composite_pct" in portfolio.columns:
+        pct = pd.to_numeric(portfolio["composite_pct"], errors="coerce")
+        w = pd.to_numeric(
+            portfolio.get("weight_effective", pd.Series(dtype=float)),
+            errors="coerce",
+        )
+        valid = pct.notna() & w.notna() & (w > 0)
+        if valid.any():
+            avg_score = float((pct[valid] * w[valid]).sum() / w[valid].sum() * 100)
+        elif pct.notna().any():
+            avg_score = float(pct.dropna().mean() * 100)
+    cls = class_of_score(avg_score if pd.notna(avg_score) else None)
+
+    meta_row: list = [
+        html.Span([html.Strong(fmt_de(n_titles, 0)), " Titel im Zielportfolio"]),
+        html.Span("·", className="ms-sep"),
+        html.Span(["Rebalance-Modus ", html.Strong(mode)]),
+        html.Span("·", className="ms-sep"),
+        html.Span([
+            "Turnover ",
+            html.Strong(_fmt_pct(meta.get("turnover_oneway"))),
+        ]),
+    ]
+    if counts[SEV_ERROR] or counts[SEV_WARNING]:
+        meta_row.append(html.Span("·", className="ms-sep"))
+        meta_row.append(
+            html.Span(
+                f"{counts[SEV_ERROR]} Fehler · {counts[SEV_WARNING]} Warnungen",
+                className="ms-badge is-down" if counts[SEV_ERROR] else "ms-badge is-warn",
+            )
+        )
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(
+                        f"Modellportfolio · Snapshot {snap.strftime('%d.%m.%Y')}",
+                        className="ms-hero-eyebrow",
+                    ),
+                    html.H1("Modellportfolio", className="ms-hero-title"),
+                    html.P(
+                        "Regelbasierte Portfoliokonstruktion — Selektion, "
+                        "Gewichtung, Ex-ante-TE-Kontrolle.",
+                        className="ms-hero-subhead",
+                    ),
+                    html.Div(meta_row, className="ms-hero-meta"),
+                ]
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Span(
+                                fmt_de(avg_score, 1) if pd.notna(avg_score) else "–"
+                            ),
+                            html.Span(" / 100", className="ms-score-suf"),
+                        ],
+                        className="ms-score-num",
+                    ),
+                    html.Div(
+                        f"Ø {cls['code']} – {cls['label']}",
+                        className="ms-score-class",
+                    ),
+                    html.Div(
+                        [
+                            html.Span([
+                                "TE ex-ante ",
+                                html.Strong(_fmt_pct(meta.get("te_ex_ante"), 2)),
+                            ]),
+                            html.Span(["Zielband ", html.Strong("4,5–5,5 %")]),
+                        ],
+                        className="ms-score-ctx",
+                    ),
+                ],
+                className="ms-hero-score",
+            ),
+        ],
+        className="ms-hero",
+    )
 
 
 def _kpi_header(meta: dict, snap: date, diags: list[Diagnostic]) -> html.Div:
@@ -353,6 +445,7 @@ def _render_result(result: dict, snap: date, universe: pd.DataFrame,
                    current: dict[str, float]) -> html.Div:
     diags = result["diagnostics"]
     sections = [
+        _hero_mp(result["meta"], snap, result["portfolio"], diags),
         _kpi_header(result["meta"], snap, diags),
         panel(
             "Diagnosen",
@@ -400,8 +493,14 @@ def _render_stored(snap: date) -> html.Div:
     portfolio = persistence.load_model_portfolio(snap)
     meta = persistence.load_model_portfolio_meta(snap) or {}
     if portfolio is None:
-        return dbc.Alert("Kein gespeichertes Zielportfolio für dieses Datum.",
-                         color="warning")
+        return html.Div([
+            page_title(
+                "Modellportfolio",
+                "Regelbasierte Portfoliokonstruktion (Composite v2).",
+            ),
+            dbc.Alert("Kein gespeichertes Zielportfolio für dieses Datum.",
+                      color="warning"),
+        ])
     diags = diags_from_json(meta.get("diagnostics"))
     # Formatierung (Prozent, Z-Werte, cTE) übernimmt render_table zentral.
     df = portfolio.copy()
@@ -419,6 +518,7 @@ def _render_stored(snap: date) -> html.Div:
     table.export_format = "csv"
     return html.Div(
         [
+            _hero_mp(meta, snap, portfolio, diags),
             _kpi_header(meta, snap, diags),
             panel("Diagnosen (damaliger Lauf)", _diagnostics_block(diags)),
             panel("Zielportfolio", table, meta="historisierter Lauf", flush=True),
@@ -456,11 +556,17 @@ def _run(n_dry, n_save, history, mode_choice):
     df = STATE.scored
     if df is None or df.empty or "composite_z" not in df.columns:
         return (
-            dbc.Alert(
-                "Kein Universum mit Composite v2 geladen — bitte zuerst auf "
-                "/daten-import ein Universum importieren.",
-                color="warning",
-            ),
+            html.Div([
+                page_title(
+                    "Modellportfolio",
+                    "Regelbasierte Portfoliokonstruktion (Composite v2).",
+                ),
+                dbc.Alert(
+                    "Kein Universum mit Composite v2 geladen — bitte zuerst auf "
+                    "/daten-import ein Universum importieren.",
+                    color="warning",
+                ),
+            ]),
             "",
         )
     snap = snapshot_date_from_universe(STATE.raw, None)
@@ -485,7 +591,16 @@ def _run(n_dry, n_save, history, mode_choice):
             last_meta=last_meta,
         )
     except ValueError as exc:
-        return dbc.Alert(f"Konfigurationsfehler: {exc}", color="danger"), ""
+        return (
+            html.Div([
+                page_title(
+                    "Modellportfolio",
+                    "Regelbasierte Portfoliokonstruktion (Composite v2).",
+                ),
+                dbc.Alert(f"Konfigurationsfehler: {exc}", color="danger"),
+            ]),
+            "",
+        )
 
     if mode is not None:
         # Manueller Modus-Override wird protokolliert (Spec 7.1).

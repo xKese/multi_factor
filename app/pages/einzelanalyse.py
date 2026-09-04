@@ -1125,7 +1125,7 @@ def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
             ],
             className="ms-dash-section",
         ),
-        html.Div(badges, className="d-flex gap-2 flex-wrap mb-2"),
+        html.Div(badges, className="ms-badge-row"),
         *card_rows,
     ]
     return html.Div(children, className="mb-3")
