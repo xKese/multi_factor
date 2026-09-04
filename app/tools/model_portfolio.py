@@ -97,6 +97,7 @@ def _exposures_lines(
             uni.get("region", pd.Series(dtype=str)).dropna().unique()
         ),
         asof=snap,
+        universe=uni,
     )
     for dim, bm in (("sector", benchmark.sector), ("region", benchmark.region)):
         if dim not in joined.columns:

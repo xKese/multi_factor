@@ -238,3 +238,36 @@ def test_cli_manual_mapping_saved(env, tmp_path, monkeypatch):
     assert rc == 0
     mapping = av_store.load_av_mapping("SAP")
     assert mapping == {"av_symbol": "SAP.DEX", "currency": "EUR", "confirmed": True}
+
+
+def test_benchmark_sector_weights_source():
+    """Die aktive Sektorallokation folgt pc_benchmark_source: 'universe' =
+    marktkapitalisierungsgewichtete Universums-Anteile, 'static' =
+    ACWI-Dict aus den Einstellungen; ohne Universum Fallback auf static."""
+    from app.core.config import Settings
+    from app.core.risk_report import _benchmark_sector_weights
+
+    scored = pd.DataFrame(
+        {
+            "uid": ["A", "B", "C"],
+            "sector": ["Tech", "Tech", "Health"],
+            "market_cap": [600.0, 200.0, 200.0],
+        }
+    )
+
+    s = Settings()
+    s.pc_benchmark_source = "universe"
+    weights, quelle = _benchmark_sector_weights(s, scored)
+    assert quelle == "universe"
+    assert weights["Tech"] == pytest.approx(0.8)
+    assert weights["Health"] == pytest.approx(0.2)
+
+    # Ohne Universum → statische ACWI-Gewichte.
+    weights_none, quelle_none = _benchmark_sector_weights(s, None)
+    assert quelle_none == "static"
+    assert weights_none == s.risk_benchmark_sector_weights
+
+    s.pc_benchmark_source = "static"
+    weights_static, quelle_static = _benchmark_sector_weights(s, scored)
+    assert quelle_static == "static"
+    assert weights_static == s.risk_benchmark_sector_weights

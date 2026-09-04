@@ -737,12 +737,34 @@ automatisches Entfernen; (7) unter `pc_min_n` → Fehler-Diagnose,
 Zielportfolio trotzdem ausgegeben. Das Modell **verkauft nie wegen einer
 Bandbreite** (Pufferzone hat Vorrang, Verletzung nur als Warnung).
 
-Benchmark-Gewichte: Sektoren aus `Settings.risk_benchmark_sector_weights`
-mit Stand `risk_benchmark_sector_weights_asof`; Regionen aus der Tabelle
-`risk_benchmark_region_weights` (`region`, `weight`, `asof`;
-Regionsnamen exakt wie Koyfin-Spalte `region`, unbekannte Regionen
-Benchmark 0 + Diagnose). Quelle fehlt oder älter als 120 Tage
-(`pc_benchmark_max_age_days`) → Band ausgesetzt + Warnung.
+Benchmark-Gewichte (`pc_benchmark_source`, Default `"universe"`):
+
+- **`"universe"`:** Sektor- und Regionsgewichte = marktkapitalisierungs-
+  gewichtete Anteile der **Gesamtheit des Daten-Imports** (alle Zeilen,
+  nicht nur eligible), bei jedem Import neu berechnet — keine manuelle
+  Pflege, kein Staleness-Check. Titel ohne Marktkapitalisierung zählen
+  mit Gewicht 0 (Info); ganz ohne Marktkapitalisierungen wird
+  gleichgewichtet (Warnung).
+- **`"static"`:** Sektoren aus `Settings.risk_benchmark_sector_weights`
+  mit Stand `risk_benchmark_sector_weights_asof`; Regionen aus der Tabelle
+  `risk_benchmark_region_weights` (`region`, `weight`, `asof`;
+  Regionsnamen exakt wie Koyfin-Spalte `region`, unbekannte Regionen
+  Benchmark 0 + Diagnose). Quelle fehlt oder älter als 120 Tage
+  (`pc_benchmark_max_age_days`) → Band ausgesetzt + Warnung.
+
+Die Ex-ante-TE-Kontrolle (12.4) rechnet unabhängig von dieser Quelle
+weiterhin gegen die ACWI-Kurszeitreihe. Die **aktive Sektorallokation des
+Risikomoduls** (`/risiko`, Report-Abschnitt 4) folgt derselben Quelle
+(`pc_benchmark_source`), damit beide Seiten gegen dieselbe Benchmark
+vergleichen; TE/MCTE/Szenarien bleiben ACWI-basiert.
+
+Bandprüfung bei der Kandidaten-Aufnahme: Geprüft wird nur der Sektor bzw.
+die Region des Kandidaten — die Gewichte aller anderen Gruppen können
+durch eine Aufnahme nur sinken (Verwässerung), eine bestehende Verletzung
+aus der Pufferzone blockiert Zukäufe in anderen Sektoren also nicht.
+Solange das Portfolio weniger als `1/pc_weight_cap` Titel hat, ist ein
+Band mathematisch unerfüllbar und wird nicht geprüft; verbleibende
+Verletzungen des finalen Portfolios werden als Warnung ausgewiesen.
 
 ### 12.3 Gewichtung (`compute_weights`, Spec 6.1–6.2)
 
@@ -879,7 +901,11 @@ Rangänderungen > 30 Perzentilpunkte, Sektorverteilung der Top-35).
 - **Faktor-Timing-Active-Mapping:** Die v1-Faktoren decken v2 nicht 1:1 —
   im Modus `active` werden Value/Quality/Momentum taktisch ersetzt,
   Investment behält sein strategisches Gewicht (Renormierung auf 1,0).
-- **ACWI-Sektorgewichte mit `asof` statt Tabelle:** Die Sektorgewichte bleiben
-  ein Settings-Dict; der 120-Tage-Staleness-Check läuft über das Feld
-  `risk_benchmark_sector_weights_asof`. Die Regionsgewichte liegen dagegen in
-  der Tabelle `risk_benchmark_region_weights`.
+- **Benchmark-Quelle „universe" als Default:** Sektor-/Regions-Bandbreiten
+  und Exposures vergleichen gegen das eigene, marktkapitalisierungs-
+  gewichtete Universum (Abschnitt 12.2) — die Benchmark ändert sich also
+  mit jedem Import. Die statische ACWI-Variante bleibt wählbar
+  (`pc_benchmark_source = "static"`); dort gilt: Sektorgewichte als
+  Settings-Dict mit `risk_benchmark_sector_weights_asof` (120-Tage-Check),
+  Regionsgewichte in der Tabelle `risk_benchmark_region_weights`. Die
+  TE-Kontrolle rechnet in beiden Fällen gegen die ACWI-Kurszeitreihe.

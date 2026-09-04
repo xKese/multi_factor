@@ -534,6 +534,29 @@ def _pc_card() -> dbc.Card:
             dbc.CardHeader("Portfoliokonstruktion"),
             dbc.CardBody(
                 [
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Label("Benchmark-Quelle (Bänder/Exposures)"), md=7),
+                            dbc.Col(
+                                dbc.Select(
+                                    id="pc-benchmark-source",
+                                    options=[
+                                        {
+                                            "label": "Universum (marktkap.-gew.)",
+                                            "value": "universe",
+                                        },
+                                        {
+                                            "label": "Statisch (ACWI, manuell)",
+                                            "value": "static",
+                                        },
+                                    ],
+                                    value=s.pc_benchmark_source,
+                                ),
+                                md=5,
+                            ),
+                        ],
+                        className="mb-2",
+                    ),
                     *rows,
                     dbc.Row(
                         [
@@ -991,6 +1014,7 @@ def _parse_months(raw: str | None, fallback: list[int]) -> list[int]:
     State({"type": "pc-set", "index": ALL}, "id"),
     State("v2-scoring-version", "value"),
     State("v2-timing-mode", "value"),
+    State("pc-benchmark-source", "value"),
     State("pc-rebalance-months", "value"),
     State("pc-interim-months", "value"),
     State("pc-sector-asof", "value"),
@@ -998,8 +1022,8 @@ def _parse_months(raw: str | None, fallback: list[int]) -> list[int]:
     prevent_initial_call=True,
 )
 def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
-             scoring_version, timing_mode, rebalance_months, interim_months,
-             sector_asof, region_weights_text):
+             scoring_version, timing_mode, benchmark_source, rebalance_months,
+             interim_months, sector_asof, region_weights_text):
     if not n_clicks:
         raise PreventUpdate
     s = STATE.settings
@@ -1023,6 +1047,7 @@ def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
 
     s.scoring_version = scoring_version or "v2"
     s.factor_timing_mode = timing_mode or "monitor"
+    s.pc_benchmark_source = benchmark_source or "universe"
     s.pc_rebalance_months = _parse_months(
         rebalance_months, defaults.pc_rebalance_months
     )

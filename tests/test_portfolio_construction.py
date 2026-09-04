@@ -146,11 +146,12 @@ def test_fill_zone():
 
 def test_missing_benchmark_weights(monkeypatch):
     """Fehlende/veraltete Benchmark-Tabellen setzen die Restriktion aus,
-    mit Warnung (Test 13)."""
+    mit Warnung (Test 13; Quelle "static")."""
     monkeypatch.setattr(
         persistence, "load_region_weights", lambda: ({}, None)
     )
-    s = _settings(risk_benchmark_sector_weights_asof="")
+    s = _settings(risk_benchmark_sector_weights_asof="",
+                  pc_benchmark_source="static")
     bm = load_benchmark_weights(s)
     assert bm.sector is None
     assert bm.region is None
@@ -160,7 +161,10 @@ def test_missing_benchmark_weights(monkeypatch):
 
     # Veralteter Sektor-Stand (> 120 Tage) → ebenfalls ausgesetzt.
     old = (date.today() - timedelta(days=200)).isoformat()
-    bm_old = load_benchmark_weights(_settings(risk_benchmark_sector_weights_asof=old))
+    bm_old = load_benchmark_weights(
+        _settings(risk_benchmark_sector_weights_asof=old,
+                  pc_benchmark_source="static")
+    )
     assert bm_old.sector is None
 
     # Frische Stände → Restriktionen aktiv; unbekannte Region → Gewicht 0.
@@ -171,7 +175,8 @@ def test_missing_benchmark_weights(monkeypatch):
     )
     fresh = date.today().isoformat()
     bm_ok = load_benchmark_weights(
-        _settings(risk_benchmark_sector_weights_asof=fresh),
+        _settings(risk_benchmark_sector_weights_asof=fresh,
+                  pc_benchmark_source="static"),
         universe_regions=["Europe", "Mars"],
     )
     assert bm_ok.sector is not None
@@ -325,3 +330,96 @@ def test_override_weights_separate():
     model2, effective2, ids2 = apply_overrides(weights, None, Settings(), [])
     pd.testing.assert_series_equal(model2, effective2)
     assert ids2 == {}
+
+
+def test_universe_benchmark_weights():
+    """Benchmark-Quelle "universe": Sektor-/Regionsgewichte sind die
+    marktkapitalisierungsgewichteten Anteile des gesamten Daten-Imports."""
+    from app.core.portfolio_construction import universe_benchmark_weights
+
+    universe = pd.DataFrame(
+        {
+            "uid": ["A", "B", "C", "D"],
+            "sector": ["Tech", "Tech", "Health", "Health"],
+            "region": ["US", "Europe", "US", "Europe"],
+            "market_cap": [600.0, 200.0, 100.0, 100.0],
+        }
+    )
+    bm = universe_benchmark_weights(universe)
+    assert bm.sector is not None and bm.region is not None
+    assert bm.sector["Tech"] == pytest.approx(0.8)
+    assert bm.sector["Health"] == pytest.approx(0.2)
+    assert bm.region["US"] == pytest.approx(0.7)
+    assert bm.region["Europe"] == pytest.approx(0.3)
+    assert any(d.code == "benchmark_universe" for d in bm.diagnostics)
+
+    # Titel ohne Marktkapitalisierung → Gewicht 0 + Info; ohne jede
+    # Marktkapitalisierung → Gleichgewichtung mit Warnung.
+    uni_partial = universe.assign(market_cap=[600.0, np.nan, 100.0, 100.0])
+    bm_partial = universe_benchmark_weights(uni_partial)
+    assert bm_partial.sector["Tech"] == pytest.approx(600 / 800)
+    assert any(
+        d.code == "benchmark_universe_mcap_missing" for d in bm_partial.diagnostics
+    )
+    uni_none = universe.assign(market_cap=np.nan)
+    bm_none = universe_benchmark_weights(uni_none)
+    assert bm_none.sector["Tech"] == pytest.approx(0.5)
+    assert any(
+        d.code == "benchmark_universe_equal_weight" for d in bm_none.diagnostics
+    )
+
+    # load_benchmark_weights nutzt bei Quelle "universe" das Universum und
+    # keinen Staleness-Check; ohne Universum → statischer Fallback + Warnung.
+    s = _settings(pc_benchmark_source="universe")
+    bm_loaded = load_benchmark_weights(s, universe=universe)
+    assert bm_loaded.sector == bm.sector
+    bm_fallback = load_benchmark_weights(s)
+    assert any(
+        d.code == "benchmark_universe_unavailable"
+        for d in bm_fallback.diagnostics
+    )
+
+
+def test_universe_benchmark_in_selection():
+    """Selektion mit Universums-Benchmark: das Band gilt gegen die
+    Universums-Anteile (Ende-zu-Ende über build_model_portfolio)."""
+    from datetime import date as _date
+
+    from app.core.portfolio_construction import build_model_portfolio
+
+    universe = pd.DataFrame(
+        [
+            {"uid": "T1", "sector": "Tech", "region": "US",
+             "zone_v2": "KANDIDAT", "composite_z": 2.0, "composite_pct": 0.95,
+             "volatility_1y": 0.2, "market_cap": 500.0},
+            {"uid": "T2", "sector": "Tech", "region": "US",
+             "zone_v2": "KANDIDAT", "composite_z": 1.5, "composite_pct": 0.9,
+             "volatility_1y": 0.2, "market_cap": 500.0},
+            {"uid": "H1", "sector": "Health", "region": "Europe",
+             "zone_v2": "KANDIDAT", "composite_z": 1.0, "composite_pct": 0.85,
+             "volatility_1y": 0.2, "market_cap": 500.0},
+            {"uid": "H2", "sector": "Health", "region": "Europe",
+             "zone_v2": "KANDIDAT", "composite_z": 0.8, "composite_pct": 0.82,
+             "volatility_1y": 0.2, "market_cap": 500.0},
+        ]
+    )
+    s = _settings(pc_benchmark_source="universe", pc_sector_band=0.55,
+                  pc_region_band=0.55)
+    result = build_model_portfolio(
+        universe, s, {}, mode="full", snapshot_date=_date(2026, 9, 4)
+    )
+    # Benchmark je Sektor 50 %/50 % — mit Band ±55 pp passen alle 4 Titel
+    # (der Aufbau läuft über Zwischenstände mit hohen Einzelgewichten).
+    assert set(result["portfolio"]["uid"]) == {"T1", "T2", "H1", "H2"}
+    assert any(
+        d.code == "benchmark_universe" for d in result["diagnostics"]
+    )
+
+    # Enges Band ±30 pp: Der zweite Tech-Titel würde Tech beim Aufbau auf
+    # 100 % heben (Benchmark 50 %) → übersprungen; Health-Titel passen.
+    s2 = _settings(pc_benchmark_source="universe", pc_sector_band=0.30,
+                   pc_region_band=0.90)
+    result2 = build_model_portfolio(
+        universe, s2, {}, mode="full", snapshot_date=_date(2026, 9, 4)
+    )
+    assert set(result2["portfolio"]["uid"]) == {"T1", "H1", "H2"}
