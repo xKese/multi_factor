@@ -6,6 +6,14 @@
      gezielt Typografie, Farben, Tabellen, Karten, Badges und Navbar.
    ========================================================================== */
 
+/* ACHTUNG: Dieser Token-Satz wird vom M&S-Design-Layer weiter unten
+   (Abschnitt „M&S Brand-Refresh — Forest Green + Gold + Cream") vollständig
+   überschrieben — gleiche Spezifität, die spätere Regel gewinnt. Die Werte
+   hier sind die alte generische Palette (blauer Accent #0B3D91, weiße
+   Flächen) und NICHT das, was im Browser ankommt.
+
+   Neue Tokens ausschließlich im M&S-Block pflegen (Regelwerk R7): jede Regel,
+   die oberhalb jenes Blocks eingefügt wird, arbeitet mit den falschen Werten. */
 :root {
   --ms-bg: #FFFFFF;
   --ms-surface: #F7F7F5;
@@ -724,77 +732,256 @@ hr { border-color: var(--ms-border); opacity: 1; }
 
 /* ---------- dash_table.DataTable ---------- */
 
-.dash-spreadsheet-container .dash-spreadsheet-inner {
+.dash-table-container { font-family: var(--ms-font-sans); }
+
+/* Außenrahmen: eine Hairline, 4 px Radius wie .card im Design */
+.dash-table-container .dash-spreadsheet-inner,
+.dash-table-container .dash-spreadsheet-container {
+  border: none !important;
+  background: transparent !important;
+}
+.dash-table-container > div > .dash-spreadsheet-container {
   border: 1px solid var(--ms-border) !important;
-  border-radius: var(--ms-r-card);
+  border-radius: 4px;
   overflow: hidden;
 }
-.dash-table-container .dash-header,
-.dash-table-container th {
-  background: var(--ms-surface) !important;
+
+/* Kopfzeile — 9 px / 0.18em Tracking, warme Fläche (app.css .toptable thead th) */
+.dash-table-container th,
+.dash-table-container .dash-header {
+  background: var(--ms-surface-alt) !important;
   color: var(--ms-text-muted) !important;
-  font-size: 10px !important;
+  font-size: 9px !important;
   font-weight: 600 !important;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.18em;
+  text-align: left;
+  padding: 10px 12px !important;
+  white-space: nowrap;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
   border-bottom: 1px solid var(--ms-border) !important;
 }
-.dash-table-container td {
+.dash-table-container th.dash-header--sortable { cursor: pointer; }
+.dash-table-container .column-header--sort svg,
+.dash-table-container .column-header--sort {
+  color: var(--ms-text-subtle) !important;
+  opacity: 0.7;
+}
+
+/* Zellen — nur horizontale Hairlines. Keine Vertikalen: das ist der
+   auffälligste Bruch gegenüber dem Design. */
+.dash-table-container td,
+.dash-table-container td.dash-cell {
   background: var(--ms-bg) !important;
   color: var(--ms-text) !important;
-  font-size: 13px !important;
-  border-bottom: 1px solid var(--ms-border) !important;
+  font-size: 12px !important;
+  height: 36px;
+  padding: 0 12px !important;
+  vertical-align: middle;
   font-variant-numeric: tabular-nums;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom: 1px solid var(--ms-border) !important;
 }
+.dash-table-container tr:last-child td { border-bottom: none !important; }
+
+/* Kein Zebra — das Design trennt über Hairlines, nicht über Flächen. */
 .dash-table-container tr:nth-child(even) td {
-  background: var(--ms-surface-alt) !important;
+  background: var(--ms-bg) !important;
 }
 
-/* BUY/SELL linke Border statt Flächenfarbe */
-.dash-table-container td[data-dash-column] {
-  /* Kein globales Styling nötig — Zeilen-Highlight über
-     style_data_conditional + linke Border-Technik */
+/* Hover statt Zebra */
+.dash-table-container tbody tr:hover td,
+.dash-table-container tr:hover td.dash-cell {
+  background: var(--ms-accent-soft) !important;
 }
 
-/* Dash filter row */
-.dash-filter input,
-.dash-table-container input {
+/* Ticker-Spalte: 700, accent-deep, leicht gesperrt (app.css .toptable .tk) */
+.dash-table-container td.column-id-ticker,
+.dash-table-container td.column-id-ticker a {
+  color: var(--ms-accent) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+.dash-table-container td.column-id-ticker a:hover {
+  color: var(--ms-gold) !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Aktive/markierte Zeile: Gold-Innenschiene, wie .toptable tr.active.
+   Bewusst NICHT für Tonwerte (BUY/KANDIDAT) — siehe Regelwerk R4. */
+.dash-table-container tr.row--selected td,
+.dash-table-container td.cell--selected {
+  background: var(--ms-gold-soft) !important;
+  box-shadow: inset 3px 0 0 var(--ms-gold);
+}
+.dash-table-container td.focused,
+.dash-table-container td.cell--selected {
+  outline: none !important;
+}
+
+/* Filterzeile — flach, ohne Bootstrap-Kästchen */
+.dash-table-container .dash-filter,
+.dash-table-container th.dash-filter {
+  background: var(--ms-surface) !important;
+  border-bottom: 1px solid var(--ms-border) !important;
+  padding: 4px 8px !important;
+}
+.dash-table-container .dash-filter input,
+.dash-table-container input:not([type="checkbox"]):not([type="radio"]) {
   background: var(--ms-bg) !important;
   color: var(--ms-text) !important;
   border: 1px solid var(--ms-border) !important;
+  border-radius: 2px !important;
+  font-family: var(--ms-font-sans) !important;
+  font-size: 11px !important;
+  padding: 2px 6px !important;
+  height: 22px;
 }
+.dash-table-container .dash-filter input::placeholder {
+  color: var(--ms-text-subtle) !important;
+  font-style: normal;
+}
+/* Das "Aa"-Toggle der Filterzeile ist im Design nicht vorgesehen */
+.dash-table-container .dash-filter--case { display: none !important; }
 
 /* Pagination */
 .dash-table-container .previous-next-container,
-.dash-table-container .page-number {
+.dash-table-container .page-number,
+.dash-table-container .previous-next-container input {
   color: var(--ms-text-muted) !important;
-  font-size: 12px;
+  font-size: 11px !important;
+  letter-spacing: 0.04em;
 }
-
-/* Export-Button (XLSX) */
-.dash-spreadsheet-container .export {
-  background: var(--ms-bg) !important;
-  color: var(--ms-text-muted) !important;
+.dash-table-container .previous-next-container button {
+  background: transparent !important;
   border: 1px solid var(--ms-border) !important;
-  border-radius: var(--ms-r-card) !important;
-  padding: 4px 12px !important;
-  font-family: var(--ms-font-sans) !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-  margin-bottom: var(--ms-sp-2);
+  border-radius: 2px !important;
+  color: var(--ms-text-muted) !important;
+  padding: 2px 8px !important;
 }
-.dash-spreadsheet-container .export:hover {
+.dash-table-container .previous-next-container button:hover:not(:disabled) {
   color: var(--ms-text) !important;
   border-color: var(--ms-border-strong) !important;
-  background: var(--ms-surface) !important;
 }
+
+/* Export-Button (XLSX) — beide DOM-Varianten abgedeckt */
+.dash-table-container button.export,
+.dash-table-container .export,
+.dash-spreadsheet-container .export {
+  appearance: none;
+  background: transparent !important;
+  color: var(--ms-text-muted) !important;
+  border: 1px solid var(--ms-border) !important;
+  border-radius: 2px !important;
+  padding: 4px 12px !important;
+  font-family: var(--ms-font-sans) !important;
+  font-size: 9px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+  margin: 0 0 10px 0 !important;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.dash-table-container button.export:hover,
+.dash-table-container .export:hover,
+.dash-spreadsheet-container .export:hover {
+  color: var(--ms-gold) !important;
+  border-color: var(--ms-gold) !important;
+  background: var(--ms-gold-soft) !important;
+}
+.dash-table-container button.export:focus-visible,
 .dash-spreadsheet-container .export:focus-visible {
   outline: 2px solid var(--ms-accent);
   outline-offset: 1px;
 }
+
+/* ---------- Panel: Rahmen um jeden Inhaltsblock ---------- */
+/* Im Design sitzt jeder Block (Tabelle, Chart, Liste) in einer Karte mit
+   eigener Überschrift. Neue Bausteine landen derzeit nackt im Seitenfluss. */
+
+.ms-panel {
+  background: var(--ms-surface);
+  border: 1px solid var(--ms-border);
+  border-radius: 4px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  margin-bottom: var(--ms-sp-4, 16px);
+}
+.ms-panel > h3,
+.ms-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-family: var(--ms-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+}
+.ms-panel-head .ms-panel-meta {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--ms-text-muted);
+}
+/* Panel randlos, wenn es nur eine Tabelle trägt (Tabelle bringt eigenen Rahmen) */
+.ms-panel.is-flush { padding: 0; border: none; background: transparent; }
+.ms-panel.is-flush > .ms-panel-head { padding: 0 0 8px; }
+
+/* ---------- Hairline-HTML-Tabelle (Ersatz für dbc striped/hover) ---------- */
+
+.ms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-text);
+}
+.ms-table th {
+  text-align: left;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  padding: 10px 12px;
+  background: var(--ms-surface-alt);
+  border-bottom: 1px solid var(--ms-border);
+  white-space: nowrap;
+}
+.ms-table td {
+  padding: 0 12px;
+  height: 36px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--ms-border);
+}
+.ms-table tbody tr:last-child td { border-bottom: none; }
+.ms-table tbody tr:hover td { background: var(--ms-accent-soft); }
+.ms-table td.num, .ms-table th.num { text-align: right; }
+.ms-table td.num { font-weight: 500; }
+
+/* Bootstrap-Zebra abschalten, wo dbc.Table noch im Einsatz ist */
+.table > tbody > tr:nth-of-type(odd) > *,
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+  background-color: transparent !important;
+  color: var(--ms-text) !important;
+  box-shadow: none !important;
+}
+.table > :not(caption) > * > * { border-bottom-color: var(--ms-border); }
 
 /* ---------- dbc.Table (HTML table) ---------- */
 
@@ -3514,3 +3701,15 @@ hr { border-color: var(--ms-border); opacity: 1; }
   text-decoration: none;
 }
 .ms-data-status-error:hover { text-decoration: underline; }
+
+/* ==========================================================================
+   Spacing-Utilities — ersetzen Inline-marginTop/padding an Layout-Blöcken.
+   Regelwerk R3: Inline-style bleibt berechneter Geometrie vorbehalten
+   (width/height/left in Prozent, Heatmap-Farben); feste Abstände gehören
+   ins Stylesheet.
+   ========================================================================== */
+
+.ms-stack-top { margin-top: 16px; }
+
+/* Leerzustand innerhalb einer Section (statt padding: 16px 0 inline) */
+.ms-section-empty { padding: 16px 0; }

@@ -760,7 +760,7 @@ def _section_head(active_sector: str | None, n_rows: int) -> html.Div:
 def _v2_overview(df: pd.DataFrame) -> html.Div:
     """Composite-v2-Übersicht (primäre Anzeige bei scoring_version = v2)."""
     from app.pages.common import render_table
-    from app.ui.theme import kpi_band, section_header
+    from app.ui.theme import kpi_band, panel, section_header
 
     zones = df.get("zone_v2", pd.Series(dtype=object)).value_counts()
     avg = df.get("composite_score", pd.Series(dtype=float)).dropna().mean()
@@ -776,6 +776,8 @@ def _v2_overview(df: pd.DataFrame) -> html.Div:
              "tone": "warn"},
         ]
     )
+    # ``uid`` bleibt im Frame als Link-Ziel; render_table blendet die Spalte
+    # aus der Ansicht aus (R8).
     cols = [
         c
         for c in (
@@ -804,7 +806,14 @@ def _v2_overview(df: pd.DataFrame) -> html.Div:
         counts = count_by_severity(STATE.v2_diagnostics)
         if counts.get(SEV_ERROR) or counts.get(SEV_WARNING):
             children.append(diagnostics_panel(STATE.v2_diagnostics))
-    children.append(render_table(top, id="dash-v2-table", page_size=20))
+    children.append(
+        panel(
+            "Top-Titel",
+            render_table(top, id="dash-v2-table", page_size=20),
+            meta="Composite v2 · Top 20 nach Score",
+            flush=True,
+        )
+    )
     return html.Div(children, className="mb-3")
 
 

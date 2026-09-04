@@ -29,7 +29,7 @@ from app.core.scoring_v2 import V2_FACTOR_NAMES
 from app.core.signal_events import snapshot_date_from_universe
 from app.core.state import STATE
 from app.pages.common import page_title, render_basic_table, render_table
-from app.ui import fmt_de, section_header
+from app.ui import fmt_de, panel, section_header
 from app.ui.theme import kpi_band
 
 log = logging.getLogger(__name__)
@@ -319,13 +319,10 @@ def _exposures_block(portfolio: pd.DataFrame, universe: pd.DataFrame,
         if bm is None:
             subtitle += " · Benchmark-Restriktion ausgesetzt (siehe Diagnosen)"
         blocks.append(
-            html.Div(
-                [
-                    html.Div(f"{title} vs. Benchmark", className="fw-bold"),
-                    html.Div(subtitle, className="small text-muted mb-1"),
-                    render_basic_table(rows),
-                ],
-                className="mb-3",
+            panel(
+                f"{title} vs. Benchmark",
+                render_basic_table(rows),
+                meta=subtitle,
             )
         )
 
@@ -343,13 +340,10 @@ def _exposures_block(portfolio: pd.DataFrame, universe: pd.DataFrame,
             ]
         )
         blocks.append(
-            html.Div(
-                [
-                    html.Div("Faktor-Exposure (Plausibilisierung)",
-                             className="fw-bold mb-1"),
-                    render_basic_table(rows),
-                ],
-                className="mb-3",
+            panel(
+                "Faktor-Exposure",
+                render_basic_table(rows),
+                meta="Plausibilisierung",
             )
         )
     return html.Div(blocks)
@@ -360,8 +354,11 @@ def _render_result(result: dict, snap: date, universe: pd.DataFrame,
     diags = result["diagnostics"]
     sections = [
         _kpi_header(result["meta"], snap, diags),
-        section_header("Diagnosen", "sortiert nach Schweregrad"),
-        _diagnostics_block(diags),
+        panel(
+            "Diagnosen",
+            _diagnostics_block(diags),
+            meta="sortiert nach Schweregrad",
+        ),
     ]
     if result["portfolio"].empty:
         sections.append(
@@ -374,15 +371,26 @@ def _render_result(result: dict, snap: date, universe: pd.DataFrame,
     else:
         sections.extend(
             [
-                section_header("Zielportfolio", "Export als CSV möglich"),
-                _portfolio_table(
-                    result["portfolio"], universe, result["trades"].trades, current
+                panel(
+                    "Zielportfolio",
+                    _portfolio_table(
+                        result["portfolio"], universe,
+                        result["trades"].trades, current,
+                    ),
+                    meta="Export als CSV möglich",
+                    flush=True,
                 ),
-                section_header("Trade-Liste", "inkl. VERSCHOBEN (Turnover-Budget)"),
-                _trade_table(result["trades"].trades),
-                section_header("Exposures"),
-                _exposures_block(result["portfolio"], universe,
-                                 STATE.settings, snap),
+                panel(
+                    "Trade-Liste",
+                    _trade_table(result["trades"].trades),
+                    meta="inkl. VERSCHOBEN (Turnover-Budget)",
+                    flush=True,
+                ),
+                panel(
+                    "Exposures",
+                    _exposures_block(result["portfolio"], universe,
+                                     STATE.settings, snap),
+                ),
             ]
         )
     return html.Div(sections)
@@ -412,10 +420,8 @@ def _render_stored(snap: date) -> html.Div:
     return html.Div(
         [
             _kpi_header(meta, snap, diags),
-            section_header("Diagnosen (damaliger Lauf)"),
-            _diagnostics_block(diags),
-            section_header("Zielportfolio (historisiert)"),
-            table,
+            panel("Diagnosen (damaliger Lauf)", _diagnostics_block(diags)),
+            panel("Zielportfolio", table, meta="historisierter Lauf", flush=True),
         ]
     )
 
@@ -565,7 +571,14 @@ def _overrides(n_create, n_close, _content, uid, direction, weight, owner,
             "created_at", "expires_at", "status",
         ]
     ].copy()
-    return html.Div(render_basic_table(show), className="mb-3"), status
+    return (
+        panel(
+            "Overrides",
+            render_basic_table(show),
+            meta=f"{len(show)} Einträge",
+        ),
+        status,
+    )
 
 
 register_page(__name__, path="/modellportfolio", name="Modellportfolio",

@@ -1,8 +1,12 @@
-"""Gemeinsam genutzte UI-Helfer (Morningstar-Look)."""
+"""Gemeinsam genutzte UI-Helfer (Morningstar-Look).
+
+Design-Rückführung: Tabellen tragen nur horizontale Hairlines (R1), die
+3-px-Innenschiene ist der ausgewählten Zeile vorbehalten (R4), technische
+Schlüssel wie ``uid`` bleiben unsichtbar (R8).
+"""
 
 from __future__ import annotations
 
-import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import dash_table, html
 from dash.dash_table.Format import Format, Scheme, Sign, Symbol
@@ -63,6 +67,10 @@ _Z_COLS: set[str] = {
     "z_investment",
 }
 
+# Technische Schlüssel: bleiben im DataFrame (Link-Ziele), verschwinden
+# aber aus der Ansicht (R8).
+_HIDDEN_COLS: set[str] = {"uid"}
+
 
 def kpi_card(label: str, value: str, color: str = "primary") -> html.Div:
     """Einzelne KPI-Zelle im Morningstar-Stil (Rückwärtskompat.)."""
@@ -72,17 +80,14 @@ def kpi_card(label: str, value: str, color: str = "primary") -> html.Div:
         "warning": "is-warn",
     }
     value_cls = "ms-kpi-value " + tone_map.get(color, "")
+    # Kein Inline-Rahmen: .ms-kpi-cell bringt Trennlinie und Fläche mit,
+    # sonst zerfällt das durchgehende KPI-Band in Einzelkästchen (R3).
     return html.Div(
         [
             html.Div(label, className="ms-kpi-label"),
             html.Div(value, className=value_cls.strip()),
         ],
         className="ms-kpi-cell",
-        style={
-            "border": "1px solid var(--ms-border)",
-            "borderRadius": "4px",
-            "background": "var(--ms-bg)",
-        },
     )
 
 
@@ -164,7 +169,14 @@ def render_table(
     page_size: int = 25,
 ) -> dash_table.DataTable:
     if columns is None:
-        columns = [_column_def(c) for c in df.columns]
+        # ``uid`` bleibt im Frame (Link-Ziel), erscheint aber nicht als
+        # eigene Spalte (R8) — allerdings nur, wenn ein ``ticker`` die
+        # Identität der Zeile sichtbar trägt. Tabellen, die den Titel
+        # ausschließlich über die uid ausweisen (Trade-Liste,
+        # historisiertes Zielportfolio), behalten die Spalte, sonst
+        # bliebe die Zeile namenlos.
+        hidden = _HIDDEN_COLS if "ticker" in df.columns else set()
+        columns = [_column_def(c) for c in df.columns if c not in hidden]
 
     # Ticker-Spalte zu Markdown-Link auf /einzelanalyse?ticker=<uid> —
     # Link-Ziel ist die uid (eindeutig bei Ticker-Kollisionen), sichtbar
@@ -184,6 +196,9 @@ def render_table(
             for t, u in zip(df["ticker"], targets)
         ]
 
+    # Tonwerte tragen ausschließlich Textfarbe (R4). Die frühere
+    # 3-px-Innenschiene je BUY-/KANDIDAT-Zeile ist entfallen: sie lag auf
+    # nahezu jeder Zeile und blockierte die Gold-Schiene der Auswahl.
     conditional = [
         {
             "if": {
@@ -216,14 +231,6 @@ def render_table(
             },
             "color": "var(--ms-down)",
             "fontWeight": "600",
-        },
-        {
-            "if": {"filter_query": "{recommendation} = 'STRONG BUY'"},
-            "borderLeft": "3px solid var(--ms-up)",
-        },
-        {
-            "if": {"filter_query": "{recommendation} = 'SELL'"},
-            "borderLeft": "3px solid var(--ms-down)",
         },
     ]
 
@@ -260,14 +267,6 @@ def render_table(
                 "column_id": "zone_v2",
             },
             "color": "var(--ms-text-muted)",
-        },
-        {
-            "if": {"filter_query": "{zone_v2} = 'KANDIDAT'"},
-            "borderLeft": "3px solid var(--ms-up)",
-        },
-        {
-            "if": {"filter_query": "{zone_v2} = 'VERKAUFEN'"},
-            "borderLeft": "3px solid var(--ms-down)",
         },
     ]
 
@@ -319,12 +318,18 @@ def render_table(
         # Deutsche Zahlen: ``1.234,56``
         locale_format={"decimal": ",", "group": ".", "grouping": [3]},
         style_table={"overflowX": "auto", "border": "none"},
+        # Nur horizontale Hairlines — alle vier Kanten explizit, weil ein
+        # pauschales "border": "none" die Vertikalen nicht zuverlässig
+        # entfernt (R1).
         style_cell={
             "fontFamily": 'Inter, "Helvetica Neue", system-ui, sans-serif',
-            "fontSize": "13px",
-            "padding": "8px 12px",
+            "fontSize": "12px",
+            "padding": "0 12px",
+            "height": "36px",
             "textAlign": "left",
-            "border": "none",
+            "borderTop": "none",
+            "borderLeft": "none",
+            "borderRight": "none",
             "borderBottom": "1px solid var(--ms-border)",
             "backgroundColor": "var(--ms-bg)",
             "color": "var(--ms-text)",
@@ -333,17 +338,22 @@ def render_table(
             {"if": {"column_type": "numeric"}, "textAlign": "right"},
         ],
         style_header={
-            "backgroundColor": "var(--ms-surface)",
+            "backgroundColor": "var(--ms-surface-alt)",
             "color": "var(--ms-text-muted)",
             "fontWeight": "600",
-            "fontSize": "10px",
+            "fontSize": "9px",
             "textTransform": "uppercase",
-            "letterSpacing": "0.06em",
-            "border": "none",
+            "letterSpacing": "0.18em",
+            "padding": "10px 12px",
+            "borderTop": "none",
+            "borderLeft": "none",
+            "borderRight": "none",
             "borderBottom": "1px solid var(--ms-border)",
         },
         style_filter={
-            "backgroundColor": "var(--ms-surface-alt)",
+            "backgroundColor": "var(--ms-surface)",
+            "borderLeft": "none",
+            "borderRight": "none",
             "borderBottom": "1px solid var(--ms-border)",
         },
         style_data={
@@ -359,11 +369,17 @@ def render_table(
             },
             {
                 "selector": ".dash-cell.column-id-ticker a",
-                "rule": "color: var(--ms-accent); font-weight: 600; text-decoration: none;",
+                "rule": (
+                    "color: var(--ms-accent); font-weight: 700; "
+                    "letter-spacing: 0.02em; text-decoration: none;"
+                ),
             },
             {
                 "selector": ".dash-cell.column-id-ticker a:hover",
-                "rule": "text-decoration: underline;",
+                "rule": (
+                    "color: var(--ms-gold); text-decoration: underline; "
+                    "text-underline-offset: 3px;"
+                ),
             },
         ],
     )
@@ -385,15 +401,40 @@ def format_scored(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def page_title(title: str, subtitle: str | None = None) -> html.Div:
-    """Einheitlicher Seiten-Titel oben auf jeder Page."""
+    """Einheitlicher Seiten-Titel oben auf jeder Page (Serif, R5)."""
     children: list = [html.H1(title, className="ms-page-title")]
     if subtitle:
         children.append(html.Div(subtitle, className="ms-page-subtitle"))
     return html.Div(children)
 
 
-def render_basic_table(df: pd.DataFrame) -> dbc.Table:
-    """Kompakte HTML-Tabelle (z. B. für Info-Zusammenfassungen)."""
-    return dbc.Table.from_dataframe(
-        df, striped=True, hover=True, size="sm", className="mb-0"
+def render_basic_table(df: pd.DataFrame) -> html.Table:
+    """Kompakte HTML-Tabelle im Design-Stil: Hairlines, kein Zebra (R1).
+
+    Ersetzt das frühere ``dbc.Table(striped=True, hover=True)``, dessen
+    Bootstrap-Zebra dem Hairline-Prinzip widerspricht.
+    """
+    numeric = {c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])}
+    head = html.Thead(
+        html.Tr(
+            [
+                html.Th(str(c), className="num" if c in numeric else None)
+                for c in df.columns
+            ]
+        )
     )
+    body = html.Tbody(
+        [
+            html.Tr(
+                [
+                    html.Td(
+                        "-" if pd.isna(v) else str(v),
+                        className="num" if c in numeric else None,
+                    )
+                    for c, v in zip(df.columns, row)
+                ]
+            )
+            for row in df.itertuples(index=False, name=None)
+        ]
+    )
+    return html.Table([head, body], className="ms-table")
