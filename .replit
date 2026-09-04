@@ -43,3 +43,7 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "App"
+
+[userenv]
+
+[userenv.shared]
