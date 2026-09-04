@@ -20,6 +20,7 @@
     <div class="sb-label">Quant-Score</div>
     <div class="sb-big">{{ sidebar.quant.score }}</div>
     {% if sidebar.quant.class_line %}<div class="sb-class">{{ sidebar.quant.class_line }}</div>{% endif %}
+    {% if sidebar.quant.v2_line %}<div class="sb-class">{{ sidebar.quant.v2_line }}</div>{% endif %}
     {{ base.chip(sidebar.delta) }}
   </div>
   {% endif %}

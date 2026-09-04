@@ -46,8 +46,13 @@ def _persist_sector_score_history(filename: str | None = None) -> None:
     if df is None or df.empty:
         return
     try:
-        agg = aggregate_sectors(df)
-        records = aggregates_to_history_records(agg)
+        # v1- und v2-Aggregate persistieren (getrennte History-Levels),
+        # damit beide Anzeige-Versionen konsistente Delta-Reihen haben.
+        records = aggregates_to_history_records(aggregate_sectors(df))
+        if "composite_score" in df.columns:
+            records += aggregates_to_history_records(
+                aggregate_sectors(df, score_col="composite_score")
+            )
         if not records:
             return
         snap = _snapshot_date_from_universe(df, filename)
@@ -248,6 +253,12 @@ def _handle(contents: str | None, filename: str | None):
                 log.warning("Rebalance-Modus-Erkennung beim Import fehlgeschlagen")
             _persist_sector_score_history(filename)
             _persist_signal_history(filename)
+            if STATE.v2_diagnostics:
+                # Leitprinzip Composite v2: keine stillen Fallbacks —
+                # Scoring-Diagnosen direkt nach dem Import anzeigen.
+                from app.ui.theme import diagnostics_panel
+
+                alerts.append(diagnostics_panel(STATE.v2_diagnostics))
             status = html.Div(alerts)
         except Exception as exc:  # noqa: BLE001
             status = dbc.Alert(f"Fehler: {exc}", color="danger")

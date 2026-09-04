@@ -82,6 +82,28 @@ def _classify_accent(classification: str | None) -> str:
     return "#737067"
 
 
+def _classify_accent_v2(classification: str | None) -> str:
+    """Akzentfarbe der v2-Klassen-Kurzformen ("A", "B+", …)."""
+    c = (classification or "").upper()
+    if c == "A":
+        return "#1b5e3a"
+    if c == "B+":
+        return "#1a3d72"
+    if c == "B":
+        return "#3d3a32"
+    return "#737067"
+
+
+def _zone_accent(zone: str | None) -> str:
+    """Print-Farbe je v2-Zone (analog UI-Tokens up/warn/down/muted)."""
+    return {
+        "KANDIDAT": "#1b5e3a",
+        "HALTEN": "#8a6d1d",
+        "VERKAUFEN": "#a8281f",
+        "FILTER": "#737067",
+    }.get(str(zone or ""), "#737067")
+
+
 def _sma_tone(signal: str | None) -> str:
     s = str(signal or "")
     if "GOLDEN" in s.upper():
@@ -114,8 +136,10 @@ def _ret_tone(v: float | None) -> str:
 # Rank, percentiles, thesis
 
 
-def compute_rank(df: pd.DataFrame, ticker: str) -> dict[str, int | None]:
-    """Sektor- und Industrie-Rang nach ``total_score`` für einen Ticker.
+def compute_rank(
+    df: pd.DataFrame, ticker: str, score_col: str = "total_score"
+) -> dict[str, int | None]:
+    """Sektor- und Industrie-Rang nach ``score_col`` für einen Ticker.
 
     Beide Ränge werden absteigend nach Score vergeben (1 = bester). NaN-Scores
     landen am Ende. Wenn der Ticker nicht in der Gruppe ist, wird ``None``
@@ -133,7 +157,7 @@ def compute_rank(df: pd.DataFrame, ticker: str) -> dict[str, int | None]:
     from .uid import rows_by_uid_index
 
     idx = rows_by_uid_index(df, ticker)
-    if len(idx) == 0 or "total_score" not in df.columns:
+    if len(idx) == 0 or score_col not in df.columns:
         return out
     target = df.loc[idx[0]]
 
@@ -144,7 +168,7 @@ def compute_rank(df: pd.DataFrame, ticker: str) -> dict[str, int | None]:
         peers = df[df[kind] == group_val]
         if peers.empty:
             continue
-        ranks = peers["total_score"].rank(ascending=False, method="min", na_option="bottom")
+        ranks = peers[score_col].rank(ascending=False, method="min", na_option="bottom")
         try:
             r = int(ranks.loc[idx[0]])
         except KeyError:
@@ -462,7 +486,57 @@ def build_context(
     vol_1y = _safe_float(r.get("volatility_1y"))
     mcap = _safe_float(r.get("market_cap"))
 
+    # Composite v2 (nur wenn berechnet)
+    v2_ctx: dict[str, Any] | None = None
+    comp_score = _safe_float(r.get("composite_score"))
+    if comp_score is not None:
+        rank_v2 = compute_rank(df, ticker, score_col="composite_score")
+        zone = str(r.get("zone_v2") or "–")
+        cls_v2 = str(r.get("classification_v2") or "–")
+        cov = _safe_float(r.get("data_coverage_v2"))
+        v2_factors: list[dict[str, Any]] = []
+        for key, label in (
+            ("value", "Value"),
+            ("quality", "Quality"),
+            ("momentum", "Momentum"),
+            ("investment", "Investment"),
+        ):
+            z = _safe_float(r.get(f"z_{key}"))
+            fcov = _safe_float(r.get(f"cov_{key}"))
+            v2_factors.append(
+                {
+                    "label": label,
+                    "z": fmt_de(z, 2) if z is not None else "–",
+                    "z_val": z if z is not None else 0.0,
+                    "coverage": (
+                        fmt_de(fcov * 100, 0) + " %" if fcov is not None else "–"
+                    ),
+                }
+            )
+        reasons = r.get("filter_reasons")
+        reasons_str = (
+            ", ".join(str(x) for x in reasons)
+            if isinstance(reasons, (list, tuple)) and len(reasons)
+            else ""
+        )
+        v2_ctx = {
+            "score": fmt_de(comp_score, 1),
+            "composite_z": fmt_de(_safe_float(r.get("composite_z")), 2),
+            "classification": cls_v2,
+            "class_accent": _classify_accent_v2(cls_v2),
+            "zone": zone,
+            "zone_accent": _zone_accent(zone),
+            "coverage": fmt_de(cov * 100, 0) + " %" if cov is not None else "–",
+            "filter_pass": bool(r.get("filter_pass")),
+            "filter_reasons": reasons_str,
+            "trend_warning": bool(r.get("trend_warning")),
+            "factors": v2_factors,
+            "sector_rank": rank_v2["sector_rank"],
+            "sector_total": rank_v2["sector_total"],
+        }
+
     return {
+        "v2": v2_ctx,
         "ticker": str(r.get("ticker") or ticker),
         "name": str(r.get("name") or ""),
         "sector": str(r.get("sector") or ""),

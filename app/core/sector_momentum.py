@@ -261,11 +261,16 @@ def _history_lookup(
 
 
 def _industry_aggregates(
-    stocks: pd.DataFrame, history: pd.DataFrame | None = None
+    stocks: pd.DataFrame,
+    history: pd.DataFrame | None = None,
+    score_col: str = "total_score",
 ) -> list[dict]:
     """Industrie-Sub-Aggregate für eine Sektor-Gruppe."""
     if "industry" not in stocks.columns:
         return []
+    if score_col not in stocks.columns:
+        score_col = "total_score"
+    level = "industry" if score_col == "total_score" else "industry_v2"
     out: list[dict] = []
     for industry, group in stocks.groupby("industry", dropna=True):
         if not industry:
@@ -273,9 +278,9 @@ def _industry_aggregates(
         n = len(group)
         if n == 0:
             continue
-        score_series = pd.to_numeric(group["total_score"], errors="coerce").dropna()
+        score_series = pd.to_numeric(group[score_col], errors="coerce").dropna()
         score = float(score_series.mean()) if not score_series.empty else float("nan")
-        prev_score, _, _ = _history_lookup(history, "industry", str(industry), score)
+        prev_score, _, _ = _history_lookup(history, level, str(industry), score)
         delta = (
             round(float(score - prev_score), 1)
             if pd.notna(score) and pd.notna(prev_score)
@@ -318,6 +323,7 @@ def _industry_aggregates(
                 ),
                 "low_confidence": bool(ind_reasons),
                 "confidence_reasons": ind_reasons,
+                "history_level": level,
             }
         )
     out.sort(
@@ -328,7 +334,9 @@ def _industry_aggregates(
 
 
 def aggregate_sectors(
-    df: pd.DataFrame, history: pd.DataFrame | None = None
+    df: pd.DataFrame,
+    history: pd.DataFrame | None = None,
+    score_col: str = "total_score",
 ) -> list[dict]:
     """Aggregiert das Equity-Universum sektorweise für den Sektor-Momentum-Screen.
 
@@ -346,6 +354,12 @@ def aggregate_sectors(
     """
     if df is None or df.empty or "sector" not in df.columns:
         return []
+    if score_col not in df.columns:
+        score_col = "total_score"
+
+    # v2-Aggregate werden unter eigenen History-Levels geführt, damit sich
+    # v1- und v2-Score-Deltas nie in einer Zeitreihe mischen.
+    level = "sector" if score_col == "total_score" else "sector_v2"
 
     out: list[dict] = []
     for sector, group in df.groupby("sector", dropna=True):
@@ -355,10 +369,10 @@ def aggregate_sectors(
         if n == 0:
             continue
 
-        score_series = pd.to_numeric(group["total_score"], errors="coerce").dropna()
+        score_series = pd.to_numeric(group[score_col], errors="coerce").dropna()
         score = float(score_series.mean()) if not score_series.empty else float("nan")
         prev_raw, spark, hist_meta = _history_lookup(
-            history, "sector", str(sector), score
+            history, level, str(sector), score
         )
         delta = (
             round(float(score - prev_raw), 1)
@@ -436,9 +450,12 @@ def aggregate_sectors(
                 ),
                 "breadth_golden": int(breadth_golden),
                 "spark": spark,
-                "industries": _industry_aggregates(group, history=history),
+                "industries": _industry_aggregates(
+                    group, history=history, score_col=score_col
+                ),
                 "low_confidence": bool(reasons),
                 "confidence_reasons": reasons,
+                "history_level": level,
             }
         )
     return out
@@ -451,7 +468,7 @@ def aggregates_to_history_records(agg: list[dict]) -> list[dict]:
     for s in agg:
         rows.append(
             {
-                "level": "sector",
+                "level": s.get("history_level", "sector"),
                 "key": s["sector"],
                 "score": s.get("score"),
                 "ret_1m": s.get("ret_1m"),
@@ -466,7 +483,7 @@ def aggregates_to_history_records(agg: list[dict]) -> list[dict]:
         for ind in s.get("industries", []) or []:
             rows.append(
                 {
-                    "level": "industry",
+                    "level": ind.get("history_level", "industry"),
                     "key": ind["industry"],
                     "score": ind.get("score"),
                     "ret_1m": None,

@@ -109,37 +109,52 @@ def _te_chart(res: dict) -> dcc.Graph:
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
 
 
-_MCTE_COLUMNS = [
-    {"name": "Titel", "id": "ticker", "presentation": "markdown"},
-    {
-        "name": "Gewicht",
-        "id": "gewicht",
-        "type": "numeric",
-        "format": Format(precision=1, scheme=Scheme.percentage_rounded, nully="-"),
-    },
-    {
-        "name": "CTE",
-        "id": "cte_bp",
-        "type": "numeric",
-        "format": Format(precision=0, scheme=Scheme.fixed, nully="-")
-        .symbol(Symbol.yes)
-        .symbol_suffix(" bp"),
-    },
-    {
-        "name": "MCTE",
-        "id": "mcte",
-        "type": "numeric",
-        "format": Format(precision=1, scheme=Scheme.percentage_rounded, nully="-"),
-    },
-    {
-        "name": "Score",
-        "id": "total_score",
-        "type": "numeric",
-        "format": Format(precision=1, scheme=Scheme.fixed, nully="-"),
-    },
-    {"name": "Empfehlung", "id": "recommendation"},
-    {"name": "SMA-Signal", "id": "sma_signal"},
-]
+def _mcte_columns() -> list[dict]:
+    """Spalten des MCTE-Rankings — Score/Aktion je Scoring-Version."""
+    from app.ui.score_context import is_v2
+
+    if is_v2():
+        score = {
+            "name": "Composite (v2)",
+            "id": "composite_score",
+            "type": "numeric",
+            "format": Format(precision=1, scheme=Scheme.fixed, nully="-"),
+        }
+        action = {"name": "Zone", "id": "zone_v2"}
+    else:
+        score = {
+            "name": "Score",
+            "id": "total_score",
+            "type": "numeric",
+            "format": Format(precision=1, scheme=Scheme.fixed, nully="-"),
+        }
+        action = {"name": "Empfehlung", "id": "recommendation"}
+    return [
+        {"name": "Titel", "id": "ticker", "presentation": "markdown"},
+        {
+            "name": "Gewicht",
+            "id": "gewicht",
+            "type": "numeric",
+            "format": Format(precision=1, scheme=Scheme.percentage_rounded, nully="-"),
+        },
+        {
+            "name": "CTE",
+            "id": "cte_bp",
+            "type": "numeric",
+            "format": Format(precision=0, scheme=Scheme.fixed, nully="-")
+            .symbol(Symbol.yes)
+            .symbol_suffix(" bp"),
+        },
+        {
+            "name": "MCTE",
+            "id": "mcte",
+            "type": "numeric",
+            "format": Format(precision=1, scheme=Scheme.percentage_rounded, nully="-"),
+        },
+        score,
+        action,
+        {"name": "SMA-Signal", "id": "sma_signal"},
+    ]
 
 
 def _mcte_section(res: dict) -> list:
@@ -162,11 +177,12 @@ def _mcte_section(res: dict) -> list:
                 className="ms-page-subtitle",
             )
         )
-    ranking = res["ranking"][
-        [c["id"] for c in _MCTE_COLUMNS if c["id"] in res["ranking"].columns]
+    mcte_columns = [
+        c for c in _mcte_columns() if c["id"] in res["ranking"].columns
     ]
+    ranking = res["ranking"][[c["id"] for c in mcte_columns]]
     children.append(
-        render_table(ranking, columns=_MCTE_COLUMNS, id="risk-mcte-table")
+        render_table(ranking, columns=mcte_columns, id="risk-mcte-table")
     )
     if not res["sektor_cte"].empty:
         sektor = res["sektor_cte"].copy()

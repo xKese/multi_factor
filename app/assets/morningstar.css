@@ -3436,3 +3436,81 @@ hr { border-color: var(--ms-border); opacity: 1; }
   .ms-agent-pipe-grid { grid-template-columns: repeat(2, 1fr); }
   .ms-agent-cards { grid-template-columns: 1fr; }
 }
+
+/* ── Composite v2: Zonen & Diagnosen ─────────────────────────────────── */
+
+/* Zonen-Chips (KANDIDAT/HALTEN/VERKAUFEN/FILTER) — analog .ms-badge.is-* */
+.ms-zone-kandidat  { color: var(--ms-up); }
+.ms-zone-halten    { color: var(--ms-warn); }
+.ms-zone-verkaufen { color: var(--ms-down); }
+.ms-zone-filter    { color: var(--ms-text-muted); }
+.ms-zone-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--ms-border-strong);
+  border-radius: var(--ms-r-badge);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.ms-zone-chip.ms-zone-kandidat  { border-color: var(--ms-up);   background: var(--ms-up-soft); }
+.ms-zone-chip.ms-zone-halten    { border-color: var(--ms-warn); background: var(--ms-warn-soft); }
+.ms-zone-chip.ms-zone-verkaufen { border-color: var(--ms-down); background: var(--ms-down-soft); }
+.ms-zone-chip.ms-zone-filter    { border-color: var(--ms-border-strong); background: var(--ms-surface-alt); }
+
+/* Diagnoseliste (Composite v2 / Portfoliokonstruktion) */
+.ms-diag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ms-diag-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 4px 8px;
+  border-left: 3px solid var(--ms-border-strong);
+  background: var(--ms-surface);
+}
+.ms-diag-row.ms-diag-fehler  { border-left-color: var(--ms-down); }
+.ms-diag-row.ms-diag-warnung { border-left-color: var(--ms-warn); }
+.ms-diag-row.ms-diag-info    { border-left-color: var(--ms-info); }
+.ms-diag-sev {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.ms-diag-fehler  .ms-diag-sev { color: var(--ms-down); }
+.ms-diag-warnung .ms-diag-sev { color: var(--ms-warn); }
+.ms-diag-info    .ms-diag-sev { color: var(--ms-info); }
+.ms-diag-row a {
+  color: var(--ms-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.ms-diag-row a:hover { text-decoration: underline; }
+
+/* Kopfzeilen-Datenstatus: Scoring-Version + Fehlerhinweis */
+.ms-data-status-version {
+  color: var(--ms-text-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.ms-data-status-error {
+  color: var(--ms-down);
+  font-weight: 600;
+  text-decoration: none;
+}
+.ms-data-status-error:hover { text-decoration: underline; }

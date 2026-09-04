@@ -26,6 +26,27 @@ Abgeschlossen (nicht mehr hier):
 
 ---
 
+## Scoring v2 — Design-Integration (erledigt, Rest offen)
+
+Erledigt (siehe Git-Historie): v2-Labels/Formatierung im Design-System
+(`labels.py`, `formatters.py`, `common.py`), Zonen-/Klassen-/Action-Farben
+(CSS `ms-zone-*`/`ms-diag-*` + `style_data_conditional`), Diagnose-Panel
+(`diagnostics_panel`) auf Daten-Import/Dashboard/Modellportfolio +
+Kopfzeilen-Chip mit Scoring-Version, v2-Primäranzeige auf Dashboard-Hero,
+Einzelanalyse-Hero, SMA-Signale, Portfolios, Risiko, Sektor-Momentum
+(getrennte v2-History-Levels), Agenten-Analyse (Live-Quant-Badge),
+Perzentil-Hilfe/Anleitung, Factsheet-PDF-v2-Sektion, README.
+
+Offen:
+- **Zonen-Übergangs-Historie**: kleine Zeitreihe „Zone je Titel über
+  Snapshots" (PIT-Archiv vorhanden, `koyfin_universe_history`) — z. B.
+  Zonen-Wechsel-Badge in der Einzelanalyse.
+- **Sektor-Momentum v2-Sparklines**: Die v2-Delta-Reihe (`sector_v2`-Level
+  in `sector_score_history`) baut sich erst ab dem nächsten Import auf;
+  bis dahin zeigen Delta/Spark im v2-Modus „–".
+- **Agenten-PDF**: v2-Kontext erscheint als Zusatzzeile; eine eigene
+  v2-Kennzahlen-Sektion (Faktor-Z je Agent-Report) wäre denkbar.
+
 ## Allgemeine offene Punkte
 
 - **Responsives Verhalten < 1024 px** ist nicht getestet. KPI-Band hat

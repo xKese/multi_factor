@@ -204,6 +204,145 @@ def _hero(df: pd.DataFrame) -> html.Div:
     )
 
 
+def _hero_v2(df: pd.DataFrame) -> html.Div:
+    """Quote-Hero der Composite-v2-Primäranzeige."""
+    from app.ui.score_context import class_of_score
+
+    n = len(df)
+    zones = df.get("zone_v2", pd.Series(dtype=object)).value_counts()
+    n_kand = int(zones.get("KANDIDAT", 0))
+    n_filter = int(zones.get("FILTER", 0))
+    n_eligible = n - n_filter
+    avg_score = float(df["composite_score"].dropna().mean())
+    cls = class_of_score(avg_score)
+    pct_eligible = (n_eligible / max(n, 1)) * 100
+    stand = _stand_str(df)
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(
+                        f"Universum · Stand {stand}",
+                        className="ms-hero-eyebrow",
+                    ),
+                    html.H1("Multi-Faktor Übersicht", className="ms-hero-title"),
+                    html.P(
+                        f"Ein ruhiger Blick auf {fmt_int(n)} Aktien – "
+                        "Composite v2, vier Faktoren, eine Sicht.",
+                        className="ms-hero-subhead",
+                    ),
+                    html.Div(
+                        [
+                            html.Span([html.Strong(fmt_int(n)), " Aktien geprüft"]),
+                            html.Span("·", className="ms-sep"),
+                            html.Span([
+                                html.Strong(fmt_int(n_eligible)),
+                                f" Filter bestanden ({fmt_de(pct_eligible, 0)} %)",
+                            ]),
+                            html.Span("·", className="ms-sep"),
+                            html.Span([html.Strong(fmt_int(n_kand)), " Kandidaten"]),
+                            html.Span("·", className="ms-sep"),
+                            html.Span([
+                                html.Strong(fmt_int(zones.get("VERKAUFEN", 0))),
+                                " Verkaufen",
+                            ]),
+                        ],
+                        className="ms-hero-meta",
+                    ),
+                ]
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Span(fmt_de(avg_score, 1)),
+                            html.Span(" / 100", className="ms-score-suf"),
+                        ],
+                        className="ms-score-num",
+                    ),
+                    html.Div(
+                        f"Ø {cls['code']} – {cls['label']}",
+                        className="ms-score-class",
+                    ),
+                    html.Div(
+                        [
+                            html.Span(["Kandidat ab ", html.Strong("Perzentil 80")]),
+                            html.Span(["Verkauf unter ", html.Strong("66,7")]),
+                        ],
+                        className="ms-score-ctx",
+                    ),
+                ],
+                className="ms-hero-score",
+            ),
+        ],
+        className="ms-hero",
+    )
+
+
+def _zone_distribution(df: pd.DataFrame) -> html.Div:
+    """Zonen-Verteilung (v2) als gestapelter Balken — analog zur
+    v1-Empfehlungs-Verteilung, gleiche Segmentklassen (Farbwelt)."""
+    zones = df.get("zone_v2", pd.Series(dtype=object)).value_counts()
+    n_kand = int(zones.get("KANDIDAT", 0))
+    n_halt = int(zones.get("HALTEN", 0))
+    n_verk = int(zones.get("VERKAUFEN", 0))
+    n_filt = int(zones.get("FILTER", 0))
+    qualified = n_kand + n_halt + n_verk
+
+    def _pct(v: int) -> float:
+        return (v / qualified) * 100 if qualified else 0.0
+
+    def _seg(v: int, klass: str, label: str) -> html.Div:
+        width = _pct(v)
+        text = f"{v} {label}" if v > 8 else ""
+        return html.Div(
+            text,
+            className=f"ms-rec-seg is-{klass}",
+            style={"width": f"{width}%"},
+        )
+
+    def _leg(v: int, klass: str, label: str) -> html.Span:
+        return html.Span(
+            [html.Span(className="ms-rl-sw"), f"{label} ", html.Strong(fmt_int(v))],
+            className=f"ms-rl-it is-{klass}",
+        )
+
+    return html.Div(
+        [
+            html.H3(
+                [
+                    "Zonen-Verteilung (Composite v2) ",
+                    html.Span(
+                        f"{fmt_int(qualified)} eligible Titel · "
+                        f"{fmt_int(n_filt)} ausgefiltert",
+                        className="ms-card-h-meta",
+                    ),
+                ],
+                className="ms-card-h",
+            ),
+            html.Div(
+                [
+                    _seg(n_kand, "strong", "KANDIDAT"),
+                    _seg(n_halt, "hold", "HALTEN"),
+                    _seg(n_verk, "sell", "VERKAUFEN"),
+                ],
+                className="ms-rec-bar",
+            ),
+            html.Div(
+                [
+                    _leg(n_kand, "strong", "Kandidat"),
+                    _leg(n_halt, "hold", "Halten"),
+                    _leg(n_verk, "sell", "Verkaufen"),
+                    _leg(n_filt, "fail", "Filter"),
+                ],
+                className="ms-rec-legend",
+            ),
+        ],
+        className="ms-card ms-rec-card",
+    )
+
+
 def _regime_strip(df: pd.DataFrame) -> html.Div:
     """Markt-Regime aus Faktor-Mittelwerten ableiten (heuristisch)."""
     fac_means = []
@@ -651,19 +790,22 @@ def _v2_overview(df: pd.DataFrame) -> html.Div:
         .head(20)[cols]
         .copy()
     )
-    if "data_coverage_v2" in top.columns:
-        top["data_coverage_v2"] = (top["data_coverage_v2"] * 100).round(0)
-    return html.Div(
-        [
-            section_header(
-                "Composite v2",
-                "Top-Titel nach Composite-Score · Details auf /modellportfolio",
-            ),
-            band,
-            render_table(top, id="dash-v2-table", page_size=20),
-        ],
-        className="mb-3",
-    )
+    children: list = [
+        section_header(
+            "Composite v2",
+            "Top-Titel nach Composite-Score · Details auf /modellportfolio",
+        ),
+        band,
+    ]
+    if STATE.v2_diagnostics:
+        from app.core.diagnostics import SEV_ERROR, SEV_WARNING, count_by_severity
+        from app.ui.theme import diagnostics_panel
+
+        counts = count_by_severity(STATE.v2_diagnostics)
+        if counts.get(SEV_ERROR) or counts.get(SEV_WARNING):
+            children.append(diagnostics_panel(STATE.v2_diagnostics))
+    children.append(render_table(top, id="dash-v2-table", page_size=20))
+    return html.Div(children, className="mb-3")
 
 
 def layout(**_) -> html.Div:
@@ -697,12 +839,14 @@ def layout(**_) -> html.Div:
         # v2 primär, v1 als aufklappbarer Vergleichsbereich (Spec 11.2).
         return html.Div(
             [
-                _hero(df),
+                _hero_v2(df),
+                _zone_distribution(df),
                 _v2_overview(df),
                 dbc.Accordion(
                     [
                         dbc.AccordionItem(
-                            v1_blocks, title="Scoring v1 (Vergleich)"
+                            [_hero(df), *v1_blocks],
+                            title="Scoring v1 (Vergleich)",
                         )
                     ],
                     start_collapsed=True,

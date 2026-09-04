@@ -16,6 +16,7 @@ from dash import (
     html,
 )
 
+from app.core.diagnostics import SEV_ERROR
 from app.core.state import STATE
 from app.ui import command_palette_layout, fmt_de, register_plotly_templates
 
@@ -328,15 +329,33 @@ def create_app() -> dash.Dash:
                     stand = pd.to_datetime(raw).strftime("%d.%m.%Y")
                 except (ValueError, TypeError):
                     stand = str(raw)
-        return html.Span(
-            [
-                html.Span("Stand ", className="ms-data-status-label"),
-                html.Span(stand or "—", className="ms-data-status-value"),
-                html.Span(" · ", className="ms-data-status-sep"),
-                html.Span(fmt_de(len(df), 0), className="ms-data-status-value"),
-                html.Span(" Aktien", className="ms-data-status-label"),
-            ]
+        children: list = [
+            html.Span("Stand ", className="ms-data-status-label"),
+            html.Span(stand or "—", className="ms-data-status-value"),
+            html.Span(" · ", className="ms-data-status-sep"),
+            html.Span(fmt_de(len(df), 0), className="ms-data-status-value"),
+            html.Span(" Aktien", className="ms-data-status-label"),
+            html.Span(" · ", className="ms-data-status-sep"),
+            html.Span(
+                f"Scoring {STATE.settings.scoring_version}",
+                className="ms-data-status-version",
+            ),
+        ]
+        n_errors = sum(
+            1 for d in STATE.v2_diagnostics if d.severity == SEV_ERROR
         )
+        if n_errors:
+            children += [
+                html.Span(" · ", className="ms-data-status-sep"),
+                html.A(
+                    f"⚠ {fmt_de(n_errors, 0)} Fehler",
+                    href="/daten-import",
+                    className="ms-data-status-error",
+                    title="Composite-v2-Diagnosen mit Schweregrad Fehler — "
+                    "Details auf der Daten-Import-Seite",
+                ),
+            ]
+        return html.Span(children)
 
     return app
 
