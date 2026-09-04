@@ -181,10 +181,11 @@ def build_factor_context(row: pd.Series | dict) -> dict:
     elif isinstance(export_date, str) and export_date:
         fc["as_of"] = export_date
 
-    for key in ("total_score", "piotroski", "altman_z"):
+    for key in ("total_score", "piotroski", "altman_z", "composite_score"):
         if (val := _num(row, key)) is not None:
             fc[key] = val
-    for key in ("classification", "filter_ok", "recommendation"):
+    for key in ("classification", "filter_ok", "recommendation",
+                "classification_v2", "zone_v2"):
         if (val := _txt(row, key)) is not None:
             fc[key] = val
 

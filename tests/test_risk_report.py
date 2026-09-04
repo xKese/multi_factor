@@ -271,3 +271,17 @@ def test_benchmark_sector_weights_source():
     weights_static, quelle_static = _benchmark_sector_weights(s, scored)
     assert quelle_static == "static"
     assert weights_static == s.risk_benchmark_sector_weights
+
+
+def test_v2_report_requires_composite_values():
+    """Der Markdown-Report zeigt v2-Spalten nur, wenn scoring_version = v2
+    UND das Ranking tatsächlich Composite-Werte trägt (join_signals legt
+    die Spalten sonst leer an)."""
+    from app.core.risk_report import _v2_report
+
+    empty = pd.DataFrame({"composite_score": [pd.NA, pd.NA]})
+    filled = pd.DataFrame({"composite_score": [61.5, pd.NA]})
+
+    assert not _v2_report({"scoring_version": "v2", "ranking": empty})
+    assert not _v2_report({"scoring_version": "v1", "ranking": filled})
+    assert _v2_report({"scoring_version": "v2", "ranking": filled})

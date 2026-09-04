@@ -748,8 +748,23 @@ def _indicator_table_card(df: pd.DataFrame, ticker: str, group) -> html.Div:
     )
 
 
+def _z_heat_class(z: float) -> str:
+    """Heatmap-Klasse für einen Faktor-Z-Score (v2, zentriert um 0)."""
+    if z >= 1.0: return "a"
+    if z >= 0.5: return "bp"
+    if z >= 0.0: return "b"
+    if z >= -0.5: return "c"
+    if z >= -1.0: return "d"
+    return "f"
+
+
 def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
-    peers = compute_peers(scored, ticker, n=6, mode=mode)
+    from app.ui.score_context import is_v2
+
+    v2 = is_v2(scored)
+    peers = compute_peers(
+        scored, ticker, n=6, mode=mode, version="v2" if v2 else "v1"
+    )
     if peers.empty:
         # Rahmen/Abstand aus .ms-panel statt Inline-Padding (R3).
         return html.Div(
@@ -763,13 +778,38 @@ def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
         cls = _class_of(float(v))["cls"]
         return html.Span(fmt_de(float(v), 0), className=f"ms-hm is-{cls}")
 
+    def _hm_z(v) -> html.Span:
+        if pd.isna(v):
+            return html.Span("–", className="ms-hm is-f")
+        cls = _z_heat_class(float(v))
+        return html.Span(fmt_de(float(v), 2), className=f"ms-hm is-{cls}")
+
+    if v2:
+        factor_headers = ["Value", "Quality", "Momentum", "Investment"]
+        factor_cols = ["z_value", "z_quality", "z_momentum", "z_investment"]
+        score_col, score_header = "composite_score", "Composite v2"
+        heat = _hm_z
+    else:
+        factor_headers = ["Value", "Quality", "Growth", "Momentum", "Low Vol"]
+        factor_cols = [
+            "value_score", "quality_score", "growth_score",
+            "momentum_score", "lowvol_score",
+        ]
+        score_col, score_header = "total_score", "Score"
+        heat = _hm
+
     rows = []
     self_uid = _resolve_uid(ticker) or ticker
     for _, p in peers.iterrows():
         peer_uid = str(p.get("uid") or p["ticker"])
         is_self = peer_uid == self_uid
-        score = p.get("total_score")
-        score_cls = _class_of(float(score))["cls"] if pd.notna(score) else "f"
+        score = p.get(score_col)
+        if v2:
+            from app.ui.score_context import class_of_score
+
+            score_cls = class_of_score(score)["cls"]
+        else:
+            score_cls = _class_of(float(score))["cls"] if pd.notna(score) else "f"
         ret_12m = p.get("ret_12m")
         ret_str = fmt_percent(float(ret_12m), 1) if pd.notna(ret_12m) else "–"
         ret_cls = "ms-up" if (pd.notna(ret_12m) and float(ret_12m) >= 0) else "ms-down"
@@ -787,11 +827,10 @@ def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
                                className="ms-peer-tk"),
                     ),
                     html.Td(name_cell),
-                    html.Td(_hm(p.get("value_score")),    className="is-num"),
-                    html.Td(_hm(p.get("quality_score")),  className="is-num"),
-                    html.Td(_hm(p.get("growth_score")),   className="is-num"),
-                    html.Td(_hm(p.get("momentum_score")), className="is-num"),
-                    html.Td(_hm(p.get("lowvol_score")),   className="is-num"),
+                    *[
+                        html.Td(heat(p.get(col)), className="is-num")
+                        for col in factor_cols
+                    ],
                     html.Td(
                         html.Span(
                             fmt_de(float(score), 1) if pd.notna(score) else "–",
@@ -814,12 +853,11 @@ def _peer_heatmap(scored: pd.DataFrame, ticker: str, mode: str) -> html.Div:
                     html.Tr([
                         html.Th("Ticker"),
                         html.Th("Name"),
-                        html.Th("Value",    className="is-num"),
-                        html.Th("Quality",  className="is-num"),
-                        html.Th("Growth",   className="is-num"),
-                        html.Th("Momentum", className="is-num"),
-                        html.Th("Low Vol",  className="is-num"),
-                        html.Th("Score",    className="is-num"),
+                        *[
+                            html.Th(h, className="is-num")
+                            for h in factor_headers
+                        ],
+                        html.Th(score_header, className="is-num"),
                         html.Th("12M",      className="is-num"),
                     ])
                 ),
@@ -1089,15 +1127,34 @@ def _agent_section_head(meta_children) -> html.Div:
 
 
 def _current_quant(ticker: str):
-    """(total_score, klassifikations-kurzform) aus dem Universum, sonst None."""
+    """(Primär-Score, Klassifikations-Kurzform) aus dem Universum, sonst None.
+
+    Folgt der aktiven Scoring-Version: v1 ``total_score``, v2
+    ``composite_score`` — konsistent zur Hero-Anzeige der Seite.
+    """
+    from app.ui.score_context import class_of_score, primary_cols
+
     if STATE.scored.empty:
         return None, None
     r = row_by_uid(STATE.scored, ticker)
     if r is None:
         return None, None
+    score = r.get(primary_cols(STATE.scored)["score"])
+    if pd.isna(score):
+        return None, None
+    return float(score), class_of_score(score)["code"]
+
+
+def _current_v1_total(ticker: str) -> float | None:
+    """Aktueller v1-``total_score`` — Vergleichsbasis für persistierte
+    Agent-Reports, deren ``factor_context`` immer den v1-Score trägt."""
+    if STATE.scored.empty:
+        return None
+    r = row_by_uid(STATE.scored, ticker)
+    if r is None:
+        return None
     score = r.get("total_score")
-    cls = _class_of(float(score)) if pd.notna(score) else None
-    return (float(score) if pd.notna(score) else None), (cls["code"] if cls else None)
+    return float(score) if pd.notna(score) else None
 
 
 def _agent_start_state(ticker: str, service_ok: bool, error: str | None) -> html.Div:
@@ -1250,7 +1307,7 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
                 )
             )
 
-        current, _ = _current_quant(ticker)
+        current = _current_v1_total(ticker)
         return (
             html.Div(
                 [

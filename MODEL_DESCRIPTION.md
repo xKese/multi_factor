@@ -485,7 +485,10 @@ historische Szenarien, Faktorschocks, Datenqualität) →
   UNTER SMA-200 (3) > ERMÜDET (4) > SIGNAL NEU (5).
 - **Peers** (`app/core/peers.py`): Vergleichsgruppen aus geschichtetem Pool
   (Industrie → Sektor → Region → Universum); Modi `similar` (euklidische Distanz im
-  5-dimensionalen Faktor-Score-Raum) und `top_score`.
+  Faktor-Raum) und `top_score`. Folgt der aktiven Scoring-Version: v1 im
+  5-dimensionalen Score-Raum (V/Q/G/M/LV, `total_score`), v2 im
+  4-dimensionalen Z-Score-Raum (`z_value`/`z_quality`/`z_momentum`/
+  `z_investment`, `composite_score`).
 - **UID-Logik** (`app/core/uid.py`): kollisionssichere interne Schlüssel — eindeutiger
   Ticker → `uid = ticker`; bei Kollision `TICKER~namens-slug` (z. B. `SAN~sanofi`).
 - **TradingAgents-Integration** (`app/core/agents_client.py`): LLM-Tiefenanalyse per

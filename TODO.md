@@ -35,7 +35,11 @@ Erledigt (siehe Git-Historie): v2-Labels/Formatierung im Design-System
 Kopfzeilen-Chip mit Scoring-Version, v2-Primäranzeige auf Dashboard-Hero,
 Einzelanalyse-Hero, SMA-Signale, Portfolios, Risiko, Sektor-Momentum
 (getrennte v2-History-Levels), Agenten-Analyse (Live-Quant-Badge),
-Perzentil-Hilfe/Anleitung, Factsheet-PDF-v2-Sektion, README.
+Perzentil-Hilfe/Anleitung, Factsheet-PDF-v2-Sektion, README,
+Peer-Vergleich (Einzelanalyse + Factsheet-Comparables im v2-Faktorraum,
+`compute_peers(version=…)`), Risiko-Markdown-Report (Composite/Zone statt
+Score/Empfehlung), Agenten-Startbereich (Primär-Score) und
+`factor_context` mit v2-Feldern.
 
 Offen:
 - **Zonen-Übergangs-Historie**: kleine Zeitreihe „Zone je Titel über
