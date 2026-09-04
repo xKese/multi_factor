@@ -146,7 +146,9 @@ def _ticker_link(ticker, uid=None) -> html.Td:
 def _score_pill(score) -> html.Td:
     if score is None or pd.isna(score):
         return html.Td("–", className="is-num")
-    cls = _class_of(float(score))
+    from app.ui.score_context import class_of_score
+
+    cls = class_of_score(float(score))
     return html.Td(
         html.Span(fmt_de(float(score), 1), className=f"ms-score-pill is-{cls['cls']}"),
         className="is-num",
@@ -158,6 +160,44 @@ def _rec_cell(rec) -> html.Td:
     rec_cls = _REC_CLASS.get(rec, "fail")
     rec_short = "FAIL" if rec == "Filter nicht bestanden" else rec
     return html.Td(html.Span(rec_short, className=f"ms-tt-rec is-{rec_cls}"))
+
+
+_ZONE_CLASS = {
+    "KANDIDAT": "strong",
+    "HALTEN": "hold",
+    "VERKAUFEN": "sell",
+    "FILTER": "fail",
+}
+
+
+def _zone_cell(zone) -> html.Td:
+    zone = str(zone or "–")
+    cls = _ZONE_CLASS.get(zone, "fail")
+    return html.Td(html.Span(zone, className=f"ms-tt-rec is-{cls}"))
+
+
+def _score_col() -> str:
+    from app.ui.score_context import is_v2
+
+    return "composite_score" if is_v2() else "total_score"
+
+
+def _score_cell(r) -> html.Td:
+    return _score_pill(r.get(_score_col()))
+
+
+def _action_cell(r) -> html.Td:
+    from app.ui.score_context import is_v2
+
+    if is_v2():
+        return _zone_cell(r.get("zone_v2"))
+    return _rec_cell(r.get("recommendation"))
+
+
+def _action_header() -> str:
+    from app.ui.score_context import is_v2
+
+    return "Zone" if is_v2() else "Empfehlung"
 
 
 def _signal_chip(sig, is_new=False) -> html.Td:
@@ -316,9 +356,20 @@ def _hero(
     flag_key = "uid" if "uid" in getattr(flags, "columns", []) else "ticker"
     n_flagged = flags[flag_key].nunique() if not flags.empty else 0
 
-    pf_avg = float(view["total_score"].dropna().mean()) if not view.empty else float("nan")
-    uni_avg = float(scored["total_score"].dropna().mean()) if not scored.empty else float("nan")
-    cls = _class_of(pf_avg)
+    from app.ui.score_context import class_of_score
+
+    score_col = _score_col()
+    pf_avg = (
+        float(view[score_col].dropna().mean())
+        if not view.empty and score_col in view.columns
+        else float("nan")
+    )
+    uni_avg = (
+        float(scored[score_col].dropna().mean())
+        if not scored.empty and score_col in scored.columns
+        else float("nan")
+    )
+    cls = class_of_score(pf_avg)
     delta = pf_avg - uni_avg if pd.notna(pf_avg) and pd.notna(uni_avg) else None
 
     meta: list = [
@@ -484,8 +535,8 @@ def _flags_section(view: pd.DataFrame) -> list:
                     _ticker_link(r["ticker"], r.get("uid")),
                     html.Td(str(r.get("name") or "—")),
                     _flag_chips(r["flags"]),
-                    _score_pill(r.get("total_score")),
-                    _rec_cell(r.get("recommendation")),
+                    _score_cell(r),
+                    _action_cell(r),
                     _signal_chip(r.get("sma_signal"), bool(r.get("is_new"))),
                     _phase_chip(r.get("trend_phase")),
                     _since_cell(r),
@@ -503,7 +554,7 @@ def _flags_section(view: pd.DataFrame) -> list:
                             html.Th("Name"),
                             html.Th("Flags"),
                             html.Th("Score", className="is-num"),
-                            html.Th("Empfehlung"),
+                            html.Th(_action_header()),
                             html.Th("Signal"),
                             html.Th("Phase"),
                             html.Th("Seit"),
@@ -573,7 +624,7 @@ def _factor_compare_card(view: pd.DataFrame, scored: pd.DataFrame) -> html.Div:
         [
             html.H3(
                 [
-                    "Faktor-Profil ",
+                    "Faktor-Profil (v1) ",
                     html.Span("Portfolio · Universum", className="ms-card-h-meta"),
                 ],
                 className="ms-card-h",
@@ -584,11 +635,30 @@ def _factor_compare_card(view: pd.DataFrame, scored: pd.DataFrame) -> html.Div:
     )
 
 
+_ZONE_SEGMENTS = [
+    ("KANDIDAT", "strong", "Kandidat"),
+    ("HALTEN", "hold", "Halten"),
+    ("VERKAUFEN", "sell", "Verkaufen"),
+]
+
+
+def _dist_segments() -> tuple[list, str, str]:
+    """(Segmente, Wertespalte, Fail-Wert) der Verteilungsbalken je Version."""
+    from app.ui.score_context import is_v2
+
+    if is_v2():
+        return _ZONE_SEGMENTS, "zone_v2", "FILTER"
+    return _REC_SEGMENTS, "recommendation", "Filter nicht bestanden"
+
+
 def _rec_bar(df: pd.DataFrame) -> html.Div:
+    segments, col, _fail = _dist_segments()
     counts = (
-        df["recommendation"].value_counts() if not df.empty else pd.Series(dtype=int)
+        df[col].value_counts()
+        if not df.empty and col in df.columns
+        else pd.Series(dtype=int)
     )
-    qualified = sum(int(counts.get(rec, 0)) for rec, _, _ in _REC_SEGMENTS)
+    qualified = sum(int(counts.get(rec, 0)) for rec, _, _ in segments)
 
     def _seg(rec: str, klass: str, label: str) -> html.Div:
         v = int(counts.get(rec, 0))
@@ -601,16 +671,19 @@ def _rec_bar(df: pd.DataFrame) -> html.Div:
         )
 
     return html.Div(
-        [_seg(rec, klass, label) for rec, klass, label in _REC_SEGMENTS],
+        [_seg(rec, klass, label) for rec, klass, label in segments],
         className="ms-rec-bar",
     )
 
 
 def _rec_compare_card(view: pd.DataFrame, scored: pd.DataFrame) -> html.Div:
+    _segments, col, fail_value = _dist_segments()
     counts = (
-        view["recommendation"].value_counts() if not view.empty else pd.Series(dtype=int)
+        view[col].value_counts()
+        if not view.empty and col in view.columns
+        else pd.Series(dtype=int)
     )
-    n_fail = int(counts.get("Filter nicht bestanden", 0))
+    n_fail = int(counts.get(fail_value, 0))
     sig = view.get("sma_signal", pd.Series(dtype=str)).astype(str)
     n_bull = int(sig.isin(BULLISH_SIGNALS).sum())
     n_bear = int(sig.isin(BEARISH_SIGNALS).sum())
@@ -624,7 +697,7 @@ def _rec_compare_card(view: pd.DataFrame, scored: pd.DataFrame) -> html.Div:
             ],
             className=f"ms-rl-it is-{klass}",
         )
-        for rec, klass, label in _REC_SEGMENTS
+        for rec, klass, label in _segments
     ]
     legend.append(
         html.Span(
@@ -641,7 +714,11 @@ def _rec_compare_card(view: pd.DataFrame, scored: pd.DataFrame) -> html.Div:
         [
             html.H3(
                 [
-                    "Empfehlungs-Verteilung ",
+                    (
+                        "Zonen-Verteilung (v2) "
+                        if col == "zone_v2"
+                        else "Empfehlungs-Verteilung "
+                    ),
                     html.Span(
                         f"{fmt_int(n_bull)} bullish · {fmt_int(n_bear)} bearish "
                         "im Portfolio",
@@ -672,7 +749,12 @@ def _positions_section(
                 ]
             ),
             html.Div(
-                f"{fmt_int(len(view))} Titel · sortiert nach Gesamt-Score",
+                f"{fmt_int(len(view))} Titel · sortiert nach "
+                + (
+                    "Composite-Score (v2)"
+                    if _score_col() == "composite_score"
+                    else "Gesamt-Score"
+                ),
                 className="ms-meta",
             ),
         ],
@@ -689,7 +771,8 @@ def _positions_section(
             )
         )
     else:
-        data = view.sort_values("total_score", ascending=False, na_position="last")
+        sort_col = _score_col() if _score_col() in view.columns else "total_score"
+        data = view.sort_values(sort_col, ascending=False, na_position="last")
         rows = []
         for _, r in data.iterrows():
             ret_12m = r.get("ret_12m")
@@ -703,9 +786,9 @@ def _positions_section(
                         _ticker_link(r["ticker"], r.get("uid")),
                         html.Td(str(r.get("name") or "—")),
                         html.Td(str(r.get("sector") or "—"), className="ms-tt-muted"),
-                        _score_pill(r.get("total_score")),
+                        _score_cell(r),
                         _mini_factor_bars(r),
-                        _rec_cell(r.get("recommendation")),
+                        _action_cell(r),
                         _signal_chip(r.get("sma_signal"), bool(r.get("is_new"))),
                         _phase_chip(r.get("trend_phase")),
                         _since_cell(r),
@@ -725,8 +808,8 @@ def _positions_section(
                                     html.Th("Name"),
                                     html.Th("Sektor"),
                                     html.Th("Score", className="is-num"),
-                                    html.Th("Faktor-Profil"),
-                                    html.Th("Empfehlung"),
+                                    html.Th("Faktor-Profil (v1)"),
+                                    html.Th(_action_header()),
                                     html.Th("Signal"),
                                     html.Th("Phase"),
                                     html.Th("Seit"),

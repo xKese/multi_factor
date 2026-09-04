@@ -249,7 +249,7 @@ def _dates(analysis: dict) -> tuple[str, str, str]:
     return short, iso, long
 
 
-def _quant_block(fc: dict | None) -> dict | None:
+def _quant_block(fc: dict | None, row: dict | None = None) -> dict | None:
     """Score + Klassenzeile fürs PDF — ``None`` ohne Quant-Kontext."""
     score = (fc or {}).get("total_score")
     if score is None:
@@ -259,9 +259,23 @@ def _quant_block(fc: dict | None) -> dict | None:
     class_line = (
         f"{code.strip()} · {label.strip().upper()}" if label else cls
     ) or None
+    # Aktueller Composite-v2-Stand aus dem Universum (Reports selbst tragen
+    # nur den v1-Kontext des Analysezeitpunkts).
+    v2_line = None
+    comp = (row or {}).get("composite_score")
+    if comp is not None and not (isinstance(comp, float) and pd.isna(comp)):
+        parts = [f"Composite v2 {fmt_de_number(comp, 1)}"]
+        cls_v2 = str((row or {}).get("classification_v2") or "").strip()
+        zone = str((row or {}).get("zone_v2") or "").strip()
+        if cls_v2:
+            parts.append(cls_v2)
+        if zone:
+            parts.append(zone)
+        v2_line = " · ".join(parts)
     return {
         "score": fmt_de_number(score, 1),
         "class_line": class_line,
+        "v2_line": v2_line,
         "cover_line": fmt_de_number(score, 1)
         + (f" · {code.strip()}" if label else ""),
     }
@@ -301,7 +315,7 @@ def build_section_context(
     if analysis.get("provider"):
         meta_parts.append(str(analysis["provider"]))
     rating = analysis.get("rating")
-    quant = _quant_block(fc)
+    quant = _quant_block(fc, row)
     metrics = _metrics(SECTION_METRICS.get(section_key, ()), fc, row)
     sidebar = {
         "rating": {
@@ -351,7 +365,7 @@ def build_full_context(analysis: dict, row: dict | None) -> dict:
     company = _company_name(analysis, fc, row)
     _, date_iso, date_long = _dates(analysis)
     rating = analysis.get("rating")
-    quant = _quant_block(fc)
+    quant = _quant_block(fc, row)
 
     sections = []
     for i, (key, title, role) in enumerate(section_list, start=1):

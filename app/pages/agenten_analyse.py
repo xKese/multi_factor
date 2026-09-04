@@ -162,7 +162,9 @@ def _universe_tag(symbol: str) -> tuple[str, bool]:
             # zuzuordnen — kein Quant-Score anzeigen statt eines falschen.
             return "Im Universum · mehrdeutig", True
         if not row.empty:
-            score = row.iloc[0].get("total_score")
+            from app.ui.score_context import primary_cols
+
+            score = row.iloc[0].get(primary_cols(STATE.scored)["score"])
             if pd.notna(score):
                 return (
                     f"Im Universum · Quant {f'{float(score):.1f}'.replace('.', ',')}",

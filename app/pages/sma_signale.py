@@ -116,8 +116,10 @@ SIGNAL_COLS = [
     "name",
     "sector",
     "total_score",
+    "composite_score",
     "filter_ok",
     "recommendation",
+    "zone_v2",
     "sma_signal",
     "trend_phase",
     "is_new",
@@ -142,7 +144,9 @@ WATCH_COLS = [
     "sma_200",
     "sma_gap",
     "total_score",
+    "composite_score",
     "recommendation",
+    "zone_v2",
 ]
 
 RANK_TOP_N = 20
@@ -247,8 +251,11 @@ def _build_signals(
 
     signals = format_scored(filtered).copy()
     signals["priority"] = signals["sma_signal"].map(PRIORITY)
+    from app.ui.score_context import primary_cols
+
+    score_col = primary_cols(signals)["score"]
     signals = signals.sort_values(
-        ["priority", "total_score"], ascending=[True, False]
+        ["priority", score_col], ascending=[True, False]
     )
     cols = [c for c in SIGNAL_COLS if c in signals.columns]
     return signals[cols]
@@ -569,7 +576,9 @@ def _ticker_link(ticker, uid=None) -> html.Td:
 def _score_pill(score) -> html.Td:
     if score is None or pd.isna(score):
         return html.Td("–", className="is-num")
-    cls = _class_of(float(score))
+    from app.ui.score_context import class_of_score
+
+    cls = class_of_score(float(score))
     return html.Td(
         html.Span(fmt_de(float(score), 1), className=f"ms-score-pill is-{cls['cls']}"),
         className="is-num",
@@ -581,6 +590,44 @@ def _rec_cell(rec) -> html.Td:
     rec_cls = _REC_CLASS.get(rec, "fail")
     rec_short = "FAIL" if rec == "Filter nicht bestanden" else rec
     return html.Td(html.Span(rec_short, className=f"ms-tt-rec is-{rec_cls}"))
+
+
+_ZONE_CLASS = {
+    "KANDIDAT": "strong",
+    "HALTEN": "hold",
+    "VERKAUFEN": "sell",
+    "FILTER": "fail",
+}
+
+
+def _zone_cell(zone) -> html.Td:
+    """Zonen-Chip (Composite v2) in der Signaltabelle."""
+    zone = str(zone or "–")
+    cls = _ZONE_CLASS.get(zone, "fail")
+    return html.Td(html.Span(zone, className=f"ms-tt-rec is-{cls}"))
+
+
+def _action_header() -> str:
+    from app.ui.score_context import is_v2
+
+    return "Zone" if is_v2() else "Empfehlung"
+
+
+def _score_cell(r) -> html.Td:
+    """Primär-Score-Pill (v1 Gesamt-Score oder Composite v2)."""
+    from app.ui.score_context import is_v2
+
+    col = "composite_score" if is_v2() else "total_score"
+    return _score_pill(r.get(col))
+
+
+def _action_cell(r) -> html.Td:
+    """Empfehlung (v1) bzw. Zone (v2) — Primäranzeige."""
+    from app.ui.score_context import is_v2
+
+    if is_v2():
+        return _zone_cell(r.get("zone_v2"))
+    return _rec_cell(r.get("recommendation"))
 
 
 def _signal_chip(sig, is_new=False) -> html.Td:
@@ -648,9 +695,9 @@ def _signals_table(table_df: pd.DataFrame, limit: int) -> list:
                     _ticker_link(r["ticker"], r.get("uid")),
                     html.Td(str(r.get("name") or "—")),
                     html.Td(str(r.get("sector") or "—"), className="ms-tt-muted"),
-                    _score_pill(r.get("total_score")),
+                    _score_cell(r),
                     html.Td(filter_ok, className=filter_cls),
-                    _rec_cell(r.get("recommendation")),
+                    _action_cell(r),
                     _signal_chip(r.get("sma_signal"), bool(r.get("is_new"))),
                     _phase_chip(r.get("trend_phase")),
                     _since_cell(r),
@@ -672,7 +719,7 @@ def _signals_table(table_df: pd.DataFrame, limit: int) -> list:
                             html.Th("Sektor"),
                             html.Th("Score", className="is-num"),
                             html.Th("Filter"),
-                            html.Th("Empfehlung"),
+                            html.Th(_action_header()),
                             html.Th("Signal"),
                             html.Th("Phase"),
                             html.Th("Seit"),
@@ -853,7 +900,7 @@ def _ranking_section(df: pd.DataFrame, lens: str) -> list:
                         className="is-num ms-tt-muted",
                     ),
                     d52_cell,
-                    _score_pill(r.get("total_score")),
+                    _score_cell(r),
                     _signal_chip(r.get("sma_signal")),
                 ]
             )
@@ -956,8 +1003,8 @@ def _watchlist_section(df: pd.DataFrame, lens: str) -> list:
                 html.Td(_fmt_num(r.get("sma_50")), className="is-num ms-tt-muted"),
                 html.Td(_fmt_num(r.get("sma_200")), className="is-num ms-tt-muted"),
                 _dist_cell(r.get("sma_gap")),
-                _score_pill(r.get("total_score")),
-                _rec_cell(r.get("recommendation")),
+                _score_cell(r),
+                _action_cell(r),
             ]
         )
         rows.append(html.Tr(cells))
@@ -982,7 +1029,7 @@ def _watchlist_section(df: pd.DataFrame, lens: str) -> list:
             html.Th("SMA-200", className="is-num"),
             html.Th("Gap", className="is-num"),
             html.Th("Score", className="is-num"),
-            html.Th("Empfehlung"),
+            html.Th(_action_header()),
         ]
     )
 

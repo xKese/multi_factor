@@ -506,3 +506,48 @@ body {
   padding-top: 6px;
   border-top: 1px solid #e5e2d9;
 }
+
+/* ── Composite v2 ─────────────────────────────────────────────────── */
+.fs-v2-section {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e5e2d9;
+  border-radius: 6px;
+  background: #faf8f2;
+}
+.fs-v2-grid {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.fs-v2-score { min-width: 200px; }
+.fs-v2-num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.fs-v2-badges { margin: 4px 0; }
+.fs-v2-badges .fs-class-badge { margin-right: 6px; }
+.fs-v2-meta {
+  font-size: 9px;
+  color: #737067;
+  margin-top: 2px;
+}
+.fs-v2-warn {
+  font-size: 9px;
+  color: #a8281f;
+  font-weight: 600;
+  margin-top: 3px;
+}
+.fs-v2-factors { flex: 1; }
+.fs-v2-factor-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid #eeece4;
+  font-size: 10px;
+}
+.fs-v2-factor-row .fs-factor-label { width: 80px; }
+.fs-v2-z { font-weight: 600; width: 70px; }
+.fs-v2-cov { color: #737067; }

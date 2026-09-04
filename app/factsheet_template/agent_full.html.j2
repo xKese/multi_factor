@@ -62,6 +62,7 @@
         <div class="sb-label">Quant</div>
         <div class="sb-big">{{ quant.score }}</div>
         {% if quant.class_line %}<div class="sb-class">{{ quant.class_line }}</div>{% endif %}
+        {% if quant.v2_line %}<div class="sb-class">{{ quant.v2_line }}</div>{% endif %}
       </div>
       {% endif %}
       {{ base.chip(delta) }}

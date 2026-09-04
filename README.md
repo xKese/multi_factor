@@ -23,8 +23,38 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 | Anleitung        | Bedienungsanleitung                             |
 | —                | Agenten-Analyse: LLM-Tiefenanalyse via TradingAgents (siehe unten) |
 | —                | Risiko & Benchmark: Tracking Error, MCTE-Risikobeiträge, Szenarien, Faktor-Schocks (siehe unten) |
+| —                | Modellportfolio: Portfoliokonstruktion v2 — Zielportfolio, Trade-Liste, Diagnosen, Overrides (siehe unten) |
 
-## Scoring-Logik
+## Scoring v2 — Composite (primäres Scoring)
+
+Seit Composite v2 ist das **4-Faktor-Z-Score-Composite** die primäre
+Bewertung (`scoring_version = "v2"`, umschaltbar in den Einstellungen;
+v1 bleibt Vergleichsmodus und wird bei jedem Import mitberechnet).
+Vollständige Methodik in `MODEL_DESCRIPTION.md` (§11/§12) — Kurzfassung:
+
+- **Faktoren** (Region×Sektor-neutrale Z-Scores, Winsorisierung 3 %/97 %,
+  Cap ±3, keine Median-Imputation): Value (0,30) · Quality (0,30) ·
+  Momentum (0,25) · Investment (0,15). Financials mit eigenem
+  Indikatorensatz; Growth und Low Volatility sind keine Faktoren mehr.
+- **Ergebnis je Titel**: `composite_z` / `composite_score` (0–100,
+  Perzentil), Klasse A ≥ 90 · B+ ≥ 80 · B ≥ 66,7 · C ≥ 50 · D ≥ 33 · F,
+  sowie die **Zone** KANDIDAT / HALTEN / VERKAUFEN / FILTER — sie ersetzt
+  die v1-Empfehlung.
+- **Universumsfilter** (Piotroski, Altman Z, Market Cap, Abdeckung,
+  optional Liquidität/IPO/Extremverschuldung) mit protokollierten
+  `filter_reasons`; **keine stillen Fallbacks** — jede Ausnahme erzeugt
+  eine Diagnose (Fehler/Warnung/Info), sichtbar beim Daten-Import, im
+  Dashboard und in der Kopfzeile.
+- **Optionale CSV-Zusatzspalten** (Header-Erkennung): `ev_ebit`,
+  `net_debt_ebitda`, `fcf_yield`, `adv_3m`, `ipo_date`.
+- **Modellportfolio** (`/modellportfolio`, CLI
+  `python -m app.tools.model_portfolio build`): regelbasierte Konstruktion
+  eines Zielportfolios von 35 Titeln — Sektor-/Regions-Bandbreiten,
+  Gewichtung `(1+z)/Vol` mit Floor/Cap, Ex-ante-TE-Kontrolle (Zielband
+  4,5–5,5 %), Trade-Liste (BUY/SELL/INCREASE/REDUCE/HOLD/DEFERRED),
+  Override-Register und PIT-Historie.
+
+## Scoring-Logik v1 (Vergleichsmodus)
 
 - **Perzentil-Rang** je Indikator (Global / Sektor / Industrie mit Fallback)
 - **Dynamische Neugewichtung** bei fehlenden Werten; Faktoren mit weniger als

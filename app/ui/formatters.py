@@ -25,6 +25,26 @@ PERCENT_FIELDS: set[str] = PERCENT_COLUMNS | {
     "rev_growth_1y",
     "mom_12_1",
     "data_coverage",
+    # Composite v2 (Dezimalanteile, siehe scoring_v2.py)
+    "data_coverage_v2",
+    "composite_pct",
+    "cov_value",
+    "cov_quality",
+    "cov_momentum",
+    "cov_investment",
+    "gp_ta",
+    "accruals",
+    "asset_growth",
+    "share_issuance",
+    "fcf_yield",
+    "fcf_yield_v2",
+    "fcf_yield_calc",
+    # Portfoliokonstruktion (Gewichte als Dezimalanteile)
+    "weight_current",
+    "weight_model",
+    "weight_effective",
+    "weight_target",
+    "delta_w",
 }
 
 # Felder, die als ganze Zahl angezeigt werden.
@@ -39,7 +59,19 @@ TWO_DEC_FIELDS: set[str] = {
     "peg",
     "ev_ebitda",
     "ocf_ni",
+    "ev_ebit",
+    "net_debt_ebitda",
+    "debt_ebit",
+    "composite_z",
+    "composite_raw",
+    "z_value",
+    "z_quality",
+    "z_momentum",
+    "z_investment",
 }
+
+# Felder mit drei Dezimalstellen (kleine Beiträge, z. B. cTE).
+THREE_DEC_FIELDS: set[str] = {"cte"}
 
 # Einfache Multiplikatoren / Ratios mit einer Nachkommastelle.
 ONE_DEC_FIELDS: set[str] = {
@@ -128,6 +160,8 @@ def fmt_indicator(column: str, value: Any) -> str:
         return fmt_percent(value)
     if column in INT_FIELDS:
         return fmt_int(value)
+    if column in THREE_DEC_FIELDS:
+        return fmt_de(value, 3)
     if column in TWO_DEC_FIELDS:
         return fmt_de(value, 2)
     if column in ONE_DEC_FIELDS:

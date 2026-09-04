@@ -51,7 +51,48 @@ Kurs-Mappings). Angezeigt wird weiterhin der Ticker.
 
 4. CSV exportieren und im Tab **Daten-Import** hochladen.
 
-## Scoring-Logik
+## Scoring v2 & Modellportfolio (primäre Anzeige)
+
+Seit Composite v2 ist das **4-Faktor-Z-Score-Composite** die primäre
+Bewertung (umschaltbar über `scoring_version` in den Einstellungen; v1
+bleibt als „Scoring v1 (Vergleich)" aufklappbar):
+
+- **Faktoren**: Value (EV/EBITDA, FCF-Rendite, optional EV/EBIT), Quality
+  (Gross Profit/Assets, ROIC, Accruals, Leverage), Momentum (12-1
+  vol-adjustiert, EPS-Revisionen), Investment (Asset Growth,
+  Nettoaktienausgabe). Gewichte 0,30 · 0,30 · 0,25 · 0,15. Financials
+  werden auf einem eigenen, reduzierten Indikatorensatz gescort.
+- **Neutralisierung**: Z-Scores je Indikator innerhalb `Region × Sektor`
+  (Fallback Sektor → Global bei kleinen Gruppen), Winsorisierung
+  3 %/97 %, Cap ±3. Keine Median-Imputation, keine stillen Fallbacks —
+  jede Ausnahme erscheint als **Diagnose** (Fehler/Warnung/Info) beim
+  Daten-Import.
+- **Ergebnis je Titel**: `Composite-Score (v2)` (0–100, Perzentil),
+  Klasse **A ≥ 90 · B+ ≥ 80 · B ≥ 66,7 · C ≥ 50 · D ≥ 33 · F**, sowie die
+  **Zone**: KANDIDAT (Perzentil ≥ 80) · HALTEN (66,7–80, Pufferzone für
+  gehaltene Titel) · VERKAUFEN (< 66,7) · FILTER (Universumsfilter nicht
+  bestanden). Eine BUY/SELL-Empfehlung gibt es in v2 nicht — die Zone
+  ersetzt sie.
+- **Universumsfilter** (harte Ausschlüsse, Gründe in `Filter-Gründe`):
+  Market Cap ≥ 1 Mrd., Piotroski ≥ 5 (Financials proportional), Altman
+  Z ≥ 1,8 (Skip für Financials/Real Estate), Datenabdeckung ≥ 60 %,
+  optional Liquidität (`adv_3m`), IPO-Alter (`ipo_date`) und
+  Extremverschuldung.
+- **Optionale CSV-Zusatzspalten** (Header-Erkennung, Position beliebig):
+  `EV/EBIT`, `Net Debt/EBITDA`, `FCF Yield`, `ADV 3M`, `IPO Date` —
+  fehlen sie, gelten dokumentierte Fallbacks (mit Info-Diagnose).
+- **Modellportfolio** (Seite */modellportfolio*): regelbasierte
+  Portfoliokonstruktion auf Basis der Zonen — Zielportfolio von 35
+  Titeln, Sektor-/Regions-Bandbreiten (±10 pp), Gewichtung
+  `(1+Composite-Z)/Volatilität` mit Floor 2 %/Cap 5 %, Ex-ante-TE-Kontrolle
+  (Ziel 4,5–5,5 %, `cTE-Beitrag` je Titel), Trade-Liste mit Aktionen
+  BUY/SELL/INCREASE/REDUCE/HOLD/DEFERRED (Turnover-Budget) und
+  Override-Register. Der Daten-Import meldet den erkannten
+  Rebalance-Modus.
+- **Faktor-Timing** wirkt seit v2 nur noch als Monitoring und fließt
+  nicht in das Composite ein.
+
+## Scoring-Logik v1 (Vergleichsmodus)
 
 - **Perzentil-Rang** je Indikator (Global / Sektor / Industrie mit Fallback).
 - **Dynamische Neugewichtung** bei fehlenden Werten; unter 50 %

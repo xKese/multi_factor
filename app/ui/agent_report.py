@@ -438,6 +438,50 @@ def _verdict_chip(rating: str | None, factor_context: dict | None) -> html.Div |
     )
 
 
+def _v2_quant_row(analysis: dict) -> html.Div | None:
+    """Aktueller Composite-v2-Stand des Titels (live aus ``STATE.scored``).
+
+    Persistierte Agent-Reports tragen nur den v1-Faktor-Kontext des
+    Analysezeitpunkts; der v2-Stand wird daher aus dem aktuellen Universum
+    gezogen und entsprechend gekennzeichnet.
+    """
+    from app.core.state import STATE
+    from app.ui.score_context import is_v2
+    from app.ui.theme import ms_badge, zone_badge
+
+    if not is_v2():
+        return None
+    ticker = str(analysis.get("ticker") or "").split(".")[0].upper()
+    df = STATE.scored
+    if not ticker or df.empty or "ticker" not in df.columns:
+        return None
+    rows = df.loc[df["ticker"].astype(str).str.upper() == ticker]
+    if len(rows) != 1:
+        # Nicht im Universum oder Ticker-Kollision — kein falscher Kontext.
+        return None
+    r = rows.iloc[0]
+    score = r.get("composite_score")
+    if pd.isna(score):
+        return None
+    return html.Div(
+        [
+            html.Div(
+                "Aktueller Quant-Stand (Composite v2)",
+                className="ms-agent-side-cap",
+            ),
+            html.Div(
+                [
+                    ms_badge("COMPOSITE", fmt_de_number(float(score))),
+                    ms_badge("KLASSE", str(r.get("classification_v2") or "–")),
+                    zone_badge(r.get("zone_v2")),
+                ],
+                className="ms-badge-row",
+            ),
+        ],
+        className="mt-2",
+    )
+
+
 def result_view(analysis: dict, current_score=None) -> html.Div:
     """Ergebnis-Ansicht: Rating-Hero, Quant-vs-Agenten-Panel, Report-Karten."""
     reports = analysis.get("reports") or {}
@@ -488,6 +532,8 @@ def result_view(analysis: dict, current_score=None) -> html.Div:
     ]
     if (chip := _verdict_chip(rating, fc)) is not None:
         side_children.append(chip)
+    if (v2_row := _v2_quant_row(analysis)) is not None:
+        side_children.append(v2_row)
     if current_score is not None and total is not None and not pd.isna(current_score):
         try:
             if abs(float(current_score) - float(total)) >= 0.05:

@@ -172,7 +172,14 @@ def join_signals(ranking: pd.DataFrame, scored: pd.DataFrame) -> pd.DataFrame:
     Universum, kommen die Spalten leer zurück."""
 
     out = ranking.copy()
-    signal_cols = ["total_score", "recommendation", "sma_signal", "sector"]
+    signal_cols = [
+        "total_score",
+        "recommendation",
+        "composite_score",
+        "zone_v2",
+        "sma_signal",
+        "sector",
+    ]
     if scored is None or scored.empty or "ticker" not in scored.columns:
         for col in signal_cols:
             out[col] = pd.NA

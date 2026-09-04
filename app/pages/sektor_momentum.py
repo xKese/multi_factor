@@ -57,19 +57,10 @@ from app.ui.formatters import fmt_int
 # ── Klassifikations-Mapping (siehe dashboard.py) ───────────────────────────
 
 def _class_of(score: float) -> dict:
-    if score is None or pd.isna(score):
-        return {"code": "–", "label": "Keine Daten", "cls": "f"}
-    if score >= 80:
-        return {"code": "A", "label": "Exzellent", "cls": "a"}
-    if score >= 70:
-        return {"code": "B+", "label": "Sehr Gut", "cls": "bp"}
-    if score >= 60:
-        return {"code": "B", "label": "Gut", "cls": "b"}
-    if score >= 50:
-        return {"code": "C", "label": "Durchschnitt", "cls": "c"}
-    if score >= 40:
-        return {"code": "D", "label": "Unterdurch.", "cls": "d"}
-    return {"code": "F", "label": "Schwach", "cls": "f"}
+    """Versionsbewusste Klassifikation (v1-/v2-Schwellen), siehe score_context."""
+    from app.ui.score_context import class_of_score
+
+    return class_of_score(score)
 
 
 _REC_CLASS = {
@@ -480,19 +471,33 @@ def _drill_table(active: str) -> html.Div:
     df = STATE.scored
     if df.empty or "sector" not in df.columns:
         return html.Div("Keine Daten", className="ms-empty-eyebrow")
+    from app.ui.score_context import class_of_score, is_v2
+
+    score_col = _score_col() if _score_col() in df.columns else "total_score"
+    v2 = is_v2() and score_col == "composite_score"
     sub = df[df["sector"] == active]
-    sub = sub.dropna(subset=["total_score"]).sort_values(
-        "total_score", ascending=False
+    sub = sub.dropna(subset=[score_col]).sort_values(
+        score_col, ascending=False
     ).head(10)
     if sub.empty:
         return html.Div("Keine Aktien für diesen Sektor.", className="ms-empty-eyebrow")
 
+    _zone_class = {
+        "KANDIDAT": "strong",
+        "HALTEN": "hold",
+        "VERKAUFEN": "sell",
+        "FILTER": "fail",
+    }
     rows = []
     for _, r in sub.iterrows():
-        cls = _class_of(float(r["total_score"]))
-        rec = str(r.get("recommendation") or "–")
-        rec_cls = _REC_CLASS.get(rec, "fail")
-        rec_short = "FAIL" if rec == "Filter nicht bestanden" else rec
+        cls = class_of_score(float(r[score_col]))
+        if v2:
+            rec_short = str(r.get("zone_v2") or "–")
+            rec_cls = _zone_class.get(rec_short, "fail")
+        else:
+            rec = str(r.get("recommendation") or "–")
+            rec_cls = _REC_CLASS.get(rec, "fail")
+            rec_short = "FAIL" if rec == "Filter nicht bestanden" else rec
         ret_12m = r.get("ret_12m")
         ret_1m = r.get("ret_1m")
         if pd.notna(ret_12m) and pd.notna(ret_1m):
@@ -521,7 +526,7 @@ def _drill_table(active: str) -> html.Div:
                     ),
                     html.Td(
                         html.Span(
-                            fmt_de(float(r["total_score"]), 1),
+                            fmt_de(float(r[score_col]), 1),
                             className=f"ms-score-pill is-{cls['cls']}",
                         ),
                         className="is-num",
@@ -563,7 +568,7 @@ def _drill_table(active: str) -> html.Div:
                             html.Th("Score", className="is-num"),
                             html.Th("12M-1M", className="is-num"),
                             html.Th("SMA-200", className="is-num"),
-                            html.Th("Empfehlung"),
+                            html.Th("Zone" if v2 else "Empfehlung"),
                         ]
                     )
                 ),
@@ -1166,10 +1171,21 @@ def _render_main(agg: list[dict], tf: str, active: str | None, open_: str | None
     return children
 
 
+def _score_col() -> str:
+    """Primäre Score-Spalte der Aggregate (v1 Gesamt-Score / Composite v2)."""
+    from app.ui.score_context import is_v2
+
+    return "composite_score" if is_v2() else "total_score"
+
+
 def layout(**_) -> html.Div:
     df = STATE.scored
     history = load_sector_score_history() if not df.empty else None
-    agg = aggregate_sectors(df, history=history) if not df.empty else []
+    agg = (
+        aggregate_sectors(df, history=history, score_col=_score_col())
+        if not df.empty
+        else []
+    )
 
     return html.Div(
         [
@@ -1263,7 +1279,11 @@ def _on_close_drill(n_clicks):
 def _render(tf, active, open_):
     df = STATE.scored
     history = load_sector_score_history() if not df.empty else None
-    agg = aggregate_sectors(df, history=history) if not df.empty else []
+    agg = (
+        aggregate_sectors(df, history=history, score_col=_score_col())
+        if not df.empty
+        else []
+    )
     return _render_main(agg, tf or "12_1", active, open_)
 
 

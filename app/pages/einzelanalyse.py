@@ -41,6 +41,7 @@ from app.ui import (
     fmt_int,
     fmt_market_cap,
     fmt_percent,
+    zone_badge,
 )
 from app.ui.agent_report import fmt_local_dt, progress_checklist, result_view
 
@@ -193,10 +194,23 @@ def _meta_strong(label: str, value: str) -> html.Span:
 
 
 def _hero_block(r: pd.Series, ranks: dict) -> html.Div:
-    """Quote-Hero mit Rang-Kontext."""
-    score = r.get("total_score")
+    """Quote-Hero mit Rang-Kontext (Primäranzeige v1 oder Composite v2)."""
+    from app.ui.score_context import is_v2
+
+    v2 = is_v2()
+    score = r.get("composite_score") if v2 else r.get("total_score")
     score_val = float(score) if pd.notna(score) else None
-    cls = _class_of(score_val) if score_val is not None else _class_of(None)
+    if v2:
+        code = str(r.get("classification_v2") or "–")
+        cls = {
+            "code": code,
+            "label": {
+                "A": "Exzellent", "B+": "Sehr Gut", "B": "Gut",
+                "C": "Durchschnitt", "D": "Unterdurch.", "F": "Schwach",
+            }.get(code, "Keine Daten"),
+        }
+    else:
+        cls = _class_of(score_val) if score_val is not None else _class_of(None)
 
     region = str(r.get("region") or "")
     industry = str(r.get("industry") or r.get("sector") or "")
@@ -226,6 +240,13 @@ def _hero_block(r: pd.Series, ranks: dict) -> html.Div:
     if pd.notna(beta):
         meta_row.append(html.Span("·", className="ms-sep"))
         meta_row.append(_meta_strong("Beta", fmt_de(beta, 2)))
+    if v2:
+        cov = r.get("data_coverage_v2")
+        if pd.notna(cov):
+            meta_row.append(html.Span("·", className="ms-sep"))
+            meta_row.append(
+                _meta_strong("Abdeckung v2", fmt_de(float(cov) * 100, 0) + " %")
+            )
 
     score_display = fmt_de(score_val, 1) if score_val is not None else "–"
 
@@ -274,10 +295,24 @@ def _hero_block(r: pd.Series, ranks: dict) -> html.Div:
                         className="ms-score-num",
                     ),
                     html.Div(
-                        f"{cls['code']} – {cls['label']}",
+                        (
+                            [
+                                f"{cls['code']} – {cls['label']} ",
+                                zone_badge(r.get("zone_v2")),
+                            ]
+                            if v2
+                            else f"{cls['code']} – {cls['label']}"
+                        ),
                         className="ms-score-class",
                     ),
-                    html.Div(score_ctx_parts, className="ms-score-ctx"),
+                    html.Div(
+                        (
+                            [html.Span(["Composite v2"]), *score_ctx_parts]
+                            if v2
+                            else score_ctx_parts
+                        ),
+                        className="ms-score-ctx",
+                    ),
                 ],
                 className="ms-hero-score",
             ),
@@ -287,20 +322,23 @@ def _hero_block(r: pd.Series, ranks: dict) -> html.Div:
 
 
 def _ranks(df: pd.DataFrame, r: pd.Series) -> dict:
-    """Sektor- und Universum-Rang des Tickers nach total_score."""
+    """Sektor- und Universum-Rang des Tickers nach dem Primär-Score."""
+    from app.ui.score_context import primary_cols
+
+    score_col = primary_cols(df)["score"]
     out = {}
-    score = r.get("total_score")
+    score = r.get(score_col)
     if pd.isna(score):
         return out
     sector = r.get("sector")
-    uni = df.dropna(subset=["total_score"])
+    uni = df.dropna(subset=[score_col])
     out["uni_total"] = len(uni)
-    out["uni_rank"] = int((uni["total_score"] > score).sum()) + 1
+    out["uni_rank"] = int((uni[score_col] > score).sum()) + 1
     if sector and sector in df["sector"].values:
         sec = uni[uni["sector"] == sector]
         out["sector_total"] = len(sec)
-        out["sector_rank"] = int((sec["total_score"] > score).sum()) + 1
-        out["sector_avg"] = float(sec["total_score"].mean())
+        out["sector_rank"] = int((sec[score_col] > score).sum()) + 1
+        out["sector_avg"] = float(sec[score_col].mean())
     return out
 
 
@@ -839,6 +877,7 @@ def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
     Indikator z_* mit Neutralisierungsebene (Spec 11.2)."""
     from app.core.scoring_v2 import V2_FACTOR_NAMES
     from app.pages.common import render_basic_table
+    from app.ui import label_for
     from app.ui.theme import ms_badge
 
     def _num(value, decimals=2):
@@ -863,6 +902,15 @@ def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
     ]
     if bool(r.get("trend_warning")):
         badges.append(ms_badge("TREND", "⚠ Death Cross", tone="warn"))
+    fcf_src = r.get("fcf_yield_source")
+    if isinstance(fcf_src, str) and fcf_src:
+        badges.append(
+            ms_badge(
+                "FCF-QUELLE",
+                {"ev": "FCF/EV", "mcap": "FCF/Marktkap."}.get(fcf_src, fcf_src),
+                tone="info" if fcf_src != "ev" else None,
+            )
+        )
     reasons = r.get("filter_reasons")
     if isinstance(reasons, list) and reasons:
         badges.append(ms_badge("FILTER", ", ".join(reasons), tone="down"))
@@ -886,7 +934,7 @@ def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
             continue
         indicator_rows.append(
             {
-                "Indikator": indicator,
+                "Indikator": label_for(indicator),
                 "Z-Score": _num(z),
                 "Neutralisierung": str(level) if pd.notna(level) else "–",
             }

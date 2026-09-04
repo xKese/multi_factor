@@ -211,6 +211,77 @@ def ms_badge(
     )
 
 
+ZONE_TONES = {
+    "KANDIDAT": "up",
+    "HALTEN": "warn",
+    "VERKAUFEN": "down",
+    "FILTER": None,
+}
+
+
+def zone_badge(zone: str | None) -> html.Span:
+    """Zonen-Chip (Composite v2): KANDIDAT/HALTEN/VERKAUFEN/FILTER."""
+    label = str(zone or "–")
+    cls = "ms-zone-chip ms-zone-" + label.lower() if zone in ZONE_TONES else "ms-zone-chip"
+    return html.Span(label, className=cls)
+
+
+def diagnostics_panel(
+    diags: list,
+    title: str = "Diagnose (Composite v2)",
+    start_collapsed: bool = True,
+) -> html.Div:
+    """Diagnoseliste (keine stillen Fallbacks): Zähler-Badges + Liste.
+
+    ``diags`` sind :class:`app.core.diagnostics.Diagnostic`-Objekte. Zeilen
+    mit ``uid`` verlinken auf die Einzelanalyse.
+    """
+    import dash_bootstrap_components as dbc
+
+    from app.core.diagnostics import (
+        SEV_ERROR,
+        SEV_INFO,
+        SEV_WARNING,
+        count_by_severity,
+        sort_diagnostics,
+    )
+
+    if not diags:
+        return html.Div()
+    diags = sort_diagnostics(diags)
+    counts = count_by_severity(diags)
+    tone = {SEV_ERROR: "down", SEV_WARNING: "warn", SEV_INFO: "info"}
+    badges = [
+        ms_badge(sev.upper(), str(counts[sev]), tone=tone[sev])
+        for sev in (SEV_ERROR, SEV_WARNING, SEV_INFO)
+        if counts.get(sev)
+    ]
+    rows = []
+    for d in diags:
+        content: list = [
+            html.Span(d.severity, className="ms-diag-sev"),
+        ]
+        if getattr(d, "uid", None):
+            content.append(
+                html.A(str(d.uid), href=f"/einzelanalyse?ticker={d.uid}")
+            )
+        content.append(html.Span(d.message))
+        rows.append(
+            html.Li(content, className=f"ms-diag-row ms-diag-{d.severity.lower()}")
+        )
+    body = html.Ul(rows, className="ms-diag-list")
+    return html.Div(
+        [
+            html.Div(badges, className="ms-badge-row"),
+            dbc.Accordion(
+                [dbc.AccordionItem(body, title=f"{title} ({len(diags)})")],
+                start_collapsed=start_collapsed,
+                className="mb-3",
+            ),
+        ]
+    )
+
+
 def factor_breakdown(factors: dict[str, float | None]) -> html.Div:
     """Horizontale Faktor-Leisten (Morningstar-Stil)."""
     from app.ui.formatters import fmt_de

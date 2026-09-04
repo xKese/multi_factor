@@ -5,7 +5,7 @@ from __future__ import annotations
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import dash_table, html
-from dash.dash_table.Format import Format, Scheme, Symbol
+from dash.dash_table.Format import Format, Scheme, Sign, Symbol
 
 from app.ui import PERCENT_FIELDS, label_for
 
@@ -17,6 +17,17 @@ SCORE_COLORS = {
     "C - Durchschnitt": "#CC8A1E",
     "D - Unterdurchschnitt": "#D76A15",
     "F - Schwach": "#A8281F",
+}
+
+# Klassifikation v2 nutzt Kurzformen ("A", "B+", …, siehe classify_v2) —
+# gleiche Farbwerte wie v1.
+SCORE_COLORS_V2 = {
+    "A": "#1E6F2A",
+    "B+": "#358848",
+    "B": "#6A9E2F",
+    "C": "#CC8A1E",
+    "D": "#D76A15",
+    "F": "#A8281F",
 }
 
 
@@ -39,6 +50,17 @@ _SCORE_COLS: set[str] = {
     "momentum_score",
     "lowvol_score",
     "total_score",
+    "composite_score",
+}
+
+# Z-Score-Spalten (zwei Nachkommastellen, vorzeichenbehaftet).
+_Z_COLS: set[str] = {
+    "composite_z",
+    "composite_raw",
+    "z_value",
+    "z_quality",
+    "z_momentum",
+    "z_investment",
 }
 
 
@@ -71,7 +93,25 @@ def _column_def(col: str) -> dict:
         # Ticker-Zellen werden zu Links auf die Einzelanalyse.
         col_def["presentation"] = "markdown"
         return col_def
-    if col in PERCENT_FIELDS:
+    if col == "delta_w":
+        # Gewichtsänderung: Dezimalanteil, vorzeichenbehaftet (+1,25 %).
+        col_def["type"] = "numeric"
+        col_def["format"] = Format(
+            precision=2,
+            scheme=Scheme.percentage_rounded,
+            sign=Sign.positive,
+            nully="-",
+        )
+    elif col in {"weight_current", "weight_model", "weight_effective",
+                 "weight_target"}:
+        # Portfoliogewichte mit zwei Nachkommastellen (0,0350 = 3,50 %).
+        col_def["type"] = "numeric"
+        col_def["format"] = Format(
+            precision=2,
+            scheme=Scheme.percentage_rounded,
+            nully="-",
+        )
+    elif col in PERCENT_FIELDS:
         # Werte sind Dezimalanteile (0,755 = 75,5 %).
         col_def["type"] = "numeric"
         col_def["format"] = Format(
@@ -97,6 +137,17 @@ def _column_def(col: str) -> dict:
     elif col in _SCORE_COLS:
         col_def["type"] = "numeric"
         col_def["format"] = Format(precision=1, scheme=Scheme.fixed, nully="-")
+    elif col in _Z_COLS:
+        col_def["type"] = "numeric"
+        col_def["format"] = Format(
+            precision=2, scheme=Scheme.fixed, sign=Sign.positive, nully="-"
+        )
+    elif col == "cte":
+        col_def["type"] = "numeric"
+        col_def["format"] = Format(precision=3, scheme=Scheme.fixed, nully="-")
+    elif col == "adv_3m":
+        col_def["type"] = "numeric"
+        col_def["format"] = Format(precision=0, scheme=Scheme.fixed, nully="-")
     elif col in {"last_price", "high_52w", "low_52w", "sma_50", "sma_200"}:
         col_def["type"] = "numeric"
         col_def["format"] = Format(precision=2, scheme=Scheme.fixed, nully="-")
@@ -174,6 +225,84 @@ def render_table(
             "if": {"filter_query": "{recommendation} = 'SELL'"},
             "borderLeft": "3px solid var(--ms-down)",
         },
+    ]
+
+    # Zone v2 (KANDIDAT/HALTEN/VERKAUFEN/FILTER) — greift nur, wenn die
+    # Spalte in der Tabelle vorhanden ist.
+    conditional += [
+        {
+            "if": {
+                "filter_query": "{zone_v2} = 'KANDIDAT'",
+                "column_id": "zone_v2",
+            },
+            "color": "var(--ms-up)",
+            "fontWeight": "600",
+        },
+        {
+            "if": {
+                "filter_query": "{zone_v2} = 'HALTEN'",
+                "column_id": "zone_v2",
+            },
+            "color": "var(--ms-warn)",
+            "fontWeight": "500",
+        },
+        {
+            "if": {
+                "filter_query": "{zone_v2} = 'VERKAUFEN'",
+                "column_id": "zone_v2",
+            },
+            "color": "var(--ms-down)",
+            "fontWeight": "600",
+        },
+        {
+            "if": {
+                "filter_query": "{zone_v2} = 'FILTER'",
+                "column_id": "zone_v2",
+            },
+            "color": "var(--ms-text-muted)",
+        },
+        {
+            "if": {"filter_query": "{zone_v2} = 'KANDIDAT'"},
+            "borderLeft": "3px solid var(--ms-up)",
+        },
+        {
+            "if": {"filter_query": "{zone_v2} = 'VERKAUFEN'"},
+            "borderLeft": "3px solid var(--ms-down)",
+        },
+    ]
+
+    # Klassifikation v2 (Kurzformen "A" … "F").
+    conditional += [
+        {
+            "if": {
+                "filter_query": f'{{classification_v2}} = "{cls}"',
+                "column_id": "classification_v2",
+            },
+            "color": color,
+            "fontWeight": "600",
+        }
+        for cls, color in SCORE_COLORS_V2.items()
+    ]
+
+    # Trade-Aktionen der Portfoliokonstruktion.
+    _ACTION_TONES = {
+        "BUY": ("var(--ms-up)", "600"),
+        "INCREASE": ("var(--ms-up)", "500"),
+        "SELL": ("var(--ms-down)", "600"),
+        "REDUCE": ("var(--ms-down)", "500"),
+        "DEFERRED": ("var(--ms-warn)", "500"),
+        "HOLD": ("var(--ms-text-muted)", "400"),
+    }
+    conditional += [
+        {
+            "if": {
+                "filter_query": f"{{action}} = '{action}'",
+                "column_id": "action",
+            },
+            "color": color,
+            "fontWeight": weight,
+        }
+        for action, (color, weight) in _ACTION_TONES.items()
     ]
 
     return dash_table.DataTable(

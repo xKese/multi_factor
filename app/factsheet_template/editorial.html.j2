@@ -84,6 +84,41 @@
       </div>
     </div>
 
+    {% if v2 %}
+    <!-- Composite v2 (primäres Scoring) -->
+    <div class="fs-v2-section">
+      <div class="fs-section-title">Composite v2</div>
+      <div class="fs-v2-grid">
+        <div class="fs-v2-score">
+          <div class="fs-v2-num">{{ v2.score }}<span class="fs-score-out-of"> / 100</span></div>
+          <div class="fs-v2-badges">
+            <span class="fs-class-badge" style="background: {{ v2.class_accent }};">{{ v2.classification }}</span>
+            <span class="fs-class-badge" style="background: {{ v2.zone_accent }};">{{ v2.zone }}</span>
+          </div>
+          <div class="fs-v2-meta">
+            Composite-Z {{ v2.composite_z }} · Abdeckung {{ v2.coverage }}
+            {% if v2.sector_rank and v2.sector_total %} · Sektor-Rang {{ v2.sector_rank }}/{{ v2.sector_total }}{% endif %}
+          </div>
+          {% if v2.trend_warning %}
+          <div class="fs-v2-warn">⚠ Trend-Warnung (Death Cross)</div>
+          {% endif %}
+          {% if not v2.filter_pass and v2.filter_reasons %}
+          <div class="fs-v2-warn">Universumsfilter: {{ v2.filter_reasons }}</div>
+          {% endif %}
+        </div>
+        <div class="fs-v2-factors">
+          {% for f in v2.factors %}
+          <div class="fs-v2-factor-row">
+            <div class="fs-factor-label">{{ f.label }}</div>
+            <div class="fs-v2-z">Z {{ f.z }}</div>
+            <div class="fs-v2-cov">Abdeckung {{ f.coverage }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Body grid: factors+filters | indicators -->
     <div class="fs-body-grid">
       <div>

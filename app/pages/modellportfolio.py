@@ -18,12 +18,10 @@ from app.core.diagnostics import (
     Diagnostic,
     count_by_severity,
     diags_from_json,
-    sort_diagnostics,
 )
 from app.core.portfolio_construction import (
     ACTION_HOLD,
     build_model_portfolio,
-    detect_rebalance_mode,
     load_benchmark_weights,
     load_risk_cache,
 )
@@ -32,7 +30,7 @@ from app.core.signal_events import snapshot_date_from_universe
 from app.core.state import STATE
 from app.pages.common import page_title, render_basic_table, render_table
 from app.ui import fmt_de, section_header
-from app.ui.theme import kpi_band, ms_badge
+from app.ui.theme import kpi_band
 
 log = logging.getLogger(__name__)
 
@@ -217,18 +215,11 @@ def _kpi_header(meta: dict, snap: date, diags: list[Diagnostic]) -> html.Div:
 def _diagnostics_block(diags: list[Diagnostic]) -> html.Div:
     if not diags:
         return html.Div(dbc.Alert("Keine Diagnosen.", color="success"))
-    rows = pd.DataFrame(
-        [
-            {
-                "Schweregrad": d.severity,
-                "Code": d.code,
-                "Titel": d.uid or "–",
-                "Meldung": d.message,
-            }
-            for d in sort_diagnostics(diags)
-        ]
+    from app.ui.theme import diagnostics_panel
+
+    return diagnostics_panel(
+        diags, title="Diagnosen der Portfoliokonstruktion", start_collapsed=False
     )
-    return html.Div(render_basic_table(rows), className="mb-3")
 
 
 def _portfolio_table(portfolio: pd.DataFrame, universe: pd.DataFrame,
@@ -257,14 +248,8 @@ def _portfolio_table(portfolio: pd.DataFrame, universe: pd.DataFrame,
         )
         if c in df.columns
     ]
+    # Formatierung (Prozent, Z-Werte, cTE) übernimmt render_table zentral.
     out = df[show].copy()
-    for col in ("composite_z", "cte"):
-        if col in out.columns:
-            out[col] = pd.to_numeric(out[col], errors="coerce").round(3)
-    for col in ("composite_pct", "weight_current", "weight_model",
-                "weight_effective", "delta_w"):
-        if col in out.columns:
-            out[col] = (pd.to_numeric(out[col], errors="coerce") * 100).round(2)
     out = out.sort_values("weight_effective", ascending=False)
     table = render_table(out, id="mp-portfolio-table", page_size=40)
     table.export_format = "csv"
@@ -277,17 +262,9 @@ def _trade_table(trades: pd.DataFrame) -> html.Div:
     active = trades[trades["action"] != ACTION_HOLD].copy()
     if active.empty:
         return html.Div(dbc.Alert("Keine Trades (alles HALTEN).", color="info"))
-    for col in ("weight_current", "weight_target", "delta_w"):
-        active[col] = (pd.to_numeric(active[col], errors="coerce") * 100).round(2)
-    active = active.rename(
-        columns={
-            "weight_current": "aktuell %",
-            "weight_target": "ziel %",
-            "delta_w": "Δw %",
-        }
-    )
-    show = ["uid", "action", "aktuell %", "ziel %", "Δw %", "reason",
-            "trend_warning", "zone_v2"]
+    # Formatierung/Labels der Gewichtspalten übernimmt render_table zentral.
+    show = ["uid", "action", "weight_current", "weight_target", "delta_w",
+            "reason", "trend_warning", "zone_v2"]
     table = render_table(
         active[[c for c in show if c in active.columns]],
         id="mp-trade-table",
@@ -418,10 +395,8 @@ def _render_stored(snap: date) -> html.Div:
         return dbc.Alert("Kein gespeichertes Zielportfolio für dieses Datum.",
                          color="warning")
     diags = diags_from_json(meta.get("diagnostics"))
+    # Formatierung (Prozent, Z-Werte, cTE) übernimmt render_table zentral.
     df = portfolio.copy()
-    for col in ("composite_pct", "weight_model", "weight_effective"):
-        df[col] = (pd.to_numeric(df[col], errors="coerce") * 100).round(2)
-    df["composite_z"] = pd.to_numeric(df["composite_z"], errors="coerce").round(3)
     table = render_table(
         df[
             [
