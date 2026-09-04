@@ -465,7 +465,9 @@ def _rec_distribution(df: pd.DataFrame) -> html.Div:
     )
 
 
-def _factor_columns_card(df: pd.DataFrame) -> html.Div:
+def _factor_columns_card(df: pd.DataFrame, version: str = "auto") -> html.Div:
+    if _use_v2(version) and "composite_score" in df.columns:
+        return _factor_columns_card_v2(df)
     weights = STATE.settings.factor_weights
     cols = []
     for label, col, key, tone in _FACTORS:
@@ -498,10 +500,75 @@ def _factor_columns_card(df: pd.DataFrame) -> html.Div:
     )
 
 
+_V2_FC_TONES = ("is-deep", "", "is-deep", "is-gold")
+
+
+def _factor_columns_card_v2(df: pd.DataFrame) -> html.Div:
+    """Ø Faktor-Z der Kandidaten-Zone (v2).
+
+    Universumsweite Z-Mittel sind durch die Neutralisierung ≈ 0 — gezeigt
+    wird daher, welche Faktoren die aktuelle KANDIDAT-Zone treiben.
+    Säulenhöhe = clip(z, 0, 1,5) / 1,5.
+    """
+    from app.core.scoring_v2 import V2_FACTOR_NAMES
+
+    cand = df[df.get("zone_v2", pd.Series(dtype=object)) == "KANDIDAT"]
+    cols = []
+    for i, name in enumerate(V2_FACTOR_NAMES):
+        col = f"z_{name}"
+        series = cand[col].dropna() if col in cand.columns else pd.Series(dtype=float)
+        z = float(series.mean()) if not series.empty else float("nan")
+        weight = float(
+            getattr(STATE.settings, f"v2_weight_{name}", 0.0) or 0.0
+        )
+        height = (
+            max(0.0, min(1.0, z / 1.5)) * 100.0 if pd.notna(z) else 0.0
+        )
+        display = (
+            f"{'+' if z > 0 else ''}{fmt_de(z, 2)}" if pd.notna(z) else "–"
+        )
+        cols.append(
+            html.Div(
+                [
+                    html.Div(
+                        html.Div(
+                            className=f"ms-fc-bar {_V2_FC_TONES[i]}".strip(),
+                            style={"height": f"{height}%"},
+                        ),
+                        className="ms-fc-bar-wrap",
+                    ),
+                    html.Div(display, className="ms-fc-val"),
+                    html.Div(name.capitalize(), className="ms-fc-name"),
+                    html.Div(
+                        f"Gewicht {round(weight * 100)} %", className="ms-fc-w"
+                    ),
+                ],
+                className="ms-fc",
+            )
+        )
+    return html.Div(
+        [
+            html.H3(
+                [
+                    "Ø Faktor-Z der Kandidaten ",
+                    html.Span("Composite v2", className="ms-card-h-meta"),
+                ],
+                className="ms-card-h",
+            ),
+            html.Div(cols, className="ms-factor-cols"),
+        ],
+        className="ms-card",
+    )
+
+
 def _sector_ranking_card(df: pd.DataFrame, active_sector: str | None) -> html.Div:
+    v2 = _use_v2("auto")
+    score_col = "composite_score" if v2 and "composite_score" in df.columns else "total_score"
+    # Balken-Schwellen: v1-Klassengrenzen 60/50, v2-Grenzen 66,7/50.
+    good, warn = (66.7, 50.0) if v2 else (60.0, 50.0)
     grouped = (
-        df.dropna(subset=["total_score"])
-        .groupby("sector")["total_score"]
+        df.dropna(subset=[score_col])
+        .groupby("sector")[score_col]
         .agg(["mean", "count"])
         .sort_values("mean", ascending=False)
     )
@@ -509,7 +576,7 @@ def _sector_ranking_card(df: pd.DataFrame, active_sector: str | None) -> html.Di
     for sector, row in grouped.iterrows():
         avg = float(row["mean"])
         n = int(row["count"])
-        bar_cls = "" if avg >= 60 else ("is-warn" if avg >= 50 else "is-down")
+        bar_cls = "" if avg >= good else ("is-warn" if avg >= warn else "is-down")
         rows.append(
             html.Button(
                 [
@@ -617,9 +684,34 @@ _AGENT_RATING_CLASS = {
 }
 
 
-def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html.Div:
+_ZONE_CLASS = {
+    "KANDIDAT": "strong",
+    "HALTEN": "hold",
+    "VERKAUFEN": "sell",
+    "FILTER": "fail",
+}
+
+# v2-Mini-Faktor-Balken: Tonfolge analog v1 (muted · primär · primär · gold).
+_V2_BAR_TONES = ("is-muted", "", "", "is-gold")
+
+
+def _use_v2(version: str) -> bool:
+    """Auflösung des ``version``-Parameters (``"auto"`` folgt den Settings)."""
+    from app.ui.score_context import is_v2
+
+    return version == "auto" and is_v2()
+
+
+def _top_table(
+    df: pd.DataFrame,
+    active_sector: str | None,
+    n: int = 25,
+    version: str = "auto",
+) -> html.Div:
+    v2 = _use_v2(version)
+    score_col = "composite_score" if v2 else "total_score"
     src = df if not active_sector else df[df["sector"] == active_sector]
-    src = src.dropna(subset=["total_score"]).sort_values("total_score", ascending=False).head(n)
+    src = src.dropna(subset=[score_col]).sort_values(score_col, ascending=False).head(n)
 
     # Neueste Agenten-Bewertung je Ticker (leer bei DB-Fehler / ohne Analysen).
     agent_ratings: dict[str, str] = {}
@@ -642,23 +734,48 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
         # Rating-Lookup: uid zuerst (neue Analysen), Fallback bloßer Ticker
         # (Bestandsanalysen von vor der uid-Einführung).
         rating = agent_ratings.get(uid) or agent_ratings.get(str(r["ticker"]))
-        cls = _class_of(float(r["total_score"]))
-        rec = str(r.get("recommendation") or "–")
-        rec_cls = _REC_CLASS.get(rec, "fail")
-        rec_short = "FAIL" if rec == "Filter nicht bestanden" else rec
+        if v2:
+            from app.ui.score_context import class_of_score
 
-        # Mini-Faktor-Bars (5 Faktoren)
+            cls = class_of_score(float(r[score_col]))
+            klass_str = f"{cls['code']} – {cls['label']}"
+            rec_short = str(r.get("zone_v2") or "–")
+            rec_cls = _ZONE_CLASS.get(rec_short, "fail")
+        else:
+            cls = _class_of(float(r[score_col]))
+            klass_str = _classification_short(r.get("classification"))
+            rec = str(r.get("recommendation") or "–")
+            rec_cls = _REC_CLASS.get(rec, "fail")
+            rec_short = "FAIL" if rec == "Filter nicht bestanden" else rec
+
+        # Mini-Faktor-Bars: v1 fünf Score-Säulen (0–100), v2 vier
+        # Faktor-Z-Säulen (−3…+3 auf die 18-px-Schiene abgebildet).
         bars = []
-        for i, (_label, col, _key, _tone) in enumerate(_FACTORS):
-            v = float(r[col]) if col in r and pd.notna(r[col]) else 0.0
-            if i in (0, 2):       # Value, Growth → muted (Hintergrund)
-                bar_cls = "is-muted"
-            elif i == 4:           # Low Vol → gold
-                bar_cls = "is-gold"
-            else:                  # Quality, Momentum → primary green
-                bar_cls = ""
-            height = max(2.0, v / 100.0 * 18.0)
-            bars.append(html.Span(className=bar_cls, style={"height": f"{height}px"}))
+        if v2:
+            from app.core.scoring_v2 import V2_FACTOR_NAMES
+
+            for i, name in enumerate(V2_FACTOR_NAMES):
+                z = r.get(f"z_{name}")
+                zf = float(z) if pd.notna(z) else 0.0
+                frac = max(0.0, min(1.0, (zf + 3.0) / 6.0))
+                bars.append(
+                    html.Span(
+                        className=_V2_BAR_TONES[i],
+                        style={"height": f"{max(2.0, frac * 18.0)}px"},
+                        title=f"{name}: {'+' if zf > 0 else ''}{fmt_de(zf, 2)}",
+                    )
+                )
+        else:
+            for i, (_label, col, _key, _tone) in enumerate(_FACTORS):
+                v = float(r[col]) if col in r and pd.notna(r[col]) else 0.0
+                if i in (0, 2):       # Value, Growth → muted (Hintergrund)
+                    bar_cls = "is-muted"
+                elif i == 4:           # Low Vol → gold
+                    bar_cls = "is-gold"
+                else:                  # Quality, Momentum → primary green
+                    bar_cls = ""
+                height = max(2.0, v / 100.0 * 18.0)
+                bars.append(html.Span(className=bar_cls, style={"height": f"{height}px"}))
 
         ret_12m = r.get("ret_12m")
         ret_str = fmt_percent(float(ret_12m), 1) if pd.notna(ret_12m) else "–"
@@ -674,12 +791,12 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
                     html.Td(str(r.get("name") or "—")),
                     html.Td(str(r.get("sector") or "—"), className="ms-tt-muted"),
                     html.Td(
-                        html.Span(fmt_de(float(r["total_score"]), 1),
+                        html.Span(fmt_de(float(r[score_col]), 1),
                                   className=f"ms-score-pill is-{cls['cls']}"),
                         className="is-num",
                     ),
                     html.Td(
-                        html.Span(_classification_short(r.get("classification")),
+                        html.Span(klass_str,
                                   className="ms-tt-muted",
                                   style={"fontSize": "11px"}),
                     ),
@@ -716,7 +833,7 @@ def _top_table(df: pd.DataFrame, active_sector: str | None, n: int = 25) -> html
                             html.Th("Klassif."),
                             html.Th("Faktor-Profil"),
                             html.Th("12M", className="is-num"),
-                            html.Th("Empfehlung"),
+                            html.Th("Zone" if v2 else "Empfehlung"),
                             html.Th("Agenten"),
                         ]
                     )
@@ -738,7 +855,10 @@ def _section_head(active_sector: str | None, n_rows: int) -> html.Div:
                    style={"cursor": "pointer"}),
         ])
     else:
-        title = f"Top-{n_rows} Aktien nach Gesamt-Score"
+        score_label = (
+            "Composite-Score (v2)" if _use_v2("auto") else "Gesamt-Score"
+        )
+        title = f"Top-{n_rows} Aktien nach {score_label}"
         meta = "Klick auf Zeile öffnet Einzelanalyse"
 
     return html.Div(
@@ -758,9 +878,12 @@ def _section_head(active_sector: str | None, n_rows: int) -> html.Div:
 # ── Layout ─────────────────────────────────────────────────────────────────
 
 def _v2_overview(df: pd.DataFrame) -> html.Div:
-    """Composite-v2-Übersicht (primäre Anzeige bei scoring_version = v2)."""
-    from app.pages.common import render_table
-    from app.ui.theme import kpi_band, panel, section_header
+    """Composite-v2-Übersicht: KPI-Band + Diagnosen (primäre Anzeige).
+
+    Die Top-Titel rendert das Layout darunter in der v1-Designvorlage
+    (``_top_table`` mit Score-Pillen, Mini-Faktor-Profil und Zonen-Chip).
+    """
+    from app.ui.theme import kpi_band, section_header
 
     zones = df.get("zone_v2", pd.Series(dtype=object)).value_counts()
     avg = df.get("composite_score", pd.Series(dtype=float)).dropna().mean()
@@ -776,26 +899,10 @@ def _v2_overview(df: pd.DataFrame) -> html.Div:
              "tone": "warn"},
         ]
     )
-    # ``uid`` bleibt im Frame als Link-Ziel; render_table blendet die Spalte
-    # aus der Ansicht aus (R8).
-    cols = [
-        c
-        for c in (
-            "ticker", "uid", "name", "sector", "composite_score",
-            "classification_v2", "zone_v2", "data_coverage_v2",
-        )
-        if c in df.columns
-    ]
-    top = (
-        df.dropna(subset=["composite_score"])
-        .sort_values(["composite_score", "uid"], ascending=[False, True])
-        .head(20)[cols]
-        .copy()
-    )
     children: list = [
         section_header(
             "Composite v2",
-            "Top-Titel nach Composite-Score · Details auf /modellportfolio",
+            "Zonen & Kennzahlen · Details auf /modellportfolio",
         ),
         band,
     ]
@@ -806,14 +913,6 @@ def _v2_overview(df: pd.DataFrame) -> html.Div:
         counts = count_by_severity(STATE.v2_diagnostics)
         if counts.get(SEV_ERROR) or counts.get(SEV_WARNING):
             children.append(diagnostics_panel(STATE.v2_diagnostics))
-    children.append(
-        panel(
-            "Top-Titel",
-            render_table(top, id="dash-v2-table", page_size=20),
-            meta="Composite v2 · Top 20 nach Score",
-            flush=True,
-        )
-    )
     return html.Div(children, className="mb-3")
 
 
@@ -822,9 +921,10 @@ def layout(**_) -> html.Div:
     if df.empty:
         return html.Div([_empty_state()])
 
-    v1_blocks = [
-        _regime_strip(df),
-        _rec_distribution(df),
+    # Interaktive Designvorlage (3-Karten-Zeile, Sektor-Drilldown,
+    # Top-Tabelle) — gehört in beiden Modi genau einmal der Primäranzeige,
+    # da die Komponenten-IDs (Store, Pattern-Buttons) eindeutig sein müssen.
+    interactive_blocks = [
         html.Div(
             [
                 _factor_columns_card(df),
@@ -845,17 +945,43 @@ def layout(**_) -> html.Div:
         STATE.settings.scoring_version == "v2"
         and "composite_score" in df.columns
     ):
-        # v2 primär, v1 als aufklappbarer Vergleichsbereich (Spec 11.2).
+        # v2 primär in der v1-Designvorlage; v1 als aufklappbarer
+        # Vergleichsbereich mit statischen Sichten (keine doppelten IDs).
+        v1_static = [
+            _hero(df),
+            _regime_strip(df),
+            _rec_distribution(df),
+            html.Div(
+                [_factor_columns_card(df, version="v1"), _movers_card(df)],
+                className="ms-row ms-r-2",
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("Ranking", className="ms-eyebrow"),
+                            html.H2("Top-25 Aktien nach Gesamt-Score (v1)"),
+                        ]
+                    ),
+                    html.Div(
+                        "Klick auf Zeile öffnet Einzelanalyse",
+                        className="ms-meta",
+                    ),
+                ],
+                className="ms-dash-section",
+            ),
+            _top_table(df, None, 25, version="v1"),
+        ]
         return html.Div(
             [
                 _hero_v2(df),
                 _zone_distribution(df),
                 _v2_overview(df),
+                *interactive_blocks,
                 dbc.Accordion(
                     [
                         dbc.AccordionItem(
-                            [_hero(df), *v1_blocks],
-                            title="Scoring v1 (Vergleich)",
+                            v1_static, title="Scoring v1 (Vergleich)"
                         )
                     ],
                     start_collapsed=True,
@@ -863,7 +989,9 @@ def layout(**_) -> html.Div:
                 ),
             ]
         )
-    return html.Div([_hero(df), *v1_blocks])
+    return html.Div(
+        [_hero(df), _regime_strip(df), _rec_distribution(df), *interactive_blocks]
+    )
 
 
 # ── Callbacks ──────────────────────────────────────────────────────────────
@@ -907,8 +1035,9 @@ def _render_filtered(active_sector):
     if df.empty:
         return no_update, no_update, no_update
     n = 25
+    score_col = "composite_score" if _use_v2("auto") else "total_score"
     src = df if not active_sector else df[df["sector"] == active_sector]
-    n_rows = min(n, len(src.dropna(subset=["total_score"])))
+    n_rows = min(n, len(src.dropna(subset=[score_col])))
     return (
         [
             _factor_columns_card(df),
