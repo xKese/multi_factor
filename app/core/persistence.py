@@ -197,10 +197,23 @@ def _snapshot_date_fallback(df: pd.DataFrame) -> date:
     Bewusst ohne Dateinamen-Fallback (der lebt in
     ``signal_events.snapshot_date_from_universe`` — ein Import hier wäre
     zirkulär); Aufrufer mit Dateinamen-Kontext übergeben ``snapshot_date``
-    explizit.
+    explizit. Die Datums-Plausibilisierung spiegelt
+    ``signal_events.parse_export_dates``: numerische Werte würden von
+    ``pd.to_datetime`` als Nanosekunden seit der Unix-Epoche
+    fehlinterpretiert (→ 01.01.1970), unplausible Daten (vor 2000 oder
+    weit in der Zukunft) werden verworfen.
     """
     if df is not None and "export_date" in df.columns:
-        parsed = pd.to_datetime(df["export_date"], errors="coerce").dropna()
+        values = df["export_date"].where(
+            df["export_date"].map(
+                lambda v: isinstance(v, str) or hasattr(v, "year")
+            )
+        )
+        parsed = pd.to_datetime(values, errors="coerce").dropna()
+        if not parsed.empty:
+            lower = pd.Timestamp("2000-01-01")
+            upper = pd.Timestamp(date.today() + timedelta(days=7))
+            parsed = parsed[(parsed >= lower) & (parsed <= upper)]
         if not parsed.empty:
             return parsed.max().date()
     return date.today()
