@@ -204,11 +204,15 @@ def _sector_chart(res: dict) -> list:
         xaxis={"title": "Aktives Gewicht (Prozentpunkte)"},
         yaxis={"autorange": "reversed", "title": None},
     )
+    subtitle = (
+        "Portfolio vs. Universum (marktkapitalisierungsgewichtete Anteile "
+        "des Daten-Imports)."
+        if res.get("sektor_benchmark_quelle") == "universe"
+        else "Portfolio vs. MSCI ACWI (statische Gewichte, quartalsweise "
+        "gepflegt)."
+    )
     return [
-        section_header(
-            "Aktive Sektorallokation",
-            "Portfolio vs. MSCI ACWI (statische Gewichte, quartalsweise gepflegt).",
-        ),
+        section_header("Aktive Sektorallokation", subtitle),
         dcc.Graph(figure=fig, config={"displayModeBar": False}),
     ]
 

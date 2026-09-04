@@ -45,6 +45,30 @@ DISCLAIMER = (
 TOP_DRIVERS = 5
 
 
+def _benchmark_sector_weights(
+    settings: Settings, scored: pd.DataFrame | None
+) -> tuple[dict[str, float], str]:
+    """Benchmark-Sektorgewichte für die aktive Sektorallokation.
+
+    Folgt ``pc_benchmark_source`` (konsistent zur Portfoliokonstruktion):
+    ``"universe"`` = marktkapitalisierungsgewichtete Anteile des geladenen
+    Universums; ``"static"`` (oder kein Universum) = manuell gepflegte
+    ACWI-Gewichte aus den Einstellungen. Liefert (Gewichte, Quelle).
+    """
+    if (
+        settings.pc_benchmark_source == "universe"
+        and scored is not None
+        and not scored.empty
+        and "sector" in scored.columns
+    ):
+        from .portfolio_construction import universe_benchmark_weights
+
+        bm = universe_benchmark_weights(scored)
+        if bm.sector:
+            return bm.sector, "universe"
+    return dict(settings.risk_benchmark_sector_weights), "static"
+
+
 def compute_risk_report(
     tickers: list[str],
     weights: dict[str, float],
@@ -99,8 +123,11 @@ def compute_risk_report(
         mcte_fehler = str(exc)
         log.warning("MCTE nicht berechenbar: %s", exc)
 
+    bm_sector_weights, sektor_benchmark_quelle = _benchmark_sector_weights(
+        settings, scored
+    )
     sektor_allokation = active_sector_weights(
-        weights, sectors, settings.risk_benchmark_sector_weights
+        weights, sectors, bm_sector_weights
     )
 
     szenarien: list[risk_scenarios.ScenarioResult] = []
@@ -153,6 +180,7 @@ def compute_risk_report(
         "ranking": ranking,
         "sektor_cte": sektor_cte,
         "sektor_allokation": sektor_allokation,
+        "sektor_benchmark_quelle": sektor_benchmark_quelle,
         "szenarien": szenarien,
         "unbekannte_szenarien": unbekannte_szenarien,
         "betas": betas,
@@ -373,10 +401,20 @@ def _section_sectors(res: dict) -> str:
     if df.empty:
         parts.append("Keine Sektordaten verfügbar (Universum nicht geladen?).")
         return "\n".join(parts)
+    if res.get("sektor_benchmark_quelle") == "universe":
+        quelle = (
+            "Portfolio-Sektorgewichte vs. Universum (marktkapitalisierungs-"
+            "gewichtete Anteile des Daten-Imports), aktive Abweichung in "
+            "Prozentpunkten:"
+        )
+    else:
+        quelle = (
+            "Portfolio-Sektorgewichte vs. MSCI-ACWI-Gewichte "
+            "(statisch, quartalsweise gepflegt), aktive Abweichung in "
+            "Prozentpunkten:"
+        )
     parts += [
-        "Portfolio-Sektorgewichte vs. MSCI-ACWI-Gewichte "
-        "(statisch, quartalsweise gepflegt), aktive Abweichung in "
-        "Prozentpunkten:",
+        quelle,
         "",
         _table(
             ["Sektor", "Portfolio", "Benchmark", "Aktiv"],

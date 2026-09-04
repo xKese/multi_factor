@@ -753,7 +753,10 @@ Benchmark-Gewichte (`pc_benchmark_source`, Default `"universe"`):
   (`pc_benchmark_max_age_days`) → Band ausgesetzt + Warnung.
 
 Die Ex-ante-TE-Kontrolle (12.4) rechnet unabhängig von dieser Quelle
-weiterhin gegen die ACWI-Kurszeitreihe.
+weiterhin gegen die ACWI-Kurszeitreihe. Die **aktive Sektorallokation des
+Risikomoduls** (`/risiko`, Report-Abschnitt 4) folgt derselben Quelle
+(`pc_benchmark_source`), damit beide Seiten gegen dieselbe Benchmark
+vergleichen; TE/MCTE/Szenarien bleiben ACWI-basiert.
 
 Bandprüfung bei der Kandidaten-Aufnahme: Geprüft wird nur der Sektor bzw.
 die Region des Kandidaten — die Gewichte aller anderen Gruppen können
