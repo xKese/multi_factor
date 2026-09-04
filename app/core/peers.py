@@ -1,8 +1,13 @@
 """Peer-Computation: Top-N Titel zu einem Ziel-Ticker.
 
 Zwei Modi auf demselben Layered-Pool (Industry → Sector → Region → Universum):
-- ``similar``: Sortierung nach Distanz im Faktor-Score-Raum (V/Q/G/M/LV, 0–100).
-- ``top_score``: Sortierung nach ``total_score`` absteigend (beste Alternative im Segment).
+- ``similar``: Sortierung nach Distanz im Faktor-Score-Raum — v1: V/Q/G/M/LV
+  (0–100, neutral 50), v2: Faktor-Z-Scores (z_value/…, neutral 0).
+- ``top_score``: Sortierung nach dem Primär-Score absteigend (v1
+  ``total_score``, v2 ``composite_score``) — beste Alternative im Segment.
+
+``version`` wählt das Scoring; die Seiten geben die aktive Version aus
+``settings.scoring_version`` durch, damit Peers und Anzeige konsistent sind.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 PeerMode = Literal["similar", "top_score"]
+PeerVersion = Literal["v1", "v2"]
 
 
 FACTOR_COLUMNS: tuple[str, ...] = (
@@ -21,6 +27,13 @@ FACTOR_COLUMNS: tuple[str, ...] = (
     "growth_score",
     "momentum_score",
     "lowvol_score",
+)
+
+FACTOR_COLUMNS_V2: tuple[str, ...] = (
+    "z_value",
+    "z_quality",
+    "z_momentum",
+    "z_investment",
 )
 
 RETURN_COLUMNS: tuple[str, ...] = (
@@ -32,6 +45,9 @@ RETURN_COLUMNS: tuple[str, ...] = (
     "region",
     "total_score",
     "classification",
+    "composite_score",
+    "classification_v2",
+    "zone_v2",
     "ret_12m",
 )
 
@@ -87,16 +103,22 @@ def compute_peers(
     ticker: str,
     n: int = 6,
     mode: PeerMode = "similar",
+    version: PeerVersion = "v1",
 ) -> pd.DataFrame:
     """Top-N Peers für ``ticker`` aus dem Layered-Pool.
 
     ``mode="similar"`` sortiert nach Faktor-Score-Distanz (kleinste zuerst);
-    NaN-Faktor-Scores werden mit dem neutralen Wert 50 gefüllt, damit
-    fehlende Daten keine künstliche Nähe oder Ferne produzieren.
+    NaN-Faktor-Werte werden mit dem neutralen Wert gefüllt (v1: 50 auf der
+    0–100-Skala, v2: 0 im Z-Score-Raum), damit fehlende Daten keine
+    künstliche Nähe oder Ferne produzieren.
 
-    ``mode="top_score"`` sortiert denselben Pool nach ``total_score``
-    absteigend (NaN ans Ende). Fehlt die Spalte ``total_score``, fällt die
-    Sortierung auf Distanz zurück.
+    ``mode="top_score"`` sortiert denselben Pool nach dem Primär-Score
+    absteigend (NaN ans Ende) — v1 ``total_score``, v2 ``composite_score``.
+    Fehlt die Score-Spalte, fällt die Sortierung auf Distanz zurück.
+
+    ``version="v2"`` rechnet Distanz und Ranking auf den Composite-v2-Spalten
+    (``z_value`` … ``z_investment``, ``composite_score``); fehlen diese,
+    greift der v1-Fallback.
     """
 
     if scored is None or scored.empty or not ticker:
@@ -108,7 +130,17 @@ def compute_peers(
     if target is None:
         return pd.DataFrame()
 
-    factors = [c for c in FACTOR_COLUMNS if c in scored.columns]
+    factor_cols, neutral, score_col = FACTOR_COLUMNS, 50.0, "total_score"
+    if version == "v2":
+        v2_factors = [c for c in FACTOR_COLUMNS_V2 if c in scored.columns]
+        if v2_factors:
+            factor_cols, neutral, score_col = (
+                FACTOR_COLUMNS_V2,
+                0.0,
+                "composite_score",
+            )
+
+    factors = [c for c in factor_cols if c in scored.columns]
     if not factors:
         return pd.DataFrame()
 
@@ -116,16 +148,18 @@ def compute_peers(
     if pool.empty:
         return pd.DataFrame()
 
-    target_vec = target[factors].astype(float).fillna(50.0).to_numpy()
-    pool_mat = pool[factors].astype(float).fillna(50.0).to_numpy()
+    target_vec = target[factors].astype(float).fillna(neutral).to_numpy()
+    pool_mat = pool[factors].astype(float).fillna(neutral).to_numpy()
     distance = np.sqrt(((pool_mat - target_vec) ** 2).sum(axis=1))
 
-    result_cols = [c for c in RETURN_COLUMNS if c in pool.columns] + factors
+    result_cols = [c for c in RETURN_COLUMNS if c in pool.columns] + [
+        c for c in factors if c not in RETURN_COLUMNS
+    ]
     out = pool[result_cols].copy()
     out["distance"] = distance
 
-    if mode == "top_score" and "total_score" in out.columns:
-        out = out.sort_values("total_score", ascending=False, na_position="last")
+    if mode == "top_score" and score_col in out.columns:
+        out = out.sort_values(score_col, ascending=False, na_position="last")
     else:
         out = out.sort_values("distance", ascending=True)
 

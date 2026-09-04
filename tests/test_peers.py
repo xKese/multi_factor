@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.core.data_loader import load_koyfin_csv
 from app.core.peers import compute_peers
 from app.core.scoring import compute_scores
+from app.core.scoring_v2 import compute_scores_v2
 
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "koyfin_sample.csv"
@@ -19,6 +20,12 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "koyfin_sample.csv"
 def _scored_fixture() -> pd.DataFrame:
     df = load_koyfin_csv(FIXTURE.read_bytes())
     return compute_scores(df, Settings())
+
+
+def _scored_v2_fixture() -> pd.DataFrame:
+    settings = Settings()
+    out, _ = compute_scores_v2(_scored_fixture(), settings)
+    return out
 
 
 def test_similar_mode_sorts_by_distance_ascending():
@@ -70,3 +77,35 @@ def test_default_mode_is_similar():
     default = compute_peers(scored, ticker, n=6)
     explicit = compute_peers(scored, ticker, n=6, mode="similar")
     pd.testing.assert_frame_equal(default, explicit)
+
+
+def test_v2_similar_uses_z_space():
+    scored = _scored_v2_fixture()
+    ticker = scored["ticker"].iloc[0]
+    out = compute_peers(scored, ticker, n=6, mode="similar", version="v2")
+
+    assert not out.empty
+    assert {"z_value", "z_quality", "z_momentum", "z_investment"} <= set(
+        out.columns
+    )
+    assert "composite_score" in out.columns
+    distances = out["distance"].to_numpy()
+    assert np.all(np.diff(distances) >= 0), "Distanz muss aufsteigend sortiert sein"
+
+
+def test_v2_top_score_sorts_by_composite_descending():
+    scored = _scored_v2_fixture()
+    ticker = scored["ticker"].iloc[0]
+    out = compute_peers(scored, ticker, n=6, mode="top_score", version="v2")
+
+    assert not out.empty
+    scores = out["composite_score"].dropna().to_numpy()
+    assert np.all(np.diff(scores) <= 0), "composite_score muss absteigend sortiert sein"
+
+
+def test_v2_falls_back_to_v1_without_v2_columns():
+    scored = _scored_fixture()
+    ticker = scored["ticker"].iloc[0]
+    fallback = compute_peers(scored, ticker, n=6, version="v2")
+    v1 = compute_peers(scored, ticker, n=6, version="v1")
+    pd.testing.assert_frame_equal(fallback, v1)

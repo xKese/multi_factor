@@ -460,19 +460,28 @@ def build_context(
     # Rang
     rank = compute_rank(df, ticker)
 
-    # Peers (4 ähnlichste)
+    # Peers (4 ähnlichste) — bei aktivem Scoring v2 im v2-Faktorraum
+    # bestimmt und mit Composite-v2-Score/-Klasse beschriftet.
+    v2_primary = (
+        settings.scoring_version == "v2" and "composite_score" in df.columns
+    )
+    peer_score_col = "composite_score" if v2_primary else "total_score"
+    peer_class_col = "classification_v2" if v2_primary else "classification"
     peers_ctx: list[dict[str, Any]] = []
     if show_peers:
-        peers_df = compute_peers(df, ticker, n=4, mode="similar")
+        peers_df = compute_peers(
+            df, ticker, n=4, mode="similar",
+            version="v2" if v2_primary else "v1",
+        )
         for _, p in peers_df.iterrows():
-            score = _safe_float(p.get("total_score"))
+            score = _safe_float(p.get(peer_score_col))
             ret_12m = _safe_float(p.get("ret_12m"))
             peers_ctx.append(
                 {
                     "ticker": str(p.get("ticker") or ""),
                     "name": str(p.get("name") or ""),
                     "score": fmt_de(score, 1) if score is not None else "–",
-                    "classification": str(p.get("classification") or ""),
+                    "classification": str(p.get(peer_class_col) or ""),
                     "ret_12m": fmt_signed_percent(ret_12m, 1) if ret_12m is not None else "–",
                     "ret_tone": _ret_tone(ret_12m),
                 }

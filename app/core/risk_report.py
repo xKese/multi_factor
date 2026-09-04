@@ -167,6 +167,7 @@ def compute_risk_report(
     return {
         "asof": asof,
         "erstellt": datetime.now(),
+        "scoring_version": settings.scoring_version,
         "variante": variant,
         "benchmark": settings.risk_benchmark_symbol,
         "tickers": tickers,
@@ -213,6 +214,21 @@ def _fmt_date(value) -> str:
     return pd.Timestamp(value).strftime("%d.%m.%Y")
 
 
+def _v2_report(res: dict) -> bool:
+    """True, wenn Scoring v2 primär ist und das Ranking v2-Werte trägt.
+
+    ``join_signals`` legt die v2-Spalten immer an (ggf. leer) — entscheidend
+    ist daher, ob mindestens ein Composite-Wert vorliegt.
+    """
+    ranking = res.get("ranking")
+    return (
+        res.get("scoring_version") == "v2"
+        and isinstance(ranking, pd.DataFrame)
+        and "composite_score" in ranking.columns
+        and ranking["composite_score"].notna().any()
+    )
+
+
 def _text(value) -> str:
     """NA-sicherer Zellentext (pd.NA verträgt kein ``or``)."""
 
@@ -246,11 +262,12 @@ def _section_summary(res: dict) -> str:
 
     if not res["ranking"].empty:
         top = res["ranking"].head(TOP_DRIVERS)
+        action_col = "zone_v2" if _v2_report(res) else "recommendation"
         drivers = []
         for _, r in top.iterrows():
             extra = []
-            if isinstance(r.get("recommendation"), str) and r["recommendation"]:
-                extra.append(r["recommendation"])
+            if isinstance(r.get(action_col), str) and r[action_col]:
+                extra.append(r[action_col])
             if isinstance(r.get("sma_signal"), str) and r["sma_signal"] not in ("", "-"):
                 extra.append(r["sma_signal"])
             suffix = f" ({', '.join(extra)})" if extra else ""
@@ -350,6 +367,9 @@ def _section_mcte(res: dict) -> str:
             "",
         ]
 
+    v2 = _v2_report(res)
+    score_col = "composite_score" if v2 else "total_score"
+    action_col = "zone_v2" if v2 else "recommendation"
     rows = []
     for i, (_, r) in enumerate(res["ranking"].iterrows()):
         ticker = f"**{r['ticker']}**" if i < TOP_DRIVERS else str(r["ticker"])
@@ -359,8 +379,8 @@ def _section_mcte(res: dict) -> str:
                 fmt_percent(r["gewicht"]),
                 _fmt_bp(r["cte_bp"]),
                 fmt_percent(r["mcte"]),
-                fmt_de(r.get("total_score"), 1),
-                _text(r.get("recommendation")),
+                fmt_de(r.get(score_col), 1),
+                _text(r.get(action_col)),
                 _text(r.get("sma_signal")),
             ]
         )
@@ -371,8 +391,8 @@ def _section_mcte(res: dict) -> str:
                 "Gewicht",
                 "CTE",
                 "MCTE (je 100 % Gewicht)",
-                "Score",
-                "Empfehlung",
+                "Composite v2" if v2 else "Score",
+                "Zone" if v2 else "Empfehlung",
                 "SMA-Signal",
             ],
             rows,
