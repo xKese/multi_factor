@@ -103,6 +103,57 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "risk_benchmark_sector_weights",
     "risk_scenario_windows",
     "risk_factor_shocks",
+    # Composite v2 und Portfoliokonstruktion (Spec Composite v2).
+    "scoring_version",
+    "factor_timing_mode",
+    "v2_weight_value",
+    "v2_weight_quality",
+    "v2_weight_momentum",
+    "v2_weight_investment",
+    "v2_min_factor_weight",
+    "v2_min_group_size",
+    "v2_min_group_valid",
+    "v2_winsor_lower",
+    "v2_winsor_upper",
+    "v2_zscore_cap",
+    "v2_composite_winsor_lower",
+    "v2_composite_winsor_upper",
+    "v2_min_volatility",
+    "v2_min_valid_nonfin",
+    "v2_min_valid_financial",
+    "filter_min_market_cap",
+    "filter_min_piotroski",
+    "filter_min_altman",
+    "filter_min_adv",
+    "filter_min_coverage",
+    "filter_min_listing_days",
+    "filter_max_de",
+    "filter_min_icr",
+    "pc_target_n",
+    "pc_min_n",
+    "pc_max_n",
+    "pc_entry_pct",
+    "pc_exit_pct",
+    "pc_fill_pct",
+    "pc_sector_band",
+    "pc_region_band",
+    "pc_max_per_sector",
+    "pc_benchmark_max_age_days",
+    "risk_benchmark_sector_weights_asof",
+    "pc_vol_floor",
+    "pc_vol_cap",
+    "pc_weight_cap",
+    "pc_weight_floor",
+    "pc_te_target_low",
+    "pc_te_target_high",
+    "pc_te_max",
+    "pc_max_cte_share",
+    "pc_te_min_coverage",
+    "pc_rebalance_months",
+    "pc_interim_months",
+    "pc_turnover_budget_full",
+    "pc_turnover_budget_interim",
+    "pc_min_trade_size",
 )
 
 _engine: Engine | None = None
@@ -185,6 +236,17 @@ def _archive_universe_snapshot(conn, df: pd.DataFrame, snapshot_date: date) -> N
         from .uid import assign_uids
 
         frame = assign_uids(frame)
+    # Listen-/Dict-Spalten (z. B. ``filter_reasons`` aus Composite v2) sind
+    # nicht SQL-fähig — als JSON-Text ablegen.
+    for col in frame.columns:
+        if frame[col].dtype == object and frame[col].map(
+            lambda v: isinstance(v, (list, dict))
+        ).any():
+            frame[col] = frame[col].map(
+                lambda v: json.dumps(v, ensure_ascii=False)
+                if isinstance(v, (list, dict))
+                else v
+            )
     frame["snapshot_date"] = snapshot_date
     frame["imported_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -1466,3 +1528,474 @@ def load_settings() -> Settings | None:
     settings = Settings()
     _apply_settings_dict(settings, data)
     return settings
+
+
+# ── Composite v2 / Portfoliokonstruktion (Spec 8, 5.3, 10) ──────────────
+
+_OVERRIDE_TABLE = "override_register"
+_REGION_WEIGHTS_TABLE = "risk_benchmark_region_weights"
+_MODEL_PORTFOLIO_TABLE = "model_portfolio"
+_MODEL_PORTFOLIO_META_TABLE = "model_portfolio_meta"
+
+# Maximale Override-Laufzeit (Spec 8): expires_at ≤ created_at + 180 Tage.
+OVERRIDE_MAX_DAYS = 180
+OVERRIDE_MIN_REASON_LEN = 20
+_OVERRIDE_DIRECTIONS = ("exclude", "include", "weight")
+
+
+def _ensure_override_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_OVERRIDE_TABLE} ("
+            "id INTEGER PRIMARY KEY, "
+            "uid TEXT NOT NULL, "
+            "direction TEXT NOT NULL CHECK (direction IN "
+            "('exclude', 'include', 'weight')), "
+            "target_weight DOUBLE PRECISION, "
+            f"reason TEXT NOT NULL CHECK (length(reason) >= {OVERRIDE_MIN_REASON_LEN}), "
+            "owner TEXT NOT NULL, "
+            "created_at TIMESTAMP NOT NULL, "
+            "expires_at DATE NOT NULL, "
+            "status TEXT NOT NULL DEFAULT 'active' CHECK (status IN "
+            "('active', 'expired', 'closed')), "
+            "closed_at TIMESTAMP, "
+            "closed_by TEXT, "
+            "close_note TEXT)"
+        )
+    )
+
+
+def save_override(
+    uid: str,
+    direction: str,
+    reason: str,
+    owner: str,
+    expires_at: date,
+    target_weight: float | None = None,
+) -> int:
+    """Legt einen Override an (Spec 8). Validiert Pflichtfelder und raised
+    ``ValueError`` bei Regelverletzung, ``RuntimeError`` ohne DB-Engine.
+    Liefert die vergebene Override-ID."""
+
+    if not (isinstance(uid, str) and uid.strip()):
+        raise ValueError("Override ohne Titel (uid) ist nicht anlegbar.")
+    if direction not in _OVERRIDE_DIRECTIONS:
+        raise ValueError(f"Unbekannte Override-Richtung: {direction!r}")
+    if not (isinstance(reason, str) and len(reason.strip()) >= OVERRIDE_MIN_REASON_LEN):
+        raise ValueError(
+            "Override-Begründung ist Pflicht und braucht mindestens "
+            f"{OVERRIDE_MIN_REASON_LEN} Zeichen."
+        )
+    if not (isinstance(owner, str) and owner.strip()):
+        raise ValueError("Override ohne Verantwortlichen (owner) ist nicht anlegbar.")
+    if expires_at is None:
+        raise ValueError("Override ohne Ablaufdatum ist nicht anlegbar.")
+    created_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    if expires_at > created_at.date() + timedelta(days=OVERRIDE_MAX_DAYS):
+        raise ValueError(
+            f"Ablaufdatum liegt mehr als {OVERRIDE_MAX_DAYS} Tage in der Zukunft."
+        )
+    if direction == "weight":
+        if target_weight is None or not (0.0 < float(target_weight) <= 1.0):
+            raise ValueError(
+                "Weight-Override braucht ein Zielgewicht in (0, 1]."
+            )
+    elif target_weight is not None:
+        raise ValueError("target_weight ist nur bei direction='weight' zulässig.")
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    with engine.begin() as conn:
+        _ensure_override_table(conn)
+        next_id = conn.execute(
+            text(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {_OVERRIDE_TABLE}")
+        ).scalar_one()
+        conn.execute(
+            text(
+                f"INSERT INTO {_OVERRIDE_TABLE} "
+                "(id, uid, direction, target_weight, reason, owner, "
+                "created_at, expires_at, status) "
+                "VALUES (:id, :uid, :direction, :target_weight, :reason, "
+                ":owner, :created_at, :expires_at, 'active')"
+            ),
+            {
+                "id": int(next_id),
+                "uid": uid.strip(),
+                "direction": direction,
+                "target_weight": (
+                    None if target_weight is None else float(target_weight)
+                ),
+                "reason": reason.strip(),
+                "owner": owner.strip(),
+                "created_at": created_at,
+                "expires_at": expires_at,
+            },
+        )
+    return int(next_id)
+
+
+def close_override(override_id: int, closed_by: str, close_note: str = "") -> None:
+    """Schließt einen Override manuell. Raised bei DB-Problemen."""
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    with engine.begin() as conn:
+        _ensure_override_table(conn)
+        conn.execute(
+            text(
+                f"UPDATE {_OVERRIDE_TABLE} SET status = 'closed', "
+                "closed_at = CURRENT_TIMESTAMP, closed_by = :by, "
+                "close_note = :note WHERE id = :id"
+            ),
+            {"by": closed_by, "note": close_note or None, "id": int(override_id)},
+        )
+
+
+def expire_overrides(snapshot_date: date) -> list[dict]:
+    """Setzt abgelaufene Overrides (``expires_at < snapshot_date``) auf
+    ``expired`` (Spec 8) und liefert die betroffenen Einträge für die
+    Diagnose ("Override abgelaufen – erneuern oder schließen").
+    Fail-open: leere Liste bei DB-Problemen."""
+
+    engine = get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            _ensure_override_table(conn)
+            rows = conn.execute(
+                text(
+                    f"SELECT id, uid, direction FROM {_OVERRIDE_TABLE} "
+                    "WHERE status = 'active' AND expires_at < :snap"
+                ),
+                {"snap": snapshot_date},
+            ).fetchall()
+            if rows:
+                conn.execute(
+                    text(
+                        f"UPDATE {_OVERRIDE_TABLE} SET status = 'expired' "
+                        "WHERE status = 'active' AND expires_at < :snap"
+                    ),
+                    {"snap": snapshot_date},
+                )
+    except SQLAlchemyError as exc:
+        log.warning("Override-Ablaufprüfung fehlgeschlagen: %s", exc)
+        return []
+    return [
+        {"id": r[0], "uid": r[1], "direction": r[2]} for r in rows
+    ]
+
+
+def load_overrides(status: str | None = None) -> pd.DataFrame | None:
+    """Lädt das Override-Register (optional nach Status gefiltert).
+    Fail-open: ``None`` bei DB-Problemen."""
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_override_table(conn)
+            query = f"SELECT * FROM {_OVERRIDE_TABLE}"
+            params: dict = {}
+            if status:
+                query += " WHERE status = :status"
+                params["status"] = status
+            df = pd.read_sql(text(query + " ORDER BY id ASC"), conn, params=params)
+    except SQLAlchemyError as exc:
+        log.warning("Laden des Override-Registers fehlgeschlagen: %s", exc)
+        return None
+    return df
+
+
+def _ensure_region_weights_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_REGION_WEIGHTS_TABLE} ("
+            "region TEXT PRIMARY KEY, "
+            "weight DOUBLE PRECISION NOT NULL, "
+            "asof DATE NOT NULL)"
+        )
+    )
+
+
+def save_region_weights(weights: dict[str, float], asof: date) -> None:
+    """Ersetzt die Benchmark-Regionsgewichte (Spec 5.3). Raised bei Fehler."""
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    with engine.begin() as conn:
+        _ensure_region_weights_table(conn)
+        conn.execute(text(f"DELETE FROM {_REGION_WEIGHTS_TABLE}"))
+        if weights:
+            conn.execute(
+                text(
+                    f"INSERT INTO {_REGION_WEIGHTS_TABLE} "
+                    "(region, weight, asof) VALUES (:region, :weight, :asof)"
+                ),
+                [
+                    {"region": str(r), "weight": float(w), "asof": asof}
+                    for r, w in weights.items()
+                ],
+            )
+
+
+def load_region_weights() -> tuple[dict[str, float], date | None]:
+    """Lädt die Benchmark-Regionsgewichte. Fail-open: ({}, None)."""
+    engine = get_engine()
+    if engine is None:
+        return {}, None
+    try:
+        with engine.begin() as conn:
+            _ensure_region_weights_table(conn)
+            rows = conn.execute(
+                text(f"SELECT region, weight, asof FROM {_REGION_WEIGHTS_TABLE}")
+            ).fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Regionsgewichte fehlgeschlagen: %s", exc)
+        return {}, None
+    weights = {str(r[0]): float(r[1]) for r in rows}
+    asof = _coerce_snapshot_date(rows[0][2]) if rows else None
+    return weights, asof
+
+
+def settings_hash_v2(settings: Settings) -> str:
+    """SHA-256 über die JSON-serialisierten, sortierten v2- und pc-Settings
+    (Spec 10) — ordnet jede Portfolioversion ihrer Parametrisierung zu."""
+    import hashlib
+
+    payload = {
+        f.name: getattr(settings, f.name)
+        for f in dataclass_fields(settings)
+        if f.name.startswith(("v2_", "pc_", "filter_"))
+        or f.name in ("scoring_version", "factor_timing_mode")
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+_MODEL_PORTFOLIO_COLS: tuple[str, ...] = (
+    "uid",
+    "composite_z",
+    "composite_pct",
+    "zone_v2",
+    "weight_model",
+    "weight_effective",
+    "cte",
+    "action",
+    "reason",
+    "rebalance_mode",
+    "override_id",
+)
+
+
+def _ensure_model_portfolio_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_MODEL_PORTFOLIO_TABLE} ("
+            "snapshot_date DATE NOT NULL, "
+            "uid TEXT NOT NULL, "
+            "composite_z DOUBLE PRECISION, "
+            "composite_pct DOUBLE PRECISION, "
+            "zone_v2 TEXT, "
+            "weight_model DOUBLE PRECISION, "
+            "weight_effective DOUBLE PRECISION, "
+            "cte DOUBLE PRECISION, "
+            "action TEXT, "
+            "reason TEXT, "
+            "rebalance_mode TEXT, "
+            "override_id INTEGER, "
+            "PRIMARY KEY (snapshot_date, uid))"
+        )
+    )
+
+
+def _ensure_model_portfolio_meta_table(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_MODEL_PORTFOLIO_META_TABLE} ("
+            "snapshot_date DATE PRIMARY KEY, "
+            "rebalance_mode TEXT, "
+            "n_titles INTEGER, "
+            "te_ex_ante DOUBLE PRECISION, "
+            "te_coverage DOUBLE PRECISION, "
+            "turnover_oneway DOUBLE PRECISION, "
+            "n_trades INTEGER, "
+            "n_deferred INTEGER, "
+            "settings_hash TEXT, "
+            "diagnostics TEXT, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
+
+
+def save_model_portfolio(
+    df: pd.DataFrame, meta: dict, snapshot_date: date
+) -> None:
+    """Persistiert Zielportfolio und Metadaten (Spec 10).
+
+    UPSERT wie im PIT-Archiv: Zeilen desselben ``snapshot_date`` werden
+    ersetzt, ältere Snapshots bleiben unangetastet. Raised bei Fehler.
+    """
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    rows = []
+    for _, r in df.iterrows():
+        row = {"snapshot_date": snapshot_date}
+        for col in _MODEL_PORTFOLIO_COLS:
+            value = r.get(col)
+            row[col] = None if value is None or pd.isna(value) else value
+        if row["override_id"] is not None:
+            row["override_id"] = int(row["override_id"])
+        rows.append(row)
+    with engine.begin() as conn:
+        _ensure_model_portfolio_table(conn)
+        _ensure_model_portfolio_meta_table(conn)
+        conn.execute(
+            text(
+                f"DELETE FROM {_MODEL_PORTFOLIO_TABLE} "
+                "WHERE snapshot_date = :snap"
+            ),
+            {"snap": snapshot_date},
+        )
+        if rows:
+            cols = ", ".join(("snapshot_date",) + _MODEL_PORTFOLIO_COLS)
+            binds = ", ".join(
+                f":{c}" for c in ("snapshot_date",) + _MODEL_PORTFOLIO_COLS
+            )
+            conn.execute(
+                text(
+                    f"INSERT INTO {_MODEL_PORTFOLIO_TABLE} ({cols}) "
+                    f"VALUES ({binds})"
+                ),
+                rows,
+            )
+        conn.execute(
+            text(
+                f"INSERT INTO {_MODEL_PORTFOLIO_META_TABLE} "
+                "(snapshot_date, rebalance_mode, n_titles, te_ex_ante, "
+                "te_coverage, turnover_oneway, n_trades, n_deferred, "
+                "settings_hash, diagnostics, updated_at) "
+                "VALUES (:snapshot_date, :rebalance_mode, :n_titles, "
+                ":te_ex_ante, :te_coverage, :turnover_oneway, :n_trades, "
+                ":n_deferred, :settings_hash, :diagnostics, "
+                "CURRENT_TIMESTAMP) "
+                "ON CONFLICT (snapshot_date) DO UPDATE SET "
+                "rebalance_mode = EXCLUDED.rebalance_mode, "
+                "n_titles = EXCLUDED.n_titles, "
+                "te_ex_ante = EXCLUDED.te_ex_ante, "
+                "te_coverage = EXCLUDED.te_coverage, "
+                "turnover_oneway = EXCLUDED.turnover_oneway, "
+                "n_trades = EXCLUDED.n_trades, "
+                "n_deferred = EXCLUDED.n_deferred, "
+                "settings_hash = EXCLUDED.settings_hash, "
+                "diagnostics = EXCLUDED.diagnostics, "
+                "updated_at = CURRENT_TIMESTAMP"
+            ),
+            {
+                "snapshot_date": snapshot_date,
+                "rebalance_mode": meta.get("rebalance_mode"),
+                "n_titles": meta.get("n_titles"),
+                "te_ex_ante": meta.get("te_ex_ante"),
+                "te_coverage": meta.get("te_coverage"),
+                "turnover_oneway": meta.get("turnover_oneway"),
+                "n_trades": meta.get("n_trades"),
+                "n_deferred": meta.get("n_deferred"),
+                "settings_hash": meta.get("settings_hash"),
+                "diagnostics": meta.get("diagnostics"),
+            },
+        )
+
+
+def load_model_portfolio(snapshot_date: date | None = None) -> pd.DataFrame | None:
+    """Lädt das Zielportfolio (neuester Snapshot, wenn kein Datum gegeben).
+    Fail-open: ``None``."""
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_model_portfolio_table(conn)
+            snap = snapshot_date
+            if snap is None:
+                row = conn.execute(
+                    text(
+                        f"SELECT MAX(snapshot_date) FROM {_MODEL_PORTFOLIO_TABLE}"
+                    )
+                ).fetchone()
+                snap = _coerce_snapshot_date(row[0]) if row else None
+            if snap is None:
+                return None
+            df = pd.read_sql(
+                text(
+                    f"SELECT * FROM {_MODEL_PORTFOLIO_TABLE} "
+                    "WHERE snapshot_date = :snap ORDER BY uid ASC"
+                ),
+                conn,
+                params={"snap": snap},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden des Modellportfolios fehlgeschlagen: %s", exc)
+        return None
+    if df.empty:
+        return None
+    df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
+    return df
+
+
+def list_model_portfolio_dates() -> list[date]:
+    """Alle Snapshot-Daten des Modellportfolios, neueste zuerst. Fail-open."""
+    engine = get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            _ensure_model_portfolio_meta_table(conn)
+            rows = conn.execute(
+                text(
+                    f"SELECT snapshot_date FROM {_MODEL_PORTFOLIO_META_TABLE} "
+                    "ORDER BY snapshot_date DESC"
+                )
+            ).fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Auflisten der Modellportfolio-Daten fehlgeschlagen: %s", exc)
+        return []
+    return [d for d in (_coerce_snapshot_date(r[0]) for r in rows) if d is not None]
+
+
+def load_model_portfolio_meta(snapshot_date: date | None = None) -> dict | None:
+    """Lädt die Metadaten eines Modellportfolio-Snapshots (neuester ohne
+    Datum). Fail-open: ``None``."""
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_model_portfolio_meta_table(conn)
+            if snapshot_date is None:
+                row = conn.execute(
+                    text(
+                        f"SELECT * FROM {_MODEL_PORTFOLIO_META_TABLE} "
+                        "ORDER BY snapshot_date DESC LIMIT 1"
+                    )
+                ).mappings().fetchone()
+            else:
+                row = conn.execute(
+                    text(
+                        f"SELECT * FROM {_MODEL_PORTFOLIO_META_TABLE} "
+                        "WHERE snapshot_date = :snap"
+                    ),
+                    {"snap": snapshot_date},
+                ).mappings().fetchone()
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Modellportfolio-Metadaten fehlgeschlagen: %s", exc)
+        return None
+    if row is None:
+        return None
+    meta = dict(row)
+    meta["snapshot_date"] = _coerce_snapshot_date(meta.get("snapshot_date"))
+    return meta

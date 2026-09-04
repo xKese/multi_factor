@@ -10,6 +10,7 @@ Re-Design auf Basis des Claude-Design-Handoffs (Multi-Faktor Dashboard.html):
 
 from __future__ import annotations
 
+import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update, register_page
 
@@ -617,33 +618,99 @@ def _section_head(active_sector: str | None, n_rows: int) -> html.Div:
 
 # ── Layout ─────────────────────────────────────────────────────────────────
 
+def _v2_overview(df: pd.DataFrame) -> html.Div:
+    """Composite-v2-Übersicht (primäre Anzeige bei scoring_version = v2)."""
+    from app.pages.common import render_table
+    from app.ui.theme import kpi_band, section_header
+
+    zones = df.get("zone_v2", pd.Series(dtype=object)).value_counts()
+    avg = df.get("composite_score", pd.Series(dtype=float)).dropna().mean()
+    band = kpi_band(
+        [
+            {"label": "Ø Composite-Score (v2)", "value": fmt_de(avg, 1)},
+            {"label": "Kandidaten", "value": fmt_int(zones.get("KANDIDAT", 0)),
+             "tone": "up"},
+            {"label": "Halten", "value": fmt_int(zones.get("HALTEN", 0))},
+            {"label": "Verkaufen", "value": fmt_int(zones.get("VERKAUFEN", 0)),
+             "tone": "down"},
+            {"label": "Filter", "value": fmt_int(zones.get("FILTER", 0)),
+             "tone": "warn"},
+        ]
+    )
+    cols = [
+        c
+        for c in (
+            "ticker", "uid", "name", "sector", "composite_score",
+            "classification_v2", "zone_v2", "data_coverage_v2",
+        )
+        if c in df.columns
+    ]
+    top = (
+        df.dropna(subset=["composite_score"])
+        .sort_values(["composite_score", "uid"], ascending=[False, True])
+        .head(20)[cols]
+        .copy()
+    )
+    if "data_coverage_v2" in top.columns:
+        top["data_coverage_v2"] = (top["data_coverage_v2"] * 100).round(0)
+    return html.Div(
+        [
+            section_header(
+                "Composite v2",
+                "Top-Titel nach Composite-Score · Details auf /modellportfolio",
+            ),
+            band,
+            render_table(top, id="dash-v2-table", page_size=20),
+        ],
+        className="mb-3",
+    )
+
+
 def layout(**_) -> html.Div:
     df = STATE.scored
     if df.empty:
         return html.Div([_empty_state()])
 
-    return html.Div(
-        [
-            _hero(df),
-            _regime_strip(df),
-            _rec_distribution(df),
-            html.Div(
-                [
-                    _factor_columns_card(df),
-                    _sector_ranking_card(df, None),
-                    _movers_card(df),
-                ],
-                className="ms-row ms-r-3",
-                id="dash-row-3",
-            ),
-            dcc.Store(id="dash-sector-filter", data=None),
-            html.Div(_section_head(None, 25), id="dash-top-section"),
-            html.Div(
-                _top_table(df, None, 25),
-                id="dash-top-table",
-            ),
-        ]
-    )
+    v1_blocks = [
+        _regime_strip(df),
+        _rec_distribution(df),
+        html.Div(
+            [
+                _factor_columns_card(df),
+                _sector_ranking_card(df, None),
+                _movers_card(df),
+            ],
+            className="ms-row ms-r-3",
+            id="dash-row-3",
+        ),
+        dcc.Store(id="dash-sector-filter", data=None),
+        html.Div(_section_head(None, 25), id="dash-top-section"),
+        html.Div(
+            _top_table(df, None, 25),
+            id="dash-top-table",
+        ),
+    ]
+    if (
+        STATE.settings.scoring_version == "v2"
+        and "composite_score" in df.columns
+    ):
+        # v2 primär, v1 als aufklappbarer Vergleichsbereich (Spec 11.2).
+        return html.Div(
+            [
+                _hero(df),
+                _v2_overview(df),
+                dbc.Accordion(
+                    [
+                        dbc.AccordionItem(
+                            v1_blocks, title="Scoring v1 (Vergleich)"
+                        )
+                    ],
+                    start_collapsed=True,
+                    className="mb-3",
+                ),
+            ]
+        )
+    return html.Div([_hero(df), *v1_blocks])
 
 
 # ── Callbacks ──────────────────────────────────────────────────────────────

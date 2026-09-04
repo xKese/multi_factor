@@ -75,6 +75,35 @@ FINANCIAL_IRRELEVANT_INDICATORS: frozenset[str] = frozenset(
     }
 )
 
+# ── Composite v2: Bereinigung vor der Standardisierung ───────────────────
+# Multiples, deren negativer Wert nur durch einen negativen Nenner entsteht
+# und daher vor dem Z-Score auf NaN maskiert wird (Spec 1.3).
+V2_NEGATIVE_IS_INVALID: frozenset[str] = frozenset(
+    {"pe", "pb", "pfcf", "ev_ebitda", "ev_ebit"}
+)
+
+# Gültigkeitsbänder je v2-Indikator: Werte außerhalb (untere, obere Grenze)
+# sind Datenartefakte und werden auf NaN gesetzt. ``None`` = keine Grenze.
+# Negative Werte innerhalb des Bandes bleiben bewusst gültig (z. B. negativer
+# FCF/EV als echte Bewertungsinformation, Nettocash bei net_debt_ebitda).
+V2_CLEAN_BOUNDS: dict[str, tuple[float | None, float | None]] = {
+    "fcf_yield": (-0.5, 0.5),
+    "net_debt_ebitda": (-20.0, 50.0),
+    "debt_ebit": (None, 50.0),
+    "asset_growth": (-0.9, 3.0),
+    "share_issuance": (-0.9, 3.0),
+    "accruals": (-1.0, 1.0),
+    "gp_ta": (-1.0, 3.0),
+    "roic": (-1.0, 2.0),
+    "eps_revisions_3m": (-1.0, 1.0),
+}
+
+# Portfoliokonstruktion: feste Verfahrensparameter (keine Settings, weil sie
+# den Algorithmus definieren, nicht die Politik).
+PC_TE_STEP: float = 0.005
+PC_TE_MAX_ITER: int = 40
+PC_CAPFLOOR_MAX_ITER: int = 50
+
 
 @dataclass
 class Settings:
@@ -250,6 +279,109 @@ class Settings:
         }
     )
 
+    # ── Composite v2 (Spec: 4-Faktor-Composite, Z-Score-basiert) ────────
+    # Welche Score-Version die UI primär anzeigt; beide Versionen werden bei
+    # jedem Import berechnet und im PIT-Archiv gespeichert.
+    scoring_version: str = "v2"
+    # Faktor-Timing: "monitor" = taktische Gewichte werden nur angezeigt,
+    # "active" = sie ersetzen die strategischen v2-Gewichte (nicht empfohlen,
+    # nur für spätere Backtests).
+    factor_timing_mode: str = "monitor"
+    # Strategische Faktorgewichte (Spec 2.4). Summe muss 1,0 ± 0,001 ergeben
+    # (``validate_v2_weights``), sonst Import-Fehler.
+    v2_weight_value: float = 0.30
+    v2_weight_quality: float = 0.30
+    v2_weight_momentum: float = 0.25
+    v2_weight_investment: float = 0.15
+    # Composite nur, wenn die Gewichte vorhandener Faktoren mindestens diesen
+    # Anteil stellen und Value oder Quality dabei ist (Spec 3.4).
+    v2_min_factor_weight: float = 0.70
+    # Neutralisierungsgruppen: Mindestanzahl gültiger Werte je Gruppe, sonst
+    # Fallback region×sector → sector → global (Spec 3.1).
+    v2_min_group_size: int = 20
+    # Unter dieser Anzahl gültiger Werte in der (finalen) Gruppe wird z = 0
+    # gesetzt und die Diagnose vermerkt (Spec 3.2).
+    v2_min_group_valid: int = 5
+    # Winsorisierung je Indikator innerhalb der Gruppe (Spec 3.2).
+    v2_winsor_lower: float = 0.03
+    v2_winsor_upper: float = 0.97
+    v2_zscore_cap: float = 3.0
+    # Zweite, globale Standardisierung des Composites (Spec 3.4).
+    v2_composite_winsor_lower: float = 0.01
+    v2_composite_winsor_upper: float = 0.99
+    # Vola-Floor für ``mom_12_1_adj`` (Spec 1.3).
+    v2_min_volatility: float = 0.05
+    # Mindestabdeckung je Faktor (Spec 3.3): Anzahl gültiger Indikatoren.
+    # Sonderregel Value Nicht-Financials: Bei nur 2 Indikatoren (fehlende
+    # Spalte ``ev_ebit``) genügt 1 gültiger Wert — greift im Code.
+    v2_min_valid_nonfin: dict[str, float] = field(
+        default_factory=lambda: {
+            "value": 2.0,
+            "quality": 2.0,
+            "momentum": 1.0,
+            "investment": 1.0,
+        }
+    )
+    v2_min_valid_financial: dict[str, float] = field(
+        default_factory=lambda: {
+            "value": 1.0,
+            "quality": 1.0,
+            "momentum": 1.0,
+            "investment": 1.0,
+        }
+    )
+
+    # ── Universumsfilter v2 (Spec 4, harte Ausschlüsse) ─────────────────
+    filter_min_market_cap: float = 1000.0
+    filter_min_piotroski: float = 5.0
+    filter_min_altman: float = 1.8
+    # Liquiditätsfilter: durchschnittlicher Tagesumsatz 3M in Mio EUR; nur
+    # angewendet, wenn die optionale Spalte ``adv_3m`` vorhanden ist.
+    filter_min_adv: float = 2.0
+    filter_min_coverage: float = 0.6
+    # IPO-Filter: Mindestanzahl Tage seit Erstnotiz (Spalte ``ipo_date``).
+    filter_min_listing_days: int = 365
+    # Extremverschuldung Nicht-Financials: D/E > max UND ICR < min.
+    filter_max_de: float = 3.0
+    filter_min_icr: float = 2.0
+
+    # ── Portfoliokonstruktion: Selektion (Spec 5) ───────────────────────
+    pc_target_n: int = 35
+    pc_min_n: int = 25
+    pc_max_n: int = 40
+    pc_entry_pct: float = 0.80
+    pc_exit_pct: float = 0.667
+    pc_fill_pct: float = 0.70
+    pc_sector_band: float = 0.10
+    pc_region_band: float = 0.10
+    pc_max_per_sector: int = 8
+    # Benchmark-Gewichte älter als diese Anzahl Tage → Bandbreiten-
+    # Restriktion ausgesetzt, Warnung (Spec 5.3).
+    pc_benchmark_max_age_days: int = 120
+    # Stand (ISO-Datum) der manuell gepflegten ACWI-Sektorgewichte
+    # ``risk_benchmark_sector_weights``. Leer = unbekannt → Restriktion
+    # ausgesetzt. Die Spec spricht von einer Tabelle; real sind die
+    # Sektorgewichte ein Settings-Dict, daher lebt das ``asof`` hier.
+    risk_benchmark_sector_weights_asof: str = ""
+
+    # ── Portfoliokonstruktion: Gewichtung und TE (Spec 6) ───────────────
+    pc_vol_floor: float = 0.10
+    pc_vol_cap: float = 0.60
+    pc_weight_cap: float = 0.05
+    pc_weight_floor: float = 0.02
+    pc_te_target_low: float = 0.045
+    pc_te_target_high: float = 0.055
+    pc_te_max: float = 0.060
+    pc_max_cte_share: float = 0.15
+    pc_te_min_coverage: float = 0.60
+
+    # ── Rebalancing-Kalender und Turnover-Budget (Spec 7) ───────────────
+    pc_rebalance_months: list[int] = field(default_factory=lambda: [3, 9])
+    pc_interim_months: list[int] = field(default_factory=lambda: [6, 12])
+    pc_turnover_budget_full: float = 0.20
+    pc_turnover_budget_interim: float = 0.10
+    pc_min_trade_size: float = 0.005
+
     INVERT_LOW_IS_BETTER: set[str] = field(
         default_factory=lambda: {
             "pb",
@@ -273,3 +405,25 @@ class Settings:
             "momentum": self.momentum_weights,
             "lowvol": self.lowvol_weights,
         }
+
+    def v2_factor_weights(self) -> dict[str, float]:
+        """Strategische v2-Faktorgewichte als Dict (Spec 2.4)."""
+        return {
+            "value": self.v2_weight_value,
+            "quality": self.v2_weight_quality,
+            "momentum": self.v2_weight_momentum,
+            "investment": self.v2_weight_investment,
+        }
+
+    def validate_v2_weights(self) -> None:
+        """Validiert die v2-Faktorgewichte (Summe 1,0 ± 0,001, Spec 2.4).
+
+        Wird beim Import (``compute_scores_v2``) und beim Speichern der
+        Einstellungen aufgerufen; eine Verletzung ist ein Import-Fehler.
+        """
+        total = sum(self.v2_factor_weights().values())
+        if abs(total - 1.0) > 0.001:
+            raise ValueError(
+                "Summe der v2-Faktorgewichte muss 1,0 ± 0,001 ergeben "
+                f"(aktuell {total:.4f})."
+            )

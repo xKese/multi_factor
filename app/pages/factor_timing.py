@@ -188,6 +188,19 @@ def layout(**_) -> html.Div:
                 "Factor Timing System",
                 "Regelbasierte taktische Faktor-Allokation — 6-Monats-Horizont.",
             ),
+            dbc.Alert(
+                (
+                    "Modus: monitor — die taktischen Gewichte werden angezeigt, "
+                    "fließen aber NICHT in das Composite v2 ein."
+                    if STATE.settings.factor_timing_mode != "active"
+                    else "Modus: active — die taktischen Gewichte ersetzen die "
+                    "strategischen v2-Faktorgewichte (nur für Backtests "
+                    "empfohlen, umstellbar in den Einstellungen)."
+                ),
+                color="info" if STATE.settings.factor_timing_mode != "active"
+                else "warning",
+                className="mb-3",
+            ),
             dbc.Row(
                 [
                     dbc.Col(

@@ -149,6 +149,10 @@ FLAG_DEATH = "DEATH CROSS"
 FLAG_BEARISH = "UNTER SMA-200"
 FLAG_TIRED = "ERMÜDET"
 FLAG_NEW = "SIGNAL NEU"
+# Composite v2 (Spec 9): Zonen als zusätzliche Flags — die bestehende
+# v1-Severity-Logik bleibt unverändert, v2-Flags reihen sich dahinter ein.
+FLAG_V2_FILTER = "V2: FILTER"
+FLAG_V2_SELL = "V2: VERKAUFEN"
 
 # Severity: kleiner = dringlicher. Bestimmt Sortierung der Flag-Tabelle.
 FLAG_SEVERITY = {
@@ -158,6 +162,8 @@ FLAG_SEVERITY = {
     FLAG_BEARISH: 3,
     FLAG_TIRED: 4,
     FLAG_NEW: 5,
+    FLAG_V2_FILTER: 6,
+    FLAG_V2_SELL: 7,
 }
 
 
@@ -177,6 +183,11 @@ def _row_flags(row: pd.Series) -> list[str]:
         flags.append(FLAG_TIRED)
     if bool(row.get("is_new")):
         flags.append(FLAG_NEW)
+    zone = str(row.get("zone_v2") or "")
+    if zone == "FILTER":
+        flags.append(FLAG_V2_FILTER)
+    elif zone == "VERKAUFEN":
+        flags.append(FLAG_V2_SELL)
     return flags
 
 

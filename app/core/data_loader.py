@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .schema import KOYFIN_COLUMNS, OPTIONAL_COLUMNS
+from .schema import KOYFIN_COLUMNS, OPTIONAL_COLUMNS, OPTIONAL_TEXT_COLUMNS
 from .uid import assign_uids
 
 
@@ -24,7 +24,7 @@ NUMERIC_COLUMNS = [
     c
     for c in KOYFIN_COLUMNS
     if c not in {"ticker", "name", "sector", "industry", "region", "export_date"}
-] + list(OPTIONAL_COLUMNS)
+] + [c for c in OPTIONAL_COLUMNS if c not in OPTIONAL_TEXT_COLUMNS]
 
 
 def _match_sma20(raw: str, normalized: str) -> bool:
@@ -52,9 +52,43 @@ def _match_fwd_rev_growth(raw: str, normalized: str) -> bool:
     )
 
 
+def _match_ev_ebit(raw: str, normalized: str) -> bool:
+    """EV/EBIT, z. B. ``EV / EBIT (LTM)`` — die EBITDA-Variante ist eine
+    Basisspalte und wird ausgeschlossen."""
+    return "evebit" in normalized and "evebitda" not in normalized
+
+
+def _match_net_debt_ebitda(raw: str, normalized: str) -> bool:
+    """Nettoverschuldung/EBITDA, z. B. ``Net Debt / EBITDA (LTM)``."""
+    return "netdebt" in normalized and "ebitda" in normalized
+
+
+def _match_fcf_yield(raw: str, normalized: str) -> bool:
+    """FCF-Yield (FCF/EV), z. B. ``FCF Yield (EV)`` oder ``fcf_yield``."""
+    return "fcf" in normalized and "yield" in normalized
+
+
+def _match_adv_3m(raw: str, normalized: str) -> bool:
+    """Durchschnittlicher Tagesumsatz 3M, z. B. ``ADV (3M)`` oder
+    ``Avg Daily Value Traded 3M``."""
+    if "adv" in normalized and "3m" in normalized:
+        return True
+    return normalized.startswith("avgdaily") and "3m" in normalized
+
+
+def _match_ipo_date(raw: str, normalized: str) -> bool:
+    """Datum der Erstnotiz, z. B. ``IPO Date`` oder ``ipo_date``."""
+    return "ipo" in normalized
+
+
 _OPTIONAL_MATCHERS = {
     "sma_20": _match_sma20,
     "fwd_rev_growth": _match_fwd_rev_growth,
+    "ev_ebit": _match_ev_ebit,
+    "net_debt_ebitda": _match_net_debt_ebitda,
+    "fcf_yield": _match_fcf_yield,
+    "adv_3m": _match_adv_3m,
+    "ipo_date": _match_ipo_date,
 }
 
 
@@ -156,11 +190,14 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
             df[col] = np.nan
     for name in OPTIONAL_COLUMNS:
         series = optional.get(name)
-        df[name] = (
-            pd.to_numeric(series, errors="coerce").values
-            if series is not None
-            else np.nan
-        )
+        if series is None:
+            df[name] = np.nan
+        elif name in OPTIONAL_TEXT_COLUMNS:
+            # ``ipo_date`` bleibt Text (ISO-Datum); Parsen übernimmt der
+            # IPO-Filter, damit ein unlesbares Datum keinen Import blockiert.
+            df[name] = series.astype("string").str.strip().values
+        else:
+            df[name] = pd.to_numeric(series, errors="coerce").values
 
     df = _coerce_numeric(df)
 
