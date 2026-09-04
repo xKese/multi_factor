@@ -113,3 +113,61 @@ def test_einzelanalyse_v2_indicator_cards(scored_v2):
     first_val = body_rows[0].children[1]
     assert first_val.className == "ms-ind-val"
     assert first_val.children != ""
+
+
+def test_dashboard_v2_uses_v1_design_template(scored_v2, monkeypatch):
+    """Dashboard v2: ms-toptable mit Composite-Pill + Zonen-Chip, Sektor-
+    Ranking auf composite_score, eindeutige interaktive IDs im Layout."""
+    import dash
+    import dash_bootstrap_components as dbc
+
+    dash.Dash(
+        __name__,
+        use_pages=True,
+        pages_folder="",
+        external_stylesheets=[dbc.themes.BOOTSTRAP],
+        suppress_callback_exceptions=True,
+    )
+    from app.core.state import STATE
+    from app.pages import dashboard as dp
+
+    monkeypatch.setattr(STATE, "scored", scored_v2, raising=False)
+    monkeypatch.setattr(STATE.settings, "scoring_version", "v2", raising=False)
+    monkeypatch.setattr(STATE, "v2_diagnostics", [], raising=False)
+
+    table = dp._top_table(scored_v2, None, 5)
+    header = [
+        th.children for th in table.children.children[0].children.children
+    ]
+    assert "Zone" in header and "Empfehlung" not in header
+    row = table.children.children[1].children[0]
+    zone_chip = row.children[7].children
+    assert zone_chip.className.startswith("ms-tt-rec is-")
+    assert zone_chip.children in {"KANDIDAT", "HALTEN", "VERKAUFEN", "FILTER", "–"}
+    # Mini-Faktor-Profil: vier v2-Balken.
+    assert len(row.children[5].children.children) == 4
+
+    # v1-Vergleichssicht bleibt per Parameter erreichbar.
+    table_v1 = dp._top_table(scored_v2, None, 5, version="v1")
+    header_v1 = [
+        th.children for th in table_v1.children.children[0].children.children
+    ]
+    assert "Empfehlung" in header_v1
+
+    # Layout: Store/Pattern-IDs genau einmal (Accordion rendert statisch).
+    def _count(node, needle):
+        n, stack = 0, [node]
+        while stack:
+            x = stack.pop()
+            if getattr(x, "id", None) == needle:
+                n += 1
+            ch = getattr(x, "children", None)
+            if isinstance(ch, (list, tuple)):
+                stack.extend(ch)
+            elif ch is not None and not isinstance(ch, (str, int, float)):
+                stack.append(ch)
+        return n
+
+    layout = dp.layout()
+    assert _count(layout, "dash-sector-filter") == 1
+    assert _count(layout, "dash-top-table") == 1
