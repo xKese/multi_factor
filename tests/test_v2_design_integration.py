@@ -171,3 +171,37 @@ def test_dashboard_v2_uses_v1_design_template(scored_v2, monkeypatch):
     layout = dp.layout()
     assert _count(layout, "dash-sector-filter") == 1
     assert _count(layout, "dash-top-table") == 1
+
+
+def test_modellportfolio_hero_v1_template(scored_v2, monkeypatch):
+    """Modellportfolio rendert den Quote-Hero der v1-Designvorlage."""
+    from datetime import date
+
+    import dash
+    import dash_bootstrap_components as dbc
+    import pandas as pd
+
+    dash.Dash(
+        __name__,
+        use_pages=True,
+        pages_folder="",
+        external_stylesheets=[dbc.themes.BOOTSTRAP],
+        suppress_callback_exceptions=True,
+    )
+    from app.pages import modellportfolio as mp
+
+    meta = {
+        "n_titles": 35,
+        "rebalance_mode": "full",
+        "turnover_oneway": 0.12,
+        "te_ex_ante": 0.051,
+    }
+    pf = pd.DataFrame(
+        {"composite_pct": [0.9, 0.85], "weight_effective": [0.6, 0.4]}
+    )
+    hero = mp._hero_mp(meta, date(2026, 9, 4), pf, [])
+    assert hero.className == "ms-hero"
+    # Gewichteter Ø Composite: 0,9·0,6 + 0,85·0,4 = 0,88 → 88,0.
+    assert hero.children[1].children[0].children[0].children == "88,0"
+    # Override-Formular in der ms-Kartensprache.
+    assert mp._override_form().className.startswith("ms-card")
