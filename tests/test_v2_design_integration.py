@@ -79,3 +79,37 @@ def test_compute_rank_score_col(scored_v2):
     rank_v1 = compute_rank(scored_v2, ticker)
     rank_v2 = compute_rank(scored_v2, ticker, score_col="composite_score")
     assert rank_v1["sector_total"] == rank_v2["sector_total"]
+
+
+def test_einzelanalyse_v2_indicator_cards(scored_v2):
+    """Faktor-Karten zeigen je Indikator Rohwert + Z-Score (Factsheet-Stil)."""
+    import dash
+    import dash_bootstrap_components as dbc
+
+    dash.Dash(
+        __name__,
+        use_pages=True,
+        pages_folder="",
+        external_stylesheets=[dbc.themes.BOOTSTRAP],
+        suppress_callback_exceptions=True,
+    )
+    from app.pages import einzelanalyse as ea
+
+    r = scored_v2.iloc[0]
+    entries = ea._v2_factor_indicators(scored_v2, r)
+    # Alle vier Faktoren mit segmentgerechten Indikatoren aufgelöst.
+    assert set(entries) == {"value", "quality", "momentum", "investment"}
+    assert ("fcf_yield", "fcf_yield_v2") in entries["value"]
+
+    card = ea._v2_indicator_card(scored_v2, r, "value", entries["value"])
+    table = card.children[1]
+    header = [th.children for th in table.children[0].children.children]
+    assert header[0] == "Kennzahl"
+    assert header[1] == "Wert"
+    assert "Z-Score" in header[2]
+    body_rows = table.children[1].children
+    assert len(body_rows) == len(entries["value"])
+    # Wert-Zelle trägt den formatierten Rohwert (nicht nur den Z-Score).
+    first_val = body_rows[0].children[1]
+    assert first_val.className == "ms-ind-val"
+    assert first_val.children != ""

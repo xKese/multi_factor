@@ -910,12 +910,160 @@ def _sync_ticker_from_url(search: str | None):
     return _resolve_uid(tickers[0]) or tickers[0]
 
 
-def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
-    """Composite-v2-Abschnitt: Score, Klasse, Zone, Faktor-Z und je
-    Indikator z_* mit Neutralisierungsebene (Spec 11.2)."""
-    from app.core.scoring_v2 import V2_FACTOR_NAMES
-    from app.pages.common import render_basic_table
+def _v2_factor_indicators(df: pd.DataFrame, r: pd.Series) -> dict[str, list[tuple[str, str]]]:
+    """Je v2-Faktor die für diesen Titel anwendbaren Indikatoren.
+
+    Liefert ``{faktor: [(indikator, wert_spalte), …]}`` — aufgelöst nach
+    Segment (Financials / Real Estate / Nicht-Financials), Leverage-Proxy
+    und optionalen Spalten, gespiegelt an ``scoring_v2.compute_scores_v2``.
+    """
+    from app.core.scoring_v2 import FINANCIAL_FACTORS, NONFIN_FACTORS
+
+    is_fin = bool(r.get("is_financial"))
+    is_re = bool(r.get("is_real_estate"))
+    base = FINANCIAL_FACTORS if is_fin else NONFIN_FACTORS
+
+    leverage = next(
+        (
+            c
+            for c in ("net_debt_ebitda", "debt_ebit", "debt_equity")
+            if f"z_{c}" in df.columns
+        ),
+        None,
+    )
+
+    out: dict[str, list[tuple[str, str]]] = {}
+    for factor, entries in base.items():
+        resolved: list[tuple[str, str]] = []
+        for name, _direction in entries:
+            if name == "__leverage__":
+                if leverage is None:
+                    continue
+                name = leverage
+            if name == "ev_ebit" and "z_ev_ebit" not in df.columns:
+                continue
+            if name == "accruals" and is_re:
+                continue
+            # Anzeige-Spalte des Rohwerts (fcf_yield scort die kombinierte
+            # Serie fcf_yield_v2 aus FCF/EV mit 1/pfcf-Fallback).
+            value_col = name
+            if name == "fcf_yield":
+                value_col = (
+                    "fcf_yield_v2" if "fcf_yield_v2" in df.columns else "fcf_yield"
+                )
+            resolved.append((name, value_col))
+        out[factor] = resolved
+    return out
+
+
+def _v2_indicator_card(
+    df: pd.DataFrame, r: pd.Series, factor: str, entries: list[tuple[str, str]]
+) -> html.Div:
+    """Faktor-Karte im v1-Factsheet-Stil: Kennzahl · Wert · Z-Score-Balken.
+
+    Der Balken bildet den richtungsbereinigten Z-Score (−3…+3, positiv =
+    gut) auf die Schiene ab — analog zur Perzentil-Schiene der
+    v1-Indikator-Karten (:func:`_indicator_table_card`).
+    """
     from app.ui import label_for
+
+    rows = []
+    for name, value_col in entries:
+        raw = r.get(value_col) if value_col in df.columns else None
+        z = r.get(f"z_{name}")
+        level = r.get(f"neut_level_{name}")
+
+        if pd.notna(z):
+            zf = float(z)
+            fill_width = max(0.0, min(100.0, (zf + 3.0) / 6.0 * 100.0))
+            if zf >= 0.5:
+                fill_cls = ""
+            elif zf >= -0.5:
+                fill_cls = "is-warn"
+            else:
+                fill_cls = "is-weak"
+            z_cell = f"{'+' if zf > 0 else ''}{fmt_de(zf, 2)}"
+        else:
+            fill_width, fill_cls, z_cell = 0, "is-weak", "–"
+
+        label_children: list = [label_for(name)]
+        if pd.notna(level) and str(level):
+            label_children.append(
+                html.Span(
+                    f" · {level}",
+                    className="ms-card-h-meta",
+                    title="Neutralisierungsebene des Z-Scores",
+                )
+            )
+
+        rows.append(
+            html.Tr(
+                [
+                    html.Td(label_children, className="ms-ind-lbl"),
+                    html.Td(
+                        fmt_indicator(value_col, raw) if pd.notna(raw) else "–",
+                        className="ms-ind-val",
+                    ),
+                    html.Td(
+                        html.Div(
+                            [
+                                html.Div(
+                                    html.Div(
+                                        className=f"ms-ind-fill {fill_cls}".strip(),
+                                        style={"width": f"{fill_width}%"},
+                                    ),
+                                    className="ms-ind-track",
+                                ),
+                                html.Span(z_cell, className="ms-ind-pct"),
+                            ],
+                            className="ms-ind-pct-cell",
+                        ),
+                    ),
+                ]
+            )
+        )
+
+    z_factor = r.get(f"z_{factor}")
+    cov = r.get(f"cov_{factor}")
+    meta_parts = []
+    if pd.notna(z_factor):
+        zf = float(z_factor)
+        meta_parts.append(f"Z {'+' if zf > 0 else ''}{fmt_de(zf, 2)}")
+    if pd.notna(cov):
+        meta_parts.append(f"Abdeckung {fmt_de(float(cov) * 100, 0)} %")
+
+    return html.Div(
+        [
+            html.H3(
+                [
+                    label_for(factor), " ",
+                    html.Span(" · ".join(meta_parts) or "–",
+                              className="ms-card-h-meta"),
+                ],
+                className="ms-card-h",
+            ),
+            html.Table(
+                [
+                    html.Thead(
+                        html.Tr([
+                            html.Th("Kennzahl"),
+                            html.Th("Wert", className="is-num"),
+                            html.Th("Z-Score (neutralisiert)"),
+                        ])
+                    ),
+                    html.Tbody(rows),
+                ],
+                className="ms-ind-table",
+            ),
+        ],
+        className="ms-card",
+    )
+
+
+def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
+    """Composite-v2-Abschnitt: Score, Klasse, Zone und je Faktor eine
+    Factsheet-Karte mit Indikatorwert + neutralisiertem Z-Score (Spec 11.2)."""
+    from app.core.scoring_v2 import V2_FACTOR_NAMES
     from app.ui.theme import ms_badge
 
     def _num(value, decimals=2):
@@ -953,50 +1101,32 @@ def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
     if isinstance(reasons, list) and reasons:
         badges.append(ms_badge("FILTER", ", ".join(reasons), tone="down"))
 
-    factor_rows = pd.DataFrame(
-        [
-            {
-                "Faktor": name,
-                "Z-Score": _num(r.get(f"z_{name}")),
-                "Abdeckung": _num((r.get(f"cov_{name}") or 0) * 100, 0) + " %",
-            }
-            for name in V2_FACTOR_NAMES
-        ]
-    )
-    indicator_rows = []
-    for col in sorted(c for c in df.columns if c.startswith("neut_level_")):
-        indicator = col.removeprefix("neut_level_")
-        z = r.get(f"z_{indicator}")
-        level = r.get(col)
-        if pd.isna(z) and (level is None or pd.isna(level)):
-            continue
-        indicator_rows.append(
-            {
-                "Indikator": label_for(indicator),
-                "Z-Score": _num(z),
-                "Neutralisierung": str(level) if pd.notna(level) else "–",
-            }
+    # Faktor-Karten im v1-Factsheet-Stil: je Faktor Kennzahl · Wert ·
+    # Z-Score-Schiene (zweispaltiges Grid wie die v1-Indikator-Karten).
+    factor_entries = _v2_factor_indicators(df, r)
+    cards = [
+        _v2_indicator_card(df, r, factor, factor_entries.get(factor, []))
+        for factor in V2_FACTOR_NAMES
+        if factor_entries.get(factor)
+    ]
+    card_rows: list = []
+    for a, b in zip(cards[0::2], cards[1::2]):
+        card_rows.append(html.Div([a, b], className="ms-row ms-r-2"))
+    if len(cards) % 2:
+        card_rows.append(
+            html.Div([cards[-1], html.Div()], className="ms-row ms-r-2")
         )
+
     children: list = [
         html.Div(
             [
                 html.Div("Composite v2", className="ms-eyebrow"),
-                html.H2("Faktor-Z-Scores (Region×Sektor-neutral)"),
+                html.H2("Faktoren & Indikatoren (Region×Sektor-neutral)"),
             ],
             className="ms-dash-section",
         ),
         html.Div(badges, className="d-flex gap-2 flex-wrap mb-2"),
-        html.Div(
-            [
-                html.Div(render_basic_table(factor_rows)),
-                html.Div(
-                    render_basic_table(pd.DataFrame(indicator_rows))
-                    if indicator_rows
-                    else html.Div(),
-                ),
-            ],
-            className="ms-row ms-r-2",
-        ),
+        *card_rows,
     ]
     return html.Div(children, className="mb-3")
 
