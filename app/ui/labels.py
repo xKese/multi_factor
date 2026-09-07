@@ -116,6 +116,7 @@ INDICATOR_LABELS: dict[str, str] = {
     "net_debt_ebitda": "Net Debt / EBITDA",
     "debt_ebit": "Debt / EBIT",
     "adv_3m": "Ø Handelsvolumen 3M (Mio.)",
+    "avg_volume": "Ø Handelsvolumen (Stück)",
     "ipo_date": "IPO-Datum",
     # Portfoliokonstruktion (Modellportfolio)
     "weight_current": "Gewicht aktuell",

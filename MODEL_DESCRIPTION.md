@@ -611,8 +611,9 @@ Eingaben und Settings ergeben identische Ausgaben (Tie-Break `uid`).
 |---|---|---|
 | `ev_ebit` | EV/EBIT | dritter Value-Indikator (Nicht-Financials); fehlt die Spalte, besteht Value aus 2 Indikatoren |
 | `net_debt_ebitda` | Nettoverschuldung/EBITDA | ersetzt den Leverage-Proxy in Quality |
-| `fcf_yield` | FCF/EV | primärer FCF-Value-Indikator; je Titel Fallback `1/pfcf` (FCF/Marktkap., `fcf_yield_source` ∈ {"ev","mcap"}, Anteil in der Diagnose) |
+| `fcf_yield` | FCF/EV | primärer FCF-Value-Indikator; je Titel Fallback `1/pfcf` (FCF/Marktkap., `fcf_yield_source` ∈ {"ev","mcap"}, Anteil in der Diagnose); Header-Varianten wie `FCF Yield (EV)` und `FCF EV Yld (LTM)` werden erkannt |
 | `adv_3m` | Ø Tagesumsatz 3M (Mio EUR) | Liquiditätsfilter |
+| `avg_volume` | Ø Handelsvolumen (Stück, Koyfin `Avg Volume`) | Fallback-Basis für `adv_3m`: fehlt der Tagesumsatz, wird er als `avg_volume × last_price` approximiert (Mio Kurswährung, Info-Diagnose `adv_derived`) |
 | `ipo_date` | Erstnotiz (ISO) | IPO-Filter |
 
 Fehlende optionale Spalten → dokumentierter Fallback + Info-Diagnose je Import.

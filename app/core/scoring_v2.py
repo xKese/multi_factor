@@ -182,6 +182,31 @@ def derive_v2_indicators(
             )
         )
 
+    # Liquidität: fehlt ``adv_3m`` (Tagesumsatz 3M in Mio EUR), wird er aus
+    # ``avg_volume`` (Stück) × ``last_price`` approximiert — Näherung in
+    # Kurswährung, ausreichend für den 2-Mio-Schwellenfilter (Spec 4).
+    if not optional_column_available(out, "adv_3m") and optional_column_available(
+        out, "avg_volume"
+    ):
+        avg_volume = col("avg_volume")
+        last_price = col("last_price")
+        derived_adv = (avg_volume * last_price / 1e6).where(
+            avg_volume.notna() & last_price.notna()
+        )
+        if derived_adv.notna().any():
+            out["adv_3m"] = derived_adv
+            diags.append(
+                Diagnostic(
+                    SEV_INFO,
+                    "adv_derived",
+                    (
+                        "Liquidität: adv_3m aus avg_volume × last_price "
+                        f"abgeleitet ({int(derived_adv.notna().sum())} Titel, "
+                        "Näherung in Kurswährung)"
+                    ),
+                )
+            )
+
     out["is_financial"] = is_financial_sector(out)
     out["is_real_estate"] = is_real_estate_sector(out) & ~out["is_financial"]
 
