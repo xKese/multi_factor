@@ -75,7 +75,11 @@ revenue, cogs, revenue_prev, cogs_prev, sma_50, sma_200, export_date
 
 - **Portfolio-Watchlist-CSV** (Seite */portfolios*): Spalte `Ticker` erforderlich;
   optionale Gewichtsspalte (`Gewicht`/`Weight`/`Anteil`, % oder Dezimal, wird auf
-  Summe 1,0 normiert; ohne Gewichte gilt Gleichgewichtung 1/N).
+  Summe 1,0 normiert; ohne Gewichte gilt Gleichgewichtung 1/N). Es können
+  mehrere benannte Portfolios hochgeladen werden; das auf */portfolios*
+  gewählte **aktive Portfolio** gilt für Risiko & Benchmark und die
+  Portfolio-Linse, */modellportfolio* wählt den Bestand für den Abgleich
+  separat.
 - **Sektor-ETF-CSV** (10 Spalten, Koyfin-Sektor-Export) für den Legacy-Snapshot des
   Sektor-Momentums.
 - **Alpha Vantage API** (`ALPHAVANTAGE_API_KEY`, Premium, Rate-Limit 70 Requests/min):
@@ -525,7 +529,7 @@ tests/                   # 24 Testdateien + fixtures/ (pytest)
 | `/agenten-analyse` | LLM-Tiefenanalyse (TradingAgents) |
 | `/sma` | Momentum-Monitor (SMA-Signale, Trendphasen) |
 | `/sektor-momentum` | Sektor-Momentum |
-| `/portfolios` | M&S-Portfolio-Monitor (Watchlist-Upload, Aktions-Flags) |
+| `/portfolios` | M&S-Portfolio-Monitor (mehrere Watchlist-Uploads, Auswahl des aktiven Portfolios, Aktions-Flags) |
 | `/modellportfolio` | Portfoliokonstruktion v2 (Zielportfolio, Diagnosen, Trade-Liste, Exposures, Override-Register, Historie) |
 | `/factor-timing` | Taktisches Faktor-Timing (Monitoring; fließt nicht ins Composite v2) |
 | `/risiko` | Risiko & Benchmark (aus Cache) |
@@ -538,11 +542,16 @@ tests/                   # 24 Testdateien + fixtures/ (pytest)
 SQLAlchemy (SQLite Default, Postgres via `DATABASE_URL`), Tabellen u. a.:
 `koyfin_universe`, `koyfin_universe_history`, `koyfin_meta`,
 `universe_signal_history`, `sector_momentum_snapshots`,
-`sector_score_history`, `ms_portfolio`, `app_settings`,
+`sector_score_history`, `ms_portfolios` / `ms_portfolio_positions` /
+`ms_portfolio_selection` (hochgeladene Portfolios, Positionen je
+Portfolio, gespeicherte Auswahl `active` und `model_source`; die
+Legacy-Tabelle `ms_portfolio` wird beim ersten Zugriff als Portfolio 1
+„M&S Portfolio“ übernommen und geleert), `app_settings`,
 `factor_timing_inputs`, `factor_timing_history`, `agent_analyses`,
 `ticker_mappings`, `av_price_cache`, `av_symbol_meta`, `av_ticker_mappings`,
 sowie für Composite v2/Portfoliokonstruktion: `model_portfolio`,
-`model_portfolio_meta`, `override_register`,
+`model_portfolio_meta` (inkl. `source_portfolio_id/_name` des
+abgeglichenen Bestands), `override_register`,
 `risk_benchmark_region_weights` (Abschnitt 12.8).
 
 **PIT-Archiv (Punkt-in-Zeit):** Jeder CSV-Import archiviert das gescorte
@@ -572,13 +581,15 @@ umlenkbar). Zugriff für Auswertungen:
    Signal- und Sektor-Historie fortgeschrieben.
 2. Dashboard, Einzelanalyse, Momentum-Monitor, Sektor-Momentum und Faktor-Timing
    speisen sich automatisch aus dem gescorten Universum.
-3. Portfolio-Watchlist separat auf */portfolios* hochladen.
+3. Portfolio-Watchlists separat auf */portfolios* hochladen (Name je
+   Upload; gleicher Name ersetzt) und das aktive Portfolio auswählen.
 4. Risikodaten per CLI aktualisieren:
    `python -m app.tools.risk_report update` und
    `python -m app.tools.risk_report report [--asof … --variante fest|buyhold]`.
-5. Zielportfolio auf */modellportfolio* berechnen (der Import meldet den
-   erkannten Rebalance-Modus) oder per CLI:
-   `python -m app.tools.model_portfolio build [--mode …] [--dry-run]`.
+5. Zielportfolio auf */modellportfolio* berechnen (Bestandsportfolio im
+   Dropdown wählbar; der Import meldet den erkannten Rebalance-Modus) oder
+   per CLI:
+   `python -m app.tools.model_portfolio build [--mode …] [--portfolio ID|NAME] [--dry-run]`.
 
 ### 10.5 Start & Tests
 
@@ -857,8 +868,11 @@ cte, action, reason, rebalance_mode, override_id`; Unique
 (`snapshot_date`, `uid`), Snapshot-UPSERT wie im PIT-Archiv),
 `model_portfolio_meta` (`rebalance_mode, n_titles, te_ex_ante,
 te_coverage, turnover_oneway, n_trades, n_deferred, settings_hash,
-diagnostics` JSON), `risk_benchmark_region_weights`. `settings_hash` =
-SHA-256 über die JSON-serialisierten, sortierten v2-/pc-/filter-Settings.
+diagnostics` JSON, `source_portfolio_id, source_portfolio_name` des
+abgeglichenen Bestandsportfolios), `risk_benchmark_region_weights`.
+`settings_hash` = SHA-256 über die JSON-serialisierten, sortierten
+v2-/pc-/filter-Settings (die Portfolio-Auswahl liegt bewusst nicht in den
+Settings, sondern in `ms_portfolio_selection`, und ändert den Hash nicht).
 
 CLI: `python -m app.tools.indicator_correlation [--snapshot]`
 (Spearman-Matrix aller `z_*`- und v1-Perzentil-Indikatoren, getrennt
@@ -866,7 +880,9 @@ Nicht-Fin/Financials; Average-Linkage-Clustering auf `1 − |ρ|`, Schwelle
 |ρ| ≥ 0,8; Abdeckung; Report `reports/indikator_korrelation_<datum>.md` +
 CSV — vor Produktivsetzung von v2 einmal auszuführen) und
 `python -m app.tools.model_portfolio build [--snapshot] [--mode
-full|interim|monitor] [--dry-run]` (Report
+full|interim|monitor] [--portfolio ID|NAME] [--dry-run]` (Bestand =
+gewähltes Portfolio, sonst gespeicherte Auswahl der Seite bzw. aktives
+Portfolio; Report
 `reports/modellportfolio_<datum>.md`; Exit 0 ohne Fehler-Diagnosen, 1 bei
 Warnungen, 2 bei Fehlern) bzw. `… compare --v1 --v2` (Spearman v1/v2,
 Rangänderungen > 30 Perzentilpunkte, Sektorverteilung der Top-35).

@@ -18,6 +18,7 @@ from app.core.diagnostics import (
     Diagnostic,
     count_by_severity,
     diags_from_json,
+    diags_to_json,
 )
 from app.core.portfolio_construction import (
     ACTION_HOLD,
@@ -46,11 +47,26 @@ def _fmt_pct(value, digits: int = 1) -> str:
 # ── Layout ──────────────────────────────────────────────────────────────
 
 
+def _source_options() -> list[dict]:
+    """Hochgeladene Portfolios als Dropdown-Optionen (Werte: int-IDs)."""
+    return [
+        {
+            "label": (
+                f"Bestand: {p['name']} · "
+                f"{fmt_de(int(p.get('n_positions') or 0), 0)} Pos."
+            ),
+            "value": int(p["id"]),
+        }
+        for p in STATE.ms_portfolios
+    ]
+
+
 def _controls() -> html.Div:
     history = persistence.list_model_portfolio_dates()
     options = [{"label": "Aktueller Import (neu berechnen)", "value": "live"}] + [
         {"label": d.strftime("%d.%m.%Y"), "value": d.isoformat()} for d in history
     ]
+    STATE.refresh_portfolios()
     return html.Div(
         [
             html.Div(
@@ -61,6 +77,20 @@ def _controls() -> html.Div:
                     clearable=False,
                 ),
                 style={"minWidth": "260px"},
+            ),
+            html.Div(
+                dcc.Dropdown(
+                    id="mp-source",
+                    options=_source_options(),
+                    value=STATE.model_source_portfolio_id(),
+                    clearable=False,
+                    placeholder="Bestandsportfolio (kein Upload)",
+                ),
+                style={"minWidth": "260px"},
+                title=(
+                    "Hochgeladenes Portfolio, das als Bestand mit dem "
+                    "Zielportfolio abgeglichen wird (Trade-Liste, Δw, Turnover)."
+                ),
             ),
             html.Div(
                 dcc.Dropdown(
@@ -219,6 +249,10 @@ def _hero_mp(
             html.Strong(_fmt_pct(meta.get("turnover_oneway"))),
         ]),
     ]
+    source_name = meta.get("source_portfolio_name")
+    if source_name:
+        meta_row.append(html.Span("·", className="ms-sep"))
+        meta_row.append(html.Span(["Bestand ", html.Strong(str(source_name))]))
     if counts[SEV_ERROR] or counts[SEV_WARNING]:
         meta_row.append(html.Span("·", className="ms-sep"))
         meta_row.append(
@@ -283,6 +317,10 @@ def _kpi_header(meta: dict, snap: date, diags: list[Diagnostic]) -> html.Div:
     return kpi_band(
         [
             {"label": "Snapshot", "value": snap.strftime("%d.%m.%Y")},
+            {
+                "label": "Bestandsportfolio",
+                "value": str(meta.get("source_portfolio_name") or "–"),
+            },
             {"label": "Rebalance-Modus", "value": str(meta.get("rebalance_mode", "–"))},
             {"label": "Titel", "value": fmt_de(meta.get("n_titles") or 0, 0)},
             {"label": "Ex-ante-TE", "value": _fmt_pct(meta.get("te_ex_ante"), 2)},
@@ -546,12 +584,33 @@ def _triggered_id():
     Input("mp-dry", "n_clicks"),
     Input("mp-save", "n_clicks"),
     Input("mp-history", "value"),
+    Input("mp-source", "value"),
     State("mp-mode", "value"),
 )
-def _run(n_dry, n_save, history, mode_choice):
+def _run(n_dry, n_save, history, source, mode_choice):
     trigger = _triggered_id()
     if history and history != "live" and trigger == "mp-history":
         return _render_stored(date.fromisoformat(history)), ""
+
+    # Bestandsportfolio für den Abgleich: Dropdown-Wahl, sonst gespeicherte
+    # Auswahl bzw. aktives Portfolio. Eine Änderung im Dropdown wird
+    # persistiert (gilt auch für das CLI).
+    status_notes: list = []
+    source_id = STATE.model_source_portfolio_id()
+    if source not in (None, ""):
+        source_id = int(source)
+        if trigger == "mp-source":
+            try:
+                persistence.set_portfolio_selection(
+                    persistence.SELECTION_MODEL_SOURCE, source_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                status_notes.append(
+                    dbc.Alert(
+                        f"Portfolio-Auswahl nicht gespeichert: {exc}",
+                        color="warning",
+                    )
+                )
 
     df = STATE.scored
     if df is None or df.empty or "composite_z" not in df.columns:
@@ -573,7 +632,11 @@ def _run(n_dry, n_save, history, mode_choice):
     settings = STATE.settings
     overrides = persistence.load_overrides()
     last_meta = persistence.load_model_portfolio_meta()
-    current = STATE.portfolio_weights()
+    resolved_source = STATE.resolve_portfolio(portfolio_id=source_id)
+    current = STATE.portfolio_weights(portfolio_id=source_id)
+    source_name = STATE.portfolio_name(source_id) or (
+        "Standard-Portfolio (nicht gespeichert)" if source_id is None else f"#{source_id}"
+    )
     mode = None if (mode_choice or "auto") == "auto" else mode_choice
 
     save = trigger == "mp-save"
@@ -602,6 +665,25 @@ def _run(n_dry, n_save, history, mode_choice):
             "",
         )
 
+    # Herkunft des Bestands protokollieren (Hero, KPI, Meta-Tabelle).
+    n_src = int(len(resolved_source))
+    n_ok = int((resolved_source["status"] == "ok").sum()) if n_src else 0
+    result["meta"]["source_portfolio_id"] = source_id
+    result["meta"]["source_portfolio_name"] = source_name
+    result["diagnostics"].append(
+        Diagnostic(
+            SEV_INFO if n_src else SEV_WARNING,
+            "portfolio_source",
+            (
+                f"Bestand: {source_name} ({fmt_de(n_src, 0)} Positionen, "
+                f"{fmt_de(n_ok, 0)} im Universum)"
+                if n_src
+                else f"Bestand: {source_name} — keine Positionen, Abgleich "
+                "läuft als Erstaufbau"
+            ),
+        )
+    )
+
     if mode is not None:
         # Manueller Modus-Override wird protokolliert (Spec 7.1).
         result["diagnostics"].append(
@@ -616,6 +698,9 @@ def _run(n_dry, n_save, history, mode_choice):
     status: object = ""
     if save and result["mode"] != "monitor":
         try:
+            # Nachträglich angehängte Diagnosen (Bestand, Modus-Override)
+            # sollen im gespeicherten Lauf sichtbar sein.
+            result["meta"]["diagnostics"] = diags_to_json(result["diagnostics"])
             persistence.save_model_portfolio(result["portfolio"],
                                              result["meta"], snap)
             status = dbc.Alert(
@@ -630,6 +715,8 @@ def _run(n_dry, n_save, history, mode_choice):
             "Monitor-Modus: kein Zielportfolio-Update — nichts gespeichert.",
             color="info",
         )
+    if status_notes:
+        status = html.Div(status_notes + ([status] if status != "" else []))
     return _render_result(result, snap, df, current), status
 
 

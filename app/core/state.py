@@ -58,6 +58,12 @@ class AppState:
     # lazy uid-Auflösung in resolve_portfolio().
     ms_portfolio_entries: pd.DataFrame = field(default_factory=pd.DataFrame)
     ms_portfolio_imported_at: object | None = None
+    # Mehrere hochgeladene Portfolios: Katalog (id, name, n_positions,
+    # imported_at) und die ID des aktiven Portfolios, dessen Positionen in
+    # den ``ms_portfolio*``-Feldern oben liegen. ``None`` = kein Portfolio
+    # gespeichert (Default-Fallback aktiv).
+    ms_portfolios: list[dict] = field(default_factory=list)
+    active_portfolio_id: int | None = None
     _lock: Lock = field(default_factory=Lock, repr=False)
 
     def recompute(self) -> None:
@@ -99,16 +105,21 @@ class AppState:
         self.raw = df
         self.recompute()
 
-    def set_ms_portfolio(self, df: pd.DataFrame, imported_at=None) -> None:
-        """Ersetzt das M&S-Portfolio aus einem Upload-/DB-Frame.
+    def set_ms_portfolio(
+        self, df: pd.DataFrame, imported_at=None, portfolio_id: int | None = None
+    ) -> None:
+        """Ersetzt das aktive M&S-Portfolio aus einem Upload-/DB-Frame.
 
         ``df`` braucht ``ticker`` (+ optional ``name``, ``weight``,
         ``imported_at``). Die Roh-Einträge werden zusätzlich als
         ``ms_portfolio_entries`` gehalten — die Auflösung gegen das Universum
         (uid) passiert lazy in :meth:`resolve_portfolio`, weil das Portfolio
         beim App-Start vor dem Universum geladen wird. Kein Recompute nötig —
-        ``scored`` ist portfoliounabhängig.
+        ``scored`` ist portfoliounabhängig. ``portfolio_id`` setzt zugleich
+        :attr:`active_portfolio_id`.
         """
+        if portfolio_id is not None:
+            self.active_portfolio_id = int(portfolio_id)
         self.ms_portfolio = [str(t) for t in df["ticker"].tolist()]
         names = (
             df["name"].fillna("")
@@ -140,8 +151,107 @@ class AppState:
         elif "imported_at" in df.columns and len(df):
             self.ms_portfolio_imported_at = df["imported_at"].iloc[0]
 
-    def resolve_portfolio(self) -> pd.DataFrame:
+    def reset_ms_portfolio(self) -> None:
+        """Aktives Portfolio verwerfen (z. B. letztes Portfolio gelöscht) —
+        zurück auf die Dataclass-Defaults inkl. Fallback-Liste."""
+        defaults = AppState()
+        self.ms_portfolio = list(defaults.ms_portfolio)
+        self.ms_portfolio_names = {}
+        self.ms_portfolio_weights = {}
+        self.ms_portfolio_entries = pd.DataFrame()
+        self.ms_portfolio_imported_at = None
+        self.active_portfolio_id = None
+
+    def refresh_portfolios(self) -> None:
+        """Portfolio-Katalog aus der DB nachladen (fail-open)."""
+        try:
+            from .persistence import list_ms_portfolios
+
+            self.ms_portfolios = list_ms_portfolios()
+        except Exception:  # noqa: BLE001
+            self.ms_portfolios = []
+
+    def portfolio_name(self, portfolio_id: int | None) -> str:
+        """Anzeigename eines Portfolios aus dem Katalog (leer, wenn unbekannt)."""
+        if portfolio_id is None:
+            return ""
+        for p in self.ms_portfolios:
+            if int(p.get("id", -1)) == int(portfolio_id):
+                return str(p.get("name") or "")
+        return ""
+
+    @property
+    def active_portfolio_name(self) -> str | None:
+        name = self.portfolio_name(self.active_portfolio_id)
+        return name or None
+
+    def model_source_portfolio_id(self) -> int | None:
+        """Bestandsportfolio für den Modellportfolio-Abgleich: die auf
+        /modellportfolio gespeicherte Auswahl, wenn sie auf ein vorhandenes
+        Portfolio zeigt, sonst das aktive Portfolio. Gemeinsame Quelle für
+        Seite und CLI."""
+        try:
+            from .persistence import SELECTION_MODEL_SOURCE, get_portfolio_selection
+
+            pid = get_portfolio_selection(SELECTION_MODEL_SOURCE)
+        except Exception:  # noqa: BLE001
+            pid = None
+        known = {int(p["id"]) for p in self.ms_portfolios if "id" in p}
+        if pid is not None and (not known or int(pid) in known):
+            return int(pid)
+        return self.active_portfolio_id
+
+    def _entries_for(self, portfolio_id: int | None) -> pd.DataFrame:
+        """Roh-Einträge (ticker, name[, weight]) des gewünschten Portfolios.
+
+        ``None`` oder die aktive ID → die im State gehaltenen Einträge (mit
+        dem bisherigen Fallback auf ``ms_portfolio``/``ms_portfolio_names``);
+        andere IDs werden fail-open aus der DB gelesen (leer, wenn unbekannt).
+        """
+        if portfolio_id is None or (
+            self.active_portfolio_id is not None
+            and int(portfolio_id) == int(self.active_portfolio_id)
+        ):
+            entries = self.ms_portfolio_entries
+            if entries is None or entries.empty:
+                entries = pd.DataFrame(
+                    {
+                        "ticker": self.ms_portfolio,
+                        "name": [
+                            self.ms_portfolio_names.get(t, "")
+                            for t in self.ms_portfolio
+                        ],
+                    }
+                )
+            return entries
+        try:
+            from .persistence import load_ms_portfolio_by_id
+
+            df = load_ms_portfolio_by_id(int(portfolio_id))
+        except Exception:  # noqa: BLE001
+            df = None
+        if df is None or df.empty:
+            return pd.DataFrame({"ticker": [], "name": []})
+        names = (
+            df["name"].fillna("")
+            if "name" in df.columns
+            else pd.Series("", index=df.index)
+        )
+        out = pd.DataFrame(
+            {
+                "ticker": [str(t) for t in df["ticker"]],
+                "name": [str(n) for n in names],
+            }
+        )
+        if "weight" in df.columns:
+            out["weight"] = pd.to_numeric(df["weight"], errors="coerce").to_numpy()
+        return out
+
+    def resolve_portfolio(self, portfolio_id: int | None = None) -> pd.DataFrame:
         """Watchlist-Einträge gegen das Universum auflösen (uid je Position).
+
+        Ohne ``portfolio_id`` das aktive Portfolio; sonst das Portfolio mit
+        dieser ID (aus der DB, fail-open → leeres Ergebnis).
 
         Rückgabe: DataFrame mit ``ticker, name, weight, uid, status``:
 
@@ -153,18 +263,11 @@ class AppState:
           auflösbar — ``uid`` = Ticker; solche Positionen dürfen NICHT per
           ``isin`` gematcht werden (sonst Doppelzählung beider Kandidaten).
         """
+        return self._resolve_entries(self._entries_for(portfolio_id))
+
+    def _resolve_entries(self, entries: pd.DataFrame) -> pd.DataFrame:
         from .uid import slugify_name
 
-        entries = self.ms_portfolio_entries
-        if entries is None or entries.empty:
-            entries = pd.DataFrame(
-                {
-                    "ticker": self.ms_portfolio,
-                    "name": [
-                        self.ms_portfolio_names.get(t, "") for t in self.ms_portfolio
-                    ],
-                }
-            )
         out = entries.copy()
         if "weight" not in out.columns:
             out["weight"] = pd.NA
@@ -217,16 +320,17 @@ class AppState:
         out["status"] = statuses
         return out
 
-    def portfolio_weights(self) -> dict[str, float]:
+    def portfolio_weights(self, portfolio_id: int | None = None) -> dict[str, float]:
         """Portfoliogewichte als Dezimalanteile (Summe 1,0), keyed by uid.
 
-        Importierte Gewichte haben Vorrang; ohne Gewichtsspalte im Upload
-        wird gleichgewichtet (1/N über alle Positionen). Auf Summe 1,0
-        renormalisiert, damit Rundungsreste im Import nicht durchschlagen.
-        Für eindeutige Ticker ist die uid identisch zum Ticker (bisheriges
-        Verhalten); nicht auflösbare Einträge behalten ihren Ticker.
+        Ohne ``portfolio_id`` das aktive Portfolio. Importierte Gewichte
+        haben Vorrang; ohne Gewichtsspalte im Upload wird gleichgewichtet
+        (1/N über alle Positionen). Auf Summe 1,0 renormalisiert, damit
+        Rundungsreste im Import nicht durchschlagen. Für eindeutige Ticker
+        ist die uid identisch zum Ticker (bisheriges Verhalten); nicht
+        auflösbare Einträge behalten ihren Ticker.
         """
-        resolved = self.resolve_portfolio()
+        resolved = self.resolve_portfolio(portfolio_id)
         if resolved.empty:
             return {}
         weights = pd.to_numeric(resolved["weight"], errors="coerce")
@@ -243,15 +347,21 @@ class AppState:
         return {str(u): 1.0 / n for u in resolved["uid"]}
 
     def load_from_db(self) -> bool:
-        from .persistence import load_ms_portfolio, load_settings, load_universe
+        from .persistence import (
+            get_active_portfolio_id,
+            load_ms_portfolio,
+            load_settings,
+            load_universe,
+        )
 
         stored_settings = load_settings()
         if stored_settings is not None:
             self.settings = stored_settings
 
+        self.refresh_portfolios()
         portfolio = load_ms_portfolio()
         if portfolio is not None and not portfolio.empty:
-            self.set_ms_portfolio(portfolio)
+            self.set_ms_portfolio(portfolio, portfolio_id=get_active_portfolio_id())
 
         df = load_universe()
         if df is None or df.empty:

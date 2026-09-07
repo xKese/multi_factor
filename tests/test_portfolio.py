@@ -161,8 +161,17 @@ def test_weights_roundtrip_through_db(tmp_path, monkeypatch):
     with engine.begin() as conn:
         persistence._ensure_column(conn, "ms_portfolio", "weight", "DOUBLE PRECISION")
         persistence._ensure_column(conn, "ms_portfolio", "weight", "DOUBLE PRECISION")
-        rows = conn.execute(text("SELECT weight FROM ms_portfolio")).fetchall()
+        rows = conn.execute(
+            text("SELECT weight FROM ms_portfolio_positions")
+        ).fetchall()
     assert len(rows) == 2
+
+    # Der Wrapper legt ohne Bestand das Portfolio „M&S Portfolio“ an und
+    # setzt es aktiv (leere Legacy-Tabelle → keine Migration).
+    catalog = persistence.list_ms_portfolios()
+    assert [p["name"] for p in catalog] == ["M&S Portfolio"]
+    assert catalog[0]["n_positions"] == 2
+    assert persistence.get_active_portfolio_id() == 1
 
 
 # ── Handlungs-Flags ────────────────────────────────────────────────────────
@@ -251,18 +260,31 @@ def test_load_from_db_uses_portfolio_when_present(monkeypatch):
 
     # Ohne persistiertes Portfolio bleibt der hartkodierte Default.
     monkeypatch.setattr(persistence, "load_ms_portfolio", lambda: None)
+    monkeypatch.setattr(persistence, "list_ms_portfolios", list)
+    monkeypatch.setattr(persistence, "get_active_portfolio_id", lambda: None)
     state = AppState()
     state.load_from_db()
     assert state.ms_portfolio == default
+    assert state.active_portfolio_id is None
+    assert state.ms_portfolios == []
 
     # Mit persistiertem Portfolio wird ersetzt.
     stored = pd.DataFrame({"ticker": ["AAA"], "name": ["Alpha"],
                            "imported_at": ["2026-07-01"]})
     monkeypatch.setattr(persistence, "load_ms_portfolio", lambda: stored)
+    monkeypatch.setattr(
+        persistence,
+        "list_ms_portfolios",
+        lambda: [{"id": 3, "name": "Depot A", "n_positions": 1,
+                  "imported_at": None, "source_filename": None}],
+    )
+    monkeypatch.setattr(persistence, "get_active_portfolio_id", lambda: 3)
     state = AppState()
     state.load_from_db()
     assert state.ms_portfolio == ["AAA"]
     assert state.ms_portfolio_imported_at == "2026-07-01"
+    assert state.active_portfolio_id == 3
+    assert state.active_portfolio_name == "Depot A"
 
 
 def test_my_portfolio_removed():

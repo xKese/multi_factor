@@ -69,8 +69,9 @@ def _load_state() -> tuple[list[str], dict[str, float]] | None:
     STATE.load_from_db()
     if not STATE.ms_portfolio:
         print(
-            "Kein M&S-Portfolio in der Datenbank — bitte zuerst auf "
-            "/portfolios eine Watchlist importieren.",
+            "Kein aktives M&S-Portfolio in der Datenbank — bitte zuerst auf "
+            "/portfolios eine Watchlist importieren bzw. ein Portfolio "
+            "auswählen.",
             file=sys.stderr,
         )
         return None
