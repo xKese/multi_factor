@@ -64,8 +64,9 @@ def _match_net_debt_ebitda(raw: str, normalized: str) -> bool:
 
 
 def _match_fcf_yield(raw: str, normalized: str) -> bool:
-    """FCF-Yield (FCF/EV), z. B. ``FCF Yield (EV)`` oder ``fcf_yield``."""
-    return "fcf" in normalized and "yield" in normalized
+    """FCF-Yield (FCF/EV), z. B. ``FCF Yield (EV)``, ``FCF EV Yld (LTM)``
+    oder ``fcf_yield``."""
+    return "fcf" in normalized and ("yield" in normalized or "yld" in normalized)
 
 
 def _match_adv_3m(raw: str, normalized: str) -> bool:
@@ -74,6 +75,12 @@ def _match_adv_3m(raw: str, normalized: str) -> bool:
     if "adv" in normalized and "3m" in normalized:
         return True
     return normalized.startswith("avgdaily") and "3m" in normalized
+
+
+def _match_avg_volume(raw: str, normalized: str) -> bool:
+    """Durchschnittliches Handelsvolumen in Stück, z. B. ``Avg Volume``
+    oder ``Average Volume (3M)`` — Fallback-Basis für ``adv_3m``."""
+    return "avgvolume" in normalized or "averagevolume" in normalized
 
 
 def _match_ipo_date(raw: str, normalized: str) -> bool:
@@ -88,6 +95,7 @@ _OPTIONAL_MATCHERS = {
     "net_debt_ebitda": _match_net_debt_ebitda,
     "fcf_yield": _match_fcf_yield,
     "adv_3m": _match_adv_3m,
+    "avg_volume": _match_avg_volume,
     "ipo_date": _match_ipo_date,
 }
 

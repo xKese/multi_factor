@@ -71,6 +71,9 @@ KOYFIN_COLUMNS: list[str] = [
 # ``net_debt_ebitda`` (Leverage in Quality), ``fcf_yield`` (FCF/EV),
 # ``adv_3m`` (Tagesumsatz 3M in Mio EUR, Liquiditätsfilter),
 # ``ipo_date`` (Erstnotiz ISO, IPO-Filter — einzige nicht-numerische).
+# ``avg_volume`` (durchschnittliches Handelsvolumen in Stück, Koyfin
+# "Avg Volume"): Fallback-Basis für ``adv_3m`` — der Tagesumsatz wird in
+# ``derive_v2_indicators`` als avg_volume × last_price approximiert.
 OPTIONAL_COLUMNS: tuple[str, ...] = (
     "sma_20",
     "fwd_rev_growth",
@@ -78,6 +81,7 @@ OPTIONAL_COLUMNS: tuple[str, ...] = (
     "net_debt_ebitda",
     "fcf_yield",
     "adv_3m",
+    "avg_volume",
     "ipo_date",
 )
 

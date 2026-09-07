@@ -318,3 +318,33 @@ def test_factor_timing_mode(monkeypatch):
     out_active, diags = compute_scores_v2(scored, settings, tactical_weights=mapped)
     assert any(d.code == "factor_timing_active" for d in diags)
     assert not out_active["composite_raw"].equals(out_plain["composite_raw"])
+
+
+def test_adv_derived_from_avg_volume():
+    """Ohne ``adv_3m`` wird der Tagesumsatz aus ``avg_volume`` (Stück) ×
+    ``last_price`` approximiert (Mio Kurswährung) — inkl. Diagnose."""
+    df = _base_frame(
+        3,
+        avg_volume=[500_000.0, 10_000.0, np.nan],
+        last_price=[100.0, 50.0, 30.0],
+    )
+    out, diags = derive_v2_indicators(df, Settings())
+
+    assert out["adv_3m"].iloc[0] == pytest.approx(50.0)
+    assert out["adv_3m"].iloc[1] == pytest.approx(0.5)
+    assert np.isnan(out["adv_3m"].iloc[2])
+    assert any(d.code == "adv_derived" for d in diags)
+
+
+def test_adv_column_wins_over_avg_volume():
+    """Liegt ``adv_3m`` direkt vor, wird nicht aus ``avg_volume`` abgeleitet."""
+    df = _base_frame(
+        3,
+        adv_3m=[5.0, 6.0, 7.0],
+        avg_volume=[500_000.0] * 3,
+        last_price=[100.0] * 3,
+    )
+    out, diags = derive_v2_indicators(df, Settings())
+
+    assert list(out["adv_3m"]) == [5.0, 6.0, 7.0]
+    assert not any(d.code == "adv_derived" for d in diags)

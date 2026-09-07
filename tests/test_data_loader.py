@@ -328,3 +328,21 @@ def test_v2_optional_columns_absent_yield_nan():
     for col in ("ev_ebit", "net_debt_ebitda", "fcf_yield", "adv_3m", "ipo_date"):
         assert col in df.columns
         assert df[col].isna().all()
+
+
+def test_fcf_yld_and_avg_volume_header_variants_detected():
+    """Koyfin-Header-Varianten ``FCF EV Yld (LTM)`` und ``Avg Volume``
+    werden erkannt, ohne die Basisspalten zu verschieben."""
+    headers, values = _base_57_row()
+    headers = headers[:20] + ["FCF EV Yld (LTM)", "Avg Volume"] + headers[20:]
+    values = values[:20] + ["0.045", "1200000"] + values[20:]
+    csv = ",".join(headers) + "\n" + ",".join(values) + "\n"
+
+    df = load_koyfin_csv(csv.encode("utf-8"))
+
+    assert df["fcf_yield"].iloc[0] == 0.045
+    assert df["avg_volume"].iloc[0] == 1200000
+    # Basisspalten unverschoben.
+    assert df["sma_50"].iloc[0] == 375
+    assert df["sma_200"].iloc[0] == 340
+    assert df["export_date"].iloc[0] == "2026-07-14"
