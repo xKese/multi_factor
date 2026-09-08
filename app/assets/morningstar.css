@@ -216,10 +216,15 @@ hr { border-color: var(--ms-border); opacity: 1; }
   align-items: stretch;
   gap: 0;
   flex: 1;
-  overflow-x: auto;
-  scrollbar-width: none;
+  /* min-width: 0 ist Pflicht, nicht Kosmetik: früher hat overflow-x: auto
+     das implizit gesetzt. Ohne die Regel weigert sich das Flex-Item, unter
+     seine Inhaltsbreite zu schrumpfen, und drückt .ms-header-tools aus der
+     Kopfzeile. Zugleich hält es die Nav-Breite unabhängig davon, wie viele
+     Tabs gerade sichtbar sind — Grundlage der Überlauf-Berechnung. */
+  min-width: 0;
+  position: relative;
+  overflow: visible;
 }
-.ms-nav::-webkit-scrollbar { display: none; }
 
 .ms-nav-link {
   display: flex;
@@ -251,6 +256,7 @@ hr { border-color: var(--ms-border); opacity: 1; }
   gap: var(--ms-sp-3);
   padding-left: var(--ms-sp-4);
   border-left: 1px solid var(--ms-border);
+  flex: 0 0 auto;
 }
 
 .ms-data-status {
@@ -3713,3 +3719,195 @@ hr { border-color: var(--ms-border); opacity: 1; }
 
 /* Leerzustand innerhalb einer Section (statt padding: 16px 0 inline) */
 .ms-section-empty { padding: 16px 0; }
+
+/* ==========================================================================
+   Priority+-Navigation — Überlauf-Menü „Mehr ▾" und Utility-Menü
+   Welche Tabs sichtbar bleiben, berechnet ``assets/ms-theme.js``; hier stehen
+   nur die Zustände (.is-overflowed / .is-compact / .is-open / .has-active).
+   Bewusst am Dateiende: der Brand-Refresh ab Zeile ~1373 deklariert die
+   :root-Tokens neu, und mehrere Regeln hier überschreiben den
+   Kopfzeilen-Block (Zeile ~180) bei gleicher Spezifität — nur die
+   Quelltext-Reihenfolge entscheidet.
+   ========================================================================== */
+
+/* Überzählige Tabs verschwinden. Das !important ist notwendig: .ms-nav-link
+   setzt display: flex, und eine Klassenregel schlägt jede Standardregel. */
+.ms-nav-link.is-overflowed { display: none !important; }
+
+/* Kompaktmodus (sehr schmal): die Tab-Reihe entfällt komplett, der
+   „Mehr"-Button trägt den Namen der aktiven Seite. */
+.ms-nav.is-compact .ms-nav-link { display: none !important; }
+
+/* Messdurchlauf: alles sichtbar UND fett. Ohne das erzwungene font-weight
+   würden die Breiten davon abhängen, welcher Tab gerade aktiv ist —
+   .ms-nav-link.active ist 600, der Rest 500. */
+.ms-nav.is-measuring .ms-nav-link {
+  display: flex !important;
+  font-weight: 600;
+}
+
+.ms-nav-more {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+/* Versteckt, aber messbar: absolut und unsichtbar statt display: none —
+   sonst liesse sich die Buttonbreite nicht vorab bestimmen. */
+.ms-nav-more.is-hidden {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Zwilling von .ms-nav-link, nur als <button> */
+.ms-nav-more-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--ms-sp-4);
+  max-width: 100%;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ms-text-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.ms-nav-more-btn:hover {
+  color: var(--ms-text);
+  border-bottom-color: var(--ms-border-strong);
+}
+.ms-nav-more-btn:focus-visible {
+  outline: 2px solid var(--ms-accent);
+  outline-offset: -2px;
+}
+.ms-nav-more-caret {
+  font-size: 10px;
+  line-height: 1;
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+.ms-nav-more-btn[aria-expanded="true"] { color: var(--ms-text); }
+.ms-nav-more-btn[aria-expanded="true"] .ms-nav-more-caret { transform: rotate(180deg); }
+.ms-nav-more-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Die aktive Seite liegt im Menü — der Button erbt den Aktiv-Look der Tabs. */
+.ms-nav-more.has-active .ms-nav-more-btn {
+  color: var(--ms-text);
+  font-weight: 600;
+  border-bottom-color: var(--ms-accent);
+}
+
+/* ---- Dropdown-Panels (Überlauf und Utility) ---------------------------- */
+
+.ms-nav-more-panel,
+.ms-util-panel {
+  position: absolute;
+  min-width: 220px;
+  max-width: 320px;
+  padding: var(--ms-sp-1) 0;
+  background: var(--ms-bg);
+  border: 1px solid var(--ms-border-strong);
+  border-radius: var(--ms-r-card);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.18);
+  z-index: 1100; /* über .ms-header (1000), unter .ms-cmdk (9000) */
+  display: none;
+}
+[data-theme="dark"] .ms-nav-more-panel,
+[data-theme="dark"] .ms-util-panel {
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+}
+.ms-nav-more-panel { top: 100%; left: 0; margin-top: -1px; }
+.ms-util-panel { top: calc(100% + 6px); right: 0; }
+.ms-nav-more.is-open .ms-nav-more-panel,
+.ms-util.is-open .ms-util-panel { display: block; }
+
+.ms-nav-more-item,
+.ms-util-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ms-sp-2);
+  padding: 8px var(--ms-sp-4);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ms-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.ms-nav-more-item:hover,
+.ms-util-item:hover {
+  background: var(--ms-surface);
+  color: var(--ms-text);
+  text-decoration: none;
+}
+.ms-nav-more-item.is-active,
+.ms-util-item.active {
+  color: var(--ms-text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--ms-accent);
+}
+.ms-nav-more-item:focus-visible,
+.ms-util-item:focus-visible {
+  outline: 2px solid var(--ms-accent);
+  outline-offset: -2px;
+}
+/* ---- Zahnrad-Menü rechts ----------------------------------------------- */
+
+.ms-util { position: relative; display: inline-flex; }
+.ms-util-btn {
+  /* Maße bewusst identisch zu .ms-theme-toggle — beide Knöpfe stehen
+     nebeneinander und sollen als Paar wirken. */
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--ms-text-muted);
+  background: transparent;
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-r-card);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.ms-util-btn:hover {
+  color: var(--ms-text);
+  border-color: var(--ms-border-strong);
+  background: var(--ms-surface);
+}
+.ms-util-btn:focus-visible {
+  outline: 2px solid var(--ms-accent);
+  outline-offset: 1px;
+}
+.ms-util-btn[aria-expanded="true"],
+.ms-util.has-active .ms-util-btn {
+  color: var(--ms-accent);
+  border-color: var(--ms-accent);
+}
+
+/* Schmale Fenster: Marke und Datenstatus weichen, damit die Tab-Reihe Luft
+   bekommt. Die Breitenänderung löst über den ResizeObserver automatisch eine
+   Neuberechnung aus. */
+@media (max-width: 900px) {
+  .ms-data-status { display: none; }
+  .ms-brand-text { display: none; }
+  .ms-brand { padding-right: var(--ms-sp-3); margin-right: var(--ms-sp-3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-nav-more-btn,
+  .ms-nav-more-caret,
+  .ms-util-btn { transition: none; }
+}
