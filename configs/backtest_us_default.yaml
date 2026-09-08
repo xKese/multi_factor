@@ -1,0 +1,42 @@
+# Backtest-Engine Stufe 1 — US-Universum, Alpha Vantage Premium.
+# Alle Werte sind die Defaults aus der Spec; Auslassen = Default aus
+# app/backtest/config.py. Der API-Key steht NICHT hier, sondern in der
+# Umgebungsvariable ALPHAVANTAGE_API_KEY.
+name: backtest_us_default
+
+# Alpha Vantage / Cache
+av_requests_per_minute: 75
+av_cache_ttl_days_fundamentals: 90
+av_cache_ttl_days_prices: 7
+av_cache_ttl_days_listing: 365
+av_no_data_ttl_days: 30
+cache_dir: data/backtest_cache
+report_dir: reports/backtest
+
+# Kalender
+bt_start: 2010-03-31
+bt_end: null            # null = letzter Handelstag im Cache
+bt_history_start: 2008-01-01
+
+# Universum
+bt_min_market_cap: 1000.0
+bt_universe_top_n: 1000
+bt_min_history_days: 250
+
+# Snapshot
+bt_reporting_lag_days: 90
+bt_tax_rate: 0.21
+bt_benchmark_ticker: SPY
+bt_benchmark_sector_source: universe_top500
+
+# Simulation
+bt_initial_capital: 10000000.0
+bt_commission_bps: 10.0
+bt_slippage_bps: 5.0
+bt_cash_yield: 0.0
+bt_delisting_haircut_sensitivity: 0.30
+bt_rf: 0.0
+
+# Produktive Settings überschreiben (nur für Experimente; Sensitivitäten
+# S1–S10 setzen ihre Overrides selbst):
+settings: {}

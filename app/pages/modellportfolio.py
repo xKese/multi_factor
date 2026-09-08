@@ -135,6 +135,13 @@ def layout(**_) -> html.Div:
             html.Div(id="mp-status"),
             dcc.Loading(html.Div(id="mp-content")),
             section_header(
+                "Track Record seit Produktivstart",
+                "Paper-Portfolios des Modells (weight_model) und der effektiven "
+                "Umsetzung (weight_effective, mit Overrides); täglich per "
+                "`python -m app.backtest paper update`.",
+            ),
+            _track_record_block(),
+            section_header(
                 "Override-Register",
                 "Manuelle Eingriffe: Pflichtfelder Begründung (≥ 20 Zeichen), "
                 "Verantwortlicher, Ablaufdatum (≤ 180 Tage).",
@@ -144,6 +151,68 @@ def layout(**_) -> html.Div:
             _override_form(),
         ]
     )
+
+
+def _track_record_block() -> html.Div:
+    """Kennzahlen beider Paper-Portfolios (Spec Backtest 11) aus
+    ``paper_nav_daily`` — fail-open, ohne Daten nur ein Hinweis."""
+    try:
+        from app.backtest.paper import VARIANT_EFFECTIVE, VARIANT_MODEL, track_record
+
+        tr = track_record()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Track Record nicht ladbar: %s", exc)
+        tr = None
+    if not tr or not tr.get("variants"):
+        return html.Div(
+            dbc.Alert(
+                "Noch kein Paper-Portfolio bewertet — `python -m app.backtest paper "
+                "update` (täglich per Cron) füllt die Tabelle paper_nav_daily ab dem "
+                "ersten gespeicherten Zielportfolio.",
+                color="info",
+            ),
+            className="mb-4",
+        )
+
+    def _cell(variant: str, block: str, key: str, pct: bool = True, digits: int = 1) -> str:
+        m = tr["variants"].get(variant)
+        if not m:
+            return "–"
+        value = m[block].get(key)
+        if value is None or pd.isna(value):
+            return "–"
+        return _fmt_pct(value, digits) if pct else fmt_de(float(value), 2)
+
+    rows = [
+        ("Gesamtrendite", "portfolio", "total_return", True),
+        ("Rendite p. a.", "portfolio", "ann_return", True),
+        ("Volatilität p. a.", "portfolio", "volatility", True),
+        ("Max. Drawdown", "portfolio", "max_drawdown", True),
+        ("Benchmark p. a. (ACWI, EUR)", "benchmark", "ann_return", True),
+        ("Aktive Rendite p. a.", "active", "ann_return", True),
+        ("Tracking Error ex post", "active", "tracking_error", True),
+        ("Information Ratio", "active", "information_ratio", False),
+    ]
+    table = pd.DataFrame(
+        [
+            {
+                "Kennzahl": label,
+                "Modell (ohne Overrides)": _cell(VARIANT_MODEL, block, key, pct),
+                "Effektiv (mit Overrides)": _cell(VARIANT_EFFECTIVE, block, key, pct),
+            }
+            for label, block, key, pct in rows
+        ]
+    )
+    oc = tr.get("override_contribution") or {}
+    meta = (
+        f"Zeitraum {tr['start']:%d.%m.%Y} – {tr['end']:%d.%m.%Y}"
+        + (
+            f" · Override-Beitrag p. a. {_fmt_pct(oc.get('ann_return'))}"
+            if oc
+            else ""
+        )
+    )
+    return panel("Paper-Portfolio: Modell vs. effektiv", render_basic_table(table), meta=meta)
 
 
 def _override_form() -> html.Div:
