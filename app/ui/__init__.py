@@ -11,6 +11,7 @@ from app.ui.formatters import (
     fmt_signed_percent,
     parse_de,
 )
+from app.ui.header import header_layout
 from app.ui.labels import FACTOR_GROUP_LABELS, INDICATOR_LABELS, label_for
 from app.ui.theme import (
     MS_DARK,
@@ -41,6 +42,7 @@ __all__ = [
     "fmt_market_cap",
     "fmt_percent",
     "fmt_signed_percent",
+    "header_layout",
     "kpi_band",
     "label_for",
     "ms_badge",

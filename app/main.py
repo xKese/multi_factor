@@ -18,24 +18,12 @@ from dash import (
 
 from app.core.diagnostics import SEV_ERROR
 from app.core.state import STATE
-from app.ui import command_palette_layout, fmt_de, register_plotly_templates
-
-
-NAV_ORDER = {
-    "Dashboard": 0,
-    "Einzelanalyse": 1,
-    "Agenten-Analyse": 2,
-    "Momentum-Monitor": 3,
-    "Sektor-Momentum": 4,
-    "M&S Portfolio": 5,
-    "Modellportfolio": 6,
-    "Factor Timing": 7,
-    "Risiko & Benchmark": 8,
-    "Daten-Import": 9,
-    "Einstellungen": 10,
-    "Perzentil-Hilfe": 11,
-    "Anleitung": 12,
-}
+from app.ui import (
+    command_palette_layout,
+    fmt_de,
+    header_layout,
+    register_plotly_templates,
+)
 
 
 INDEX_STRING = """<!DOCTYPE html>
@@ -60,51 +48,6 @@ INDEX_STRING = """<!DOCTYPE html>
     </body>
 </html>
 """
-
-
-def _nav_order(page: dict) -> int:
-    return NAV_ORDER.get(page["name"], 99)
-
-
-def _header() -> html.Header:
-    links = [
-        dcc.Link(p["name"], href=p["path"], className="ms-nav-link", id=f"ms-nav-{i}")
-        for i, p in enumerate(sorted(dash.page_registry.values(), key=_nav_order))
-    ]
-    return html.Header(
-        [
-            html.Div(
-                [
-                    html.Div(className="ms-brand-mark"),
-                    html.Span("M&S · Multi-Faktor"),
-                ],
-                className="ms-brand",
-            ),
-            html.Nav(links, className="ms-nav", id="ms-nav"),
-            html.Div(
-                [
-                    html.Div(id="ms-agent-status"),
-                    html.Div(id="ms-data-status", className="ms-data-status"),
-                    html.Button(
-                        [
-                            html.Span("☀", className="sun", **{"aria-hidden": "true"}),
-                            html.Span("☾", className="moon", **{"aria-hidden": "true"}),
-                        ],
-                        id="ms-theme-btn",
-                        className="ms-theme-toggle",
-                        title="Theme umschalten",
-                        n_clicks=0,
-                        **{
-                            "aria-label": "Theme umschalten",
-                            "aria-pressed": "false",
-                        },
-                    ),
-                ],
-                className="ms-header-tools",
-            ),
-        ],
-        className="ms-header",
-    )
 
 
 def _read_modal_layout():
@@ -153,7 +96,7 @@ def create_app() -> dash.Dash:
             dcc.Store(id="ms-theme-store", storage_type="local"),
             dcc.Store(id="ms-agent-fp"),
             dcc.Interval(id="ms-agent-poll", interval=4000),
-            _header(),
+            header_layout(dash.page_registry.values()),
             html.Main(dash.page_container, className="ms-page"),
             command_palette_layout(),
             _read_modal_layout(),
@@ -165,7 +108,7 @@ def create_app() -> dash.Dash:
     clientside_callback(
         """
         function(pathname) {
-            var links = document.querySelectorAll('.ms-nav-link');
+            var links = document.querySelectorAll('.ms-nav-link, .ms-util-item');
             links.forEach(function (a) {
                 var href = a.getAttribute('href') || '';
                 var isActive = (pathname === href) ||
@@ -174,6 +117,9 @@ def create_app() -> dash.Dash:
                 else if (href === '/' && pathname !== '/') isActive = false;
                 a.classList.toggle('active', isActive);
             });
+            // Priority+: aktiven Tab notfalls aus dem "Mehr"-Menu in die
+            // sichtbare Reihe holen und die Aktiv-Marker nachziehen.
+            if (window.msNavOverflow) window.msNavOverflow.sync();
             return window.dash_clientside.no_update;
         }
         """,
