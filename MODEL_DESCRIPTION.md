@@ -552,7 +552,8 @@ Legacy-Tabelle `ms_portfolio` wird beim ersten Zugriff als Portfolio 1
 sowie für Composite v2/Portfoliokonstruktion: `model_portfolio`,
 `model_portfolio_meta` (inkl. `source_portfolio_id/_name` des
 abgeglichenen Bestands), `override_register`,
-`risk_benchmark_region_weights` (Abschnitt 12.8).
+`risk_benchmark_region_weights` (Abschnitt 12.8), `paper_nav_daily`
+(Paper-Portfolio, Abschnitt 14.7).
 
 **PIT-Archiv (Punkt-in-Zeit):** Jeder CSV-Import archiviert das gescorte
 Universum (Rohkennzahlen + berechnete Scores) zusätzlich in
@@ -886,6 +887,171 @@ Portfolio; Report
 `reports/modellportfolio_<datum>.md`; Exit 0 ohne Fehler-Diagnosen, 1 bei
 Warnungen, 2 bei Fehlern) bzw. `… compare --v1 --v2` (Spearman v1/v2,
 Rangänderungen > 30 Perzentilpunkte, Sektorverteilung der Top-35).
+
+---
+
+## 14. Backtest-Engine und Paper-Portfolio (`app/backtest/`)
+
+Beantwortet „Wie hätte sich ein Portfolio entwickelt, das dem Modell gefolgt
+wäre?" — Stufe 1 auf dem US-Teiluniversum mit Alpha-Vantage-Premium-Daten,
+und dient zugleich als Paper-Portfolio-Tracker des produktiven Modells.
+CLI: `python -m app.backtest fetch | run | report | paper | snapshot`,
+Config `configs/backtest_us_default.yaml` (alle Parameter =
+`BacktestConfig` in `app/backtest/config.py`; Abschnitt `settings:` überschreibt
+produktive `Settings`-Felder, sonst gelten die Defaults).
+
+### 14.1 Leitprinzipien
+
+- **Kein Nachbau des Modells.** Der Simulator ruft ausschließlich die
+  produktiven Funktionen auf — `compute_scores` (v1, liefert Piotroski),
+  `compute_scores_v2` (enthält `derive_v2_indicators`,
+  `apply_universe_filters`, Zonen), `select_portfolio`, `compute_weights`,
+  `apply_te_constraint`, `build_trade_list` (Modus `full`) bzw.
+  `build_model_portfolio` (Modus `interim`, produktive Interim-Semantik) —
+  über ihre Modulattribute; Test 12 beweist per Monkeypatch, dass keine
+  Kopie existiert. Die Engine erzeugt lediglich je Stichtag einen DataFrame
+  mit exakt der Spaltenstruktur des Koyfin-Imports (`SnapshotSource`,
+  abstrakte Basisklasse; `AlphaVantageSnapshotSource` erste Implementierung).
+- **Punkt-in-Zeit, Bias offen dokumentiert:** Vorbehaltsblock (14.8) steht
+  wörtlich am Anfang jedes Reports.
+- **Reproduzierbar:** jeder Lauf speichert Config-Hash, Settings-Hash,
+  Git-Commit, Cache-Stand; gleicher Cache + gleiche Config ⇒ identische
+  NAV-Reihe (SHA-256 in `sensitivities.csv`).
+- **Kein Netzwerk während der Simulation:** alle Daten aus
+  `data/backtest_cache/` (Parquet je Endpunkt/Ticker + SQLite-Manifest
+  `cache_manifest`; TTL 90 Tage Fundamentals, 7 Kurse, 365 historische
+  Listings, 30 `no_data`). API-Key nur aus `ALPHAVANTAGE_API_KEY`.
+
+### 14.2 Datenschicht (`av_client.py`, `dataset.py`)
+
+Endpunkte `LISTING_STATUS` (aktiv je Stichtag, delisted einmalig),
+`TIME_SERIES_DAILY_ADJUSTED`, `INCOME_STATEMENT`, `BALANCE_SHEET`,
+`CASH_FLOW`, `OVERVIEW`, `FX_DAILY` (USD/EUR); Kenneth-French-Faktordateien
+im `fetch`-Schritt. Rate-Limit über gleitendes 60-s-Fenster (`av_requests_per_minute`,
+Default 75), Retry mit Backoff bei HTTP-Fehlern und `Note`/`Information`-
+Antworten; Antworten ohne erwartete Schlüssel werden als `no_data` gecacht.
+Feldmapping mit Fallbacks (`ebit → operatingIncome`,
+`ebitda → ebit + D&A`, `total_debt → longTermDebt + shortTermDebt`,
+`cash → cashAndShortTermInvestments`, `fcf = ocf − |capex|`), `"None"` → NaN.
+
+### 14.3 Universum (`universe.py`)
+
+Je Stichtag: `LISTING_STATUS(date=d)` mit `assetType = Stock`, Börse ∈
+{NYSE, NASDAQ, NYSE ARCA, NYSE MKT}; raus: Suffixe `-P/-WS/-U/-R`,
+OVERVIEW ≠ Common Stock, Land ≠ USA (fehlt OVERVIEW: Titel bleibt, Sektor
+`Unknown` → Neutralisierungsgruppe global), < 250 Kurstage, Doppelgattungen
+(gleicher Firmenname → liquidere Gattung nach 3M-Dollar-Volumen); dann
+`market_cap(d) ≥ bt_min_market_cap` (1.000 Mio EUR) und die größten
+`bt_universe_top_n` (1.000). Alpha-Vantage-Sektoren (SIC-basiert) werden
+auf GICS-nahe Namen gemappt (`AV_SECTOR_MAP`), sodass die Financials-/Real-
+Estate-Sonderlogik greift. Delistings: Verkauf am ersten Tag ohne Kurs zum
+letzten Adjusted Close (Kosten), Erlös in Cash; Sensitivität S7 mit −30 %.
+
+### 14.4 Snapshot (`pit_builder.py`)
+
+Fundamentals gelten ab `fiscal_date + bt_reporting_lag_days` (90); `aktuell(d)`
+= jüngster verfügbarer Jahresabschluss, `vorjahr(d)` der davor; älter als
+18 Monate ⇒ alle Fundamentalspalten NaN. Alle USD-Beträge mit `fx(d)`
+(letzter Kurs ≤ d) in EUR Mio; Kursreihen tagesweise in EUR, sodass
+`ret_*`, `volatility_1y`, `beta`, `high/low_52w`, `sma_50/200` die
+EUR-Perspektive abbilden. Belegung nach Spec 4.3 (u. a. `market_cap` =
+Close(unadjustiert) · shares_out · fx / 1e6, `roic` mit `bt_tax_rate` 0,21
+bzw. 0,35 vor 2018, `int_coverage` Cap 100, Altman Z aus Working Capital,
+Retained Earnings, EBIT, Marktkapitalisierung, Umsatz); optionale Spalten
+`ev_ebit`, `net_debt_ebitda`, `fcf_yield`, `adv_3m`, `ipo_date` gefüllt;
+`eps_revisions_3m` = NaN (Momentum nur `mom_12_1_adj`; S8 belegt die Spalte
+mit risikoadjustiertem 6-1-Momentum, auf das Gültigkeitsband geclippt).
+`region` = „United States" (Regionsband inaktiv). Benchmark SPY (EUR);
+Sektorgewichte für die Bandbreiten = kapitalisierungsgewichtete Anteile der
+500 größten Universumstitel (Proxy, `select_portfolio` erhält sie als
+Parameter). `snapshot --date … --out … [--score]` schreibt eine CSV, die
+`load_koyfin_csv` fehlerfrei einliest (Test 7).
+
+### 14.5 Simulation und Kalender (`simulator.py`)
+
+Startkapital 10 Mio EUR (Skalierung). Stichtage: letzter Handelstag der
+Monate aus `pc_rebalance_months` (`full`) und `pc_interim_months`
+(`interim`), erster Stichtag immer `full`; Handelskalender aus der
+SPY-Reihe; kein täglicher `monitor`-Lauf. Ausführung zum Schlusskurs des
+Stichtags, Käufe auf ganze Aktien abgerundet, Kosten je Seite
+`bt_commission_bps` 10 + `bt_slippage_bps` 5 aus dem Cash, Cash nie negativ
+(Käufe werden auf verfügbares Cash skaliert), Cash unverzinst. Nicht
+ausführbare Käufe (kein Kurs) bleiben Cash und werden gezählt. Die
+TE-Kontrolle erhält die EUR-Renditen der letzten 504 Handelstage bis
+einschließlich `t` (`risk_cache_from_backtest`, strikt ohne Daten nach `t`);
+Overrides sind immer leer. Abbruch, wenn an einem Stichtag für > 5 % der
+gelisteten Titel keine Kursreihe im Cache liegt.
+
+### 14.6 Kennzahlen, Faktorregression, Report, Sensitivitäten
+
+`metrics.py`: Rendite (gesamt/p. a. geometrisch), Vola (Log-Renditen ·
+√252), Sharpe (`bt_rf`), Max. Drawdown mit Datum/Erholung, Calmar, TE ex post,
+IR, Beta, Trefferquote (Kalenderjahre aktiv > 0), beste/schlechteste
+12-Monats-Periode, Turnover p. a., Kosten in bp, Kalenderjahrestabelle,
+rollierende 3-Jahres-Reihen, Diagnosestatistik (Ø Titel, Ø Haltedauer,
+Notfüllungen, verschobene Trades, TE nicht erfüllbar, fehlende Kurse,
+Delistings, `Unknown`-Anteil). `factor_regression.py`: FF5 + Momentum in
+USD (Newey-West, 5 Lags), Alpha p. a., R²; falsches Vorzeichen oder |t| < 2
+werden markiert. `report.py`: `reports/backtest/backtest_<config>_<ts>.md`
+mit 11 Abschnitten (Vorbehaltsblock zuerst) plus Lauf-Verzeichnis mit
+`nav_daily.csv`, `holdings_by_date.csv`, `trades.csv`, `diagnostics.csv`,
+`sensitivities.csv`, `factor_regression.csv`, `chart_data.csv`, `run.json`;
+`report --run <run_id>` rendert daraus erneut. Pflicht-Sensitivitäten
+S1–S10 (`SENSITIVITY_VARIANTS`): gleiche Faktorgewichte, keine Pufferzone,
+1/N, ohne TE-Schritt, jedes Quartal `full`, Kosten × 2, Delisting-Haircut,
+Momentum-Proxy, Lag 120, Top-500. Weicht der IR von Basisfall und S1 um
+mehr als 0,2 ab, steht ein Warnhinweis im Report.
+
+### 14.7 Paper-Portfolio (`paper.py`)
+
+Bei jedem gespeicherten Zielportfolio mit `rebalance_mode ∈ {full, interim}`
+werden zwei Paper-Portfolios fortgeschrieben: `model` folgt `weight_model`
+(ohne Overrides), `effective` folgt `weight_effective`. Bewertung täglich
+mit derselben Buchhaltung wie der Backtest (`replay_targets`) über den
+Kurscache des Risikomoduls (`market_data.load_price_panel`: globale Ticker,
+EUR-Umrechnung, Benchmark ACWI-EUR-Reihe); fehlende Kurse werden gezählt und
+mit dem letzten Kurs fortgeschrieben. Das Ticker-Mapping Koyfin → Alpha
+Vantage ist die bestehende Tabelle `av_ticker_mappings` (uid → `av_symbol`,
+`confirmed_by_user` = manuell bestätigt; Vorbelegung per SYMBOL_SEARCH in
+`market_data.resolve_symbols`). Tabelle `paper_nav_daily` (`date, variant,
+nav, benchmark_nav, cash, n_positions, missing_prices`), Start = erster
+Snapshot. CLI `python -m app.backtest paper update [--no-fetch]` (täglich,
+z. B. Cron `15 22 * * 1-5 cd /srv/app && python -m app.backtest paper update`)
+und `… paper report` (Kennzahlen beider Varianten + Override-Beitrag =
+effektiv − Modell). Auf `/modellportfolio` zeigt der Abschnitt „Track
+Record seit Produktivstart" beide Varianten.
+
+### 14.8 Vorbehaltsblock (wörtlich in jedem Report)
+
+```
+VORBEHALTE – DIESER BACKTEST IST EIN PLAUSIBILITÄTSTEST, KEIN TRACK RECORD
+
+1. Universum: nur US-gelistete Aktien. Das produktive Modell arbeitet global.
+2. Fundamentaldaten sind nachträglich korrigierte Werte (restated), keine
+   Punkt-in-Zeit-Daten. Dieser Bias verbessert Value-, Quality- und Investment-
+   Signale systematisch. Der Reporting-Lag von 90 Tagen mildert, beseitigt ihn nicht.
+3. EPS-Revisionen sind nicht verfügbar. Momentum besteht im Basisfall nur aus
+   risikoadjustiertem 12-1-Preismomentum.
+4. Sektorzuordnung ist die heutige, nicht die historische.
+5. Delistings werden zum letzten Kurs verkauft; Konkursverluste sind unterschätzt
+   (siehe Sensitivität S7).
+6. Benchmark-Sektorgewichte sind ein Proxy aus dem eigenen Universum.
+7. Kosten sind pauschal; Marktimpact bei illiquiden Titeln ist nicht modelliert.
+8. Faktorgewichte, Schwellen und Bandbreiten wurden vor diesem Backtest festgelegt
+   und nicht daran angepasst. Jede spätere Anpassung an Backtest-Ergebnisse muss
+   als solche dokumentiert werden.
+9. Ergebnisse sind brutto vor Steuern und vor Verwaltungsgebühren.
+
+Erwartete Live-Prämien liegen deutlich unter Backtest-Werten (McLean/Pontiff 2016:
+Ø 26 % out-of-sample, 58 % post-publication).
+```
+
+Tests (`tests/backtest/`, 17 Tests, synthetische Fixtures, kein Netzwerk):
+Cache/TTL/no_data/Key-Hygiene, Rate-Limiter, Feldmapping, FX, PIT-
+Verfügbarkeit, kein Look-ahead, Snapshot-Schema, Universumsausschlüsse,
+Delisting, Buchhaltung, Kalender, produktiver Code (Monkeypatch),
+Kennzahlen gegen Handrechnung, Faktorregression, Sensitivitäten +
+Reproduzierbarkeit, Vorbehaltsblock zuerst, Paper-Update.
 
 ---
 

@@ -398,13 +398,37 @@ python -m app.tools.risk_report report --variante buyhold
   Default-Szenarien erreichen Bestandsinstallationen daher nur über ein
   erneutes Speichern der Einstellungen.
 
+## Backtest-Engine (Alpha Vantage, US-Universum) und Paper-Portfolio
+
+`app/backtest/` simuliert, wie sich ein Portfolio entwickelt hätte, das dem
+Modell gefolgt wäre — mit dem **unveränderten produktiven Code** (Scoring
+v2, Filter, Selektion, Gewichtung, TE-Kontrolle, Trade-Liste) auf einem
+Punkt-in-Zeit-Snapshot je Stichtag. Details: `MODEL_DESCRIPTION.md`,
+Abschnitt 14; Spezifikation der Parameter in `configs/backtest_us_default.yaml`.
+
+```bash
+export ALPHAVANTAGE_API_KEY=…                                   # nie in Config/Cache/Report
+python -m app.backtest fetch  --config configs/backtest_us_default.yaml   # Cache füllen (~80 min bei 75/min)
+python -m app.backtest snapshot --config … --date 2015-03-31 --out snapshot.csv --score
+python -m app.backtest run    --config configs/backtest_us_default.yaml   # Basisfall + S1–S10
+python -m app.backtest run    --config … --no-sensitivities --variant S3_equal_weight
+python -m app.backtest report --run backtest_backtest_us_default_<ts>     # aus gespeichertem Lauf
+python -m app.backtest paper update      # täglich per Cron; --no-fetch ohne API-Calls
+python -m app.backtest paper report
+```
+
+Reports liegen unter `reports/backtest/` (Markdown mit Vorbehaltsblock an
+erster Stelle + CSVs je Lauf), der Cache unter `data/backtest_cache/`.
+Exit-Codes: 0 ohne Fehler, 1 bei Warnungen (z. B. fehlende Faktordaten,
+Diagnose-Fehler an Stichtagen), 2 bei Abbruch/Konfigurationsfehler.
+
 ## Tests
 
 ```bash
 python -m tests.test_scoring        # Smoke-Test Scoring
 python -m pytest tests -q           # komplette Suite (inkl. Agenten-Client,
                                     # Ticker-Mapping, Agenten-Persistenz,
-                                    # Risiko-&-Benchmark-Modul)
+                                    # Risiko-&-Benchmark-Modul, Backtest-Engine)
 ```
 
 Smoke-Test gegen `tests/fixtures/koyfin_sample.csv` (10 synthetische Tickers).
