@@ -13,7 +13,7 @@ Die Anwendung ersetzt die 12 Excel-Sheets durch interaktive Seiten:
 | Dashboard        | Übersicht mit KPIs, Top-Ranking                 |
 | Einzelanalyse    | Ticker-Detailansicht                            |
 | SMA_Signale      | Momentum-Monitor (Trend-Phasen, Cross-Events, 12-1) |
-| M&S Portfolio    | Portfolio-Monitor: Koyfin-Watchlist-Upload, Handlungs-Flags, Vergleich zum Universum |
+| M&S Portfolio    | Portfolio-Monitor: mehrere Koyfin-Watchlist-Uploads, Auswahl des aktiven Portfolios, Handlungs-Flags, Vergleich zum Universum |
 | Factor_Timing    | Taktische Faktor-Allokation: Makro-Regime v2 + Faktor-Momentum aus dem Universum + Sentiment (siehe unten) |
 | Daten_Import     | CSV-Upload (Koyfin-Export, einziger Input)      |
 | Berechnungen     | automatisch (Scoring-Engine)                    |
@@ -52,7 +52,9 @@ Vollständige Methodik in `MODEL_DESCRIPTION.md` (§11/§12) — Kurzfassung:
   eines Zielportfolios von 35 Titeln — Sektor-/Regions-Bandbreiten,
   Gewichtung `(1+z)/Vol` mit Floor/Cap, Ex-ante-TE-Kontrolle (Zielband
   4,5–5,5 %), Trade-Liste (BUY/SELL/INCREASE/REDUCE/HOLD/DEFERRED),
-  Override-Register und PIT-Historie.
+  Override-Register und PIT-Historie. Welches hochgeladene Portfolio als
+  Bestand abgeglichen wird, wählt das Dropdown „Bestand“ auf der Seite
+  (gespeichert; CLI: `--portfolio ID|NAME`).
 
 ## Scoring-Logik v1 (Vergleichsmodus)
 
@@ -282,9 +284,17 @@ Agenten-Funktionen sind deaktiviert (Hinweis in der UI).
    oder Klick auswählen
 3. Nach erfolgreichem Import werden Dashboard, Einzelanalyse, Momentum-Monitor,
    M&S Portfolio und Perzentil-Hilfe automatisch befüllt
-4. Das M&S-Portfolio selbst wird auf der Portfolio-Seite als
-   Koyfin-Watchlist-CSV hochgeladen (nur Ticker-Spalte nötig) und in der
-   Datenbank gespeichert
+4. Portfolios werden auf der Portfolio-Seite als Koyfin-Watchlist-CSV
+   hochgeladen (nur Ticker-Spalte nötig) und in der Datenbank gespeichert.
+   Es können mehrere benannte Portfolios angelegt werden (Name im
+   Eingabefeld, sonst Dateiname; gleicher Name ersetzt). Das im Dropdown
+   gewählte **aktive Portfolio** gilt für die Portfolio-Seite, „Risiko &
+   Benchmark“ und die Portfolio-Linse; der Modellportfolio-Tab wählt den
+   Bestand für den Abgleich separat. Die Auswahl ist prozessweit (alle
+   Browser-Tabs). Bestehende Datenbanken werden beim ersten Start
+   automatisch migriert: das bisherige Portfolio erscheint als
+   „M&S Portfolio“ (id 1); die alte Tabelle `ms_portfolio` bleibt leer
+   zurück, ältere App-Versionen sehen darin kein Portfolio mehr
 
 ### CSV-Format
 
@@ -323,10 +333,11 @@ python -m app.tools.risk_report report --variante buyhold
 - Exit-Codes: `0` Erfolg, `1` fehlende Daten (kein Portfolio/Cache), `2`
   Argumentfehler — geeignet für einen täglichen Scheduler-Lauf
   (`update` gefolgt von `report`).
-- **Portfoliogewichte:** Der Watchlist-Upload auf `/portfolios` darf optional
+- **Portfoliogewichte:** Jeder Watchlist-Upload auf `/portfolios` darf optional
   eine Gewichtsspalte enthalten (Header `Gewicht`/`Weight`/`Anteil`;
   Dezimalkomma, Prozent- oder Dezimalskala). Ohne Spalte gilt
-  Gleichgewichtung (1/N). Beispiel:
+  Gleichgewichtung (1/N). Das Risikomodul rechnet mit dem aktiven
+  Portfolio. Beispiel:
 
   ```csv
   Ticker;Name;Gewicht

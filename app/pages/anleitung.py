@@ -87,8 +87,10 @@ bleibt als „Scoring v1 (Vergleich)" aufklappbar):
   `(1+Composite-Z)/Volatilität` mit Floor 2 %/Cap 5 %, Ex-ante-TE-Kontrolle
   (Ziel 4,5–5,5 %, `cTE-Beitrag` je Titel), Trade-Liste mit Aktionen
   BUY/SELL/INCREASE/REDUCE/HOLD/DEFERRED (Turnover-Budget) und
-  Override-Register. Der Daten-Import meldet den erkannten
-  Rebalance-Modus.
+  Override-Register. Das Dropdown „Bestand" wählt, welches hochgeladene
+  Portfolio als Bestand mit dem Zielportfolio abgeglichen wird
+  (Trade-Liste, Δw, Turnover); die Auswahl wird gespeichert und gilt auch
+  für das CLI. Der Daten-Import meldet den erkannten Rebalance-Modus.
 - **Faktor-Timing** wirkt seit v2 nur noch als Monitoring und fließt
   nicht in das Composite ein.
 
@@ -165,14 +167,22 @@ klassische Momentum-Definition); Ranking inkl. Abstand zum 52-Wochen-Hoch.
 
 ## M&S Portfolio
 
-Das Portfolio wird als **Koyfin-Watchlist-CSV** auf der Portfolio-Seite
+Portfolios werden als **Koyfin-Watchlist-CSV** auf der Portfolio-Seite
 hochgeladen — es genügt eine Ticker-Spalte (Header `Ticker`; Gruppen-Zeilen
 wie "Watch" werden ignoriert, identische Zeilen entfernt). Bei doppelt
 vergebenen Tickern im Universum entscheidet die Namensspalte der Watchlist,
 welche Firma gemeint ist; ohne auflösbaren Namen wird die Position als
-„mehrdeutig" markiert statt falsch oder doppelt gematcht. Der Upload wird in der
-Datenbank gespeichert und übersteht Neustarts; die Portfolio-Linse auf dem
-Momentum-Monitor nutzt automatisch die hochgeladene Liste.
+„mehrdeutig" markiert statt falsch oder doppelt gematcht.
+
+**Mehrere Portfolios:** Jeder Upload bekommt einen Namen (Eingabefeld, sonst
+der Dateiname). Ein Upload unter einem bereits vergebenen Namen ersetzt
+dieses Portfolio, ein neuer Name legt ein weiteres an. Im Dropdown
+„Portfolio auswählen" wird das **aktive Portfolio** gewählt — es bestimmt die
+Modell-Sicht auf dieser Seite, die Seite „Risiko & Benchmark" und die
+Portfolio-Linse auf dem Momentum-Monitor; „Portfolio löschen" entfernt das
+ausgewählte Portfolio nach Rückfrage. Alle Portfolios und die Auswahl werden
+in der Datenbank gespeichert und überstehen Neustarts (die Auswahl gilt
+prozessweit, also für alle geöffneten Browser-Tabs).
 
 Die Seite überträgt die Modell-Kennzahlen auf den Bestand:
 

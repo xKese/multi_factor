@@ -11,11 +11,12 @@ Re-Design analog Dashboard/Momentum-Monitor (Claude-Design-Handoff):
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 
 import pandas as pd
 from dash import Input, Output, State, callback, dcc, html, no_update, register_page
 
-from app.core.persistence import save_ms_portfolio
+from app.core import persistence
 from app.core.portfolio import (
     FLAG_BEARISH,
     FLAG_DEATH,
@@ -31,7 +32,6 @@ from app.core.state import STATE
 from app.pages.common import format_scored
 from app.ui import fmt_de, fmt_percent
 from app.ui.formatters import fmt_int
-
 
 BULLISH_SIGNALS = {"✓ GOLDEN CROSS", "● Kurs > SMA-200"}
 BEARISH_SIGNALS = {"⚠ DEATH CROSS", "▼ Kurs < SMA-200"}
@@ -313,18 +313,84 @@ def _missing_label(ticker: str) -> str:
 
 # ── Bausteine ──────────────────────────────────────────────────────────────
 
+def _portfolio_options() -> list[dict]:
+    return [
+        {
+            "label": f"{p['name']} · {fmt_int(int(p.get('n_positions') or 0))} Pos.",
+            "value": int(p["id"]),
+        }
+        for p in STATE.ms_portfolios
+    ]
+
+
+def _manage_card() -> html.Div:
+    return html.Div(
+        [
+            html.H3(
+                [
+                    "Portfolio auswählen ",
+                    html.Span(
+                        "Aktives Portfolio gilt für Risiko & Benchmark und die "
+                        "Portfolio-Linse",
+                        className="ms-card-h-meta",
+                    ),
+                ],
+                className="ms-card-h",
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        dcc.Dropdown(
+                            id="pf-select",
+                            options=_portfolio_options(),
+                            value=STATE.active_portfolio_id,
+                            clearable=False,
+                            placeholder="Noch kein Portfolio hochgeladen",
+                        ),
+                        style={"minWidth": "280px", "flex": "1 1 280px"},
+                    ),
+                    dcc.ConfirmDialogProvider(
+                        id="pf-delete",
+                        message=(
+                            "Ausgewähltes Portfolio wirklich löschen? Positionen "
+                            "und Auswahl gehen verloren."
+                        ),
+                        children=html.Button(
+                            "Portfolio löschen",
+                            className="btn btn-outline-danger btn-sm",
+                            disabled=not STATE.ms_portfolios,
+                        ),
+                    ),
+                ],
+                className="d-flex gap-2 align-items-center flex-wrap",
+            ),
+            html.Div(id="pf-select-status", className="ms-portfolio-feedback"),
+        ],
+        className="ms-card ms-stack-top",
+    )
+
+
 def _upload_card() -> html.Div:
     return html.Div(
         [
             html.H3(
                 [
-                    "Portfolio aktualisieren ",
+                    "Portfolio hochladen ",
                     html.Span(
-                        "Koyfin-Watchlist-CSV · nur Ticker-Spalte nötig",
+                        "Koyfin-Watchlist-CSV · nur Ticker-Spalte nötig · "
+                        "gleicher Name ersetzt, neuer Name legt an",
                         className="ms-card-h-meta",
                     ),
                 ],
                 className="ms-card-h",
+            ),
+            dcc.Input(
+                id="pf-upload-name",
+                type="text",
+                placeholder="Portfolioname (leer = Dateiname)",
+                debounce=True,
+                className="form-control form-control-sm mb-2",
+                style={"maxWidth": "360px"},
             ),
             dcc.Upload(
                 id="pf-upload",
@@ -403,7 +469,8 @@ def _hero(
             )
         )
 
-    eyebrow = f"M&S Portfolio · Stand {_stand_str(scored)}"
+    pf_name = STATE.active_portfolio_name or "Standard-Portfolio (nicht gespeichert)"
+    eyebrow = f"{pf_name} · Stand {_stand_str(scored)}"
     imported = _import_str()
     if imported:
         eyebrow += f" · Import vom {imported}"
@@ -919,9 +986,13 @@ def _render_main() -> list:
 
 
 def layout(**_) -> html.Div:
+    # Katalog bei jedem Seitenaufruf auffrischen (Uploads/Löschungen aus
+    # anderen Tabs oder dem CLI werden so sichtbar).
+    STATE.refresh_portfolios()
     return html.Div(
         [
             html.Div(_render_main(), id="pf-main"),
+            _manage_card(),
             _upload_card(),
         ]
     )
@@ -929,63 +1000,208 @@ def layout(**_) -> html.Div:
 
 # ── Callback ───────────────────────────────────────────────────────────────
 
-@callback(
-    Output("pf-main", "children"),
-    Output("pf-upload-status", "children"),
-    Output("pf-upload-status", "className"),
-    Input("pf-upload", "contents"),
-    State("pf-upload", "filename"),
-    prevent_initial_call=True,
-)
-def _on_upload(contents: str | None, filename: str | None):
-    base = "ms-portfolio-feedback"
+_FEEDBACK = "ms-portfolio-feedback"
+
+
+def _triggered_id():
+    """``ctx.triggered_id`` — ``None`` außerhalb eines Callback-Kontexts
+    (macht die Handler direkt testbar)."""
+    try:
+        from dash import ctx
+
+        return ctx.triggered_id
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _outputs(
+    main=no_update,
+    *,
+    upload_status=None,
+    upload_warn: bool = False,
+    select_status=None,
+    select_warn: bool = False,
+) -> tuple:
+    """7-Tupel des Sammel-Callbacks; Dropdown-Optionen und -Wert werden
+    immer aus dem aktuellen State neu gesetzt."""
+
+    def _cls(warn: bool) -> str:
+        return f"{_FEEDBACK} {'is-warn' if warn else 'is-ok'}"
+
+    return (
+        main,
+        _portfolio_options(),
+        STATE.active_portfolio_id,
+        no_update if upload_status is None else upload_status,
+        no_update if upload_status is None else _cls(upload_warn),
+        no_update if select_status is None else select_status,
+        no_update if select_status is None else _cls(select_warn),
+    )
+
+
+def _universe_hints() -> tuple[list[str], bool]:
+    """Hinweise zur Abdeckung des aktiven Portfolios im Universum."""
+    parts: list[str] = []
+    warn = False
+    scored = STATE.scored
+    if scored.empty:
+        parts.append("Kein Universum geladen — Kennzahlen folgen nach dem Import.")
+        return parts, True
+    resolved = STATE.resolve_portfolio()
+    missing = _missing_tickers(resolved)
+    if missing:
+        shown = ", ".join(missing[:MISSING_LIST_CAP])
+        if len(missing) > MISSING_LIST_CAP:
+            shown += ", …"
+        parts.append(f"{fmt_int(len(missing))} nicht im Universum: {shown}")
+        warn = True
+    ambiguous = _ambiguous_entries(resolved)
+    if ambiguous:
+        shown = ", ".join(ambiguous[:MISSING_LIST_CAP])
+        if len(ambiguous) > MISSING_LIST_CAP:
+            shown += ", …"
+        parts.append(
+            f"{fmt_int(len(ambiguous))} mehrdeutig (Ticker-Kollision): {shown}"
+        )
+        warn = True
+    return parts, warn
+
+
+def _handle_upload(contents: str | None, filename: str | None, name_input):
     if not contents:
-        return no_update, no_update, no_update
+        return _outputs()
     try:
         _, b64 = contents.split(",", 1)
         raw = base64.b64decode(b64)
         df = load_portfolio_csv(raw)
     except Exception as exc:  # noqa: BLE001
-        return no_update, f"Fehler: {exc}", f"{base} is-warn"
+        return _outputs(upload_status=f"Fehler: {exc}", upload_warn=True)
 
-    STATE.set_ms_portfolio(df, imported_at=pd.Timestamp.now())
+    name = str(name_input or "").strip()
+    if not name and filename:
+        name = Path(str(filename)).stem.strip()
+    if not name:
+        name = f"Portfolio {len(STATE.ms_portfolios) + 1}"
 
-    parts = [f"{fmt_int(len(df))} Positionen aus {filename or 'Upload'} übernommen."]
+    now = pd.Timestamp.now()
+    existing = {str(p["name"]).lower(): int(p["id"]) for p in STATE.ms_portfolios}
+    replaced = name.lower() in existing
+    parts: list[str] = []
     warn = False
+    pid: int | None = None
     try:
-        save_ms_portfolio(df)
+        pid, _n = persistence.save_ms_portfolio_named(
+            df, name, source_filename=filename, imported_at=now.to_pydatetime()
+        )
+        persistence.set_portfolio_selection(persistence.SELECTION_ACTIVE, pid)
+        STATE.refresh_portfolios()
+        parts.append(
+            f"{fmt_int(len(df))} Positionen aus {filename or 'Upload'} als "
+            f"„{name}“ {'ersetzt' if replaced else 'angelegt'}."
+        )
+    except ValueError as exc:
+        return _outputs(upload_status=f"Fehler: {exc}", upload_warn=True)
     except Exception as exc:  # noqa: BLE001
         parts.append(
+            f"{fmt_int(len(df))} Positionen aus {filename or 'Upload'} übernommen. "
             f"DB-Speicherung fehlgeschlagen ({exc}) — Portfolio nur in "
             "dieser Session."
         )
         warn = True
 
-    scored = STATE.scored
-    if scored.empty:
-        parts.append("Kein Universum geladen — Kennzahlen folgen nach dem Import.")
-        warn = True
-    else:
-        resolved = STATE.resolve_portfolio()
-        missing = _missing_tickers(resolved)
-        if missing:
-            shown = ", ".join(missing[:MISSING_LIST_CAP])
-            if len(missing) > MISSING_LIST_CAP:
-                shown += ", …"
-            parts.append(f"{fmt_int(len(missing))} nicht im Universum: {shown}")
-            warn = True
-        ambiguous = _ambiguous_entries(resolved)
-        if ambiguous:
-            shown = ", ".join(ambiguous[:MISSING_LIST_CAP])
-            if len(ambiguous) > MISSING_LIST_CAP:
-                shown += ", …"
-            parts.append(
-                f"{fmt_int(len(ambiguous))} mehrdeutig (Ticker-Kollision): {shown}"
-            )
-            warn = True
+    STATE.set_ms_portfolio(df, imported_at=now, portfolio_id=pid)
+    hints, hint_warn = _universe_hints()
+    parts.extend(hints)
+    warn = warn or hint_warn
+    return _outputs(
+        _render_main(), upload_status=" · ".join(parts), upload_warn=warn
+    )
 
-    status_cls = f"{base} {'is-warn' if warn else 'is-ok'}"
-    return _render_main(), " · ".join(parts), status_cls
+
+def _handle_select(selected):
+    if selected in (None, ""):
+        return _outputs()
+    pid = int(selected)
+    if STATE.active_portfolio_id is not None and pid == STATE.active_portfolio_id:
+        return _outputs()
+    df = persistence.load_ms_portfolio_by_id(pid)
+    if df is None or df.empty:
+        STATE.refresh_portfolios()
+        return _outputs(
+            select_status="Portfolio nicht gefunden — Liste aktualisiert.",
+            select_warn=True,
+        )
+    parts: list[str] = []
+    warn = False
+    try:
+        persistence.set_portfolio_selection(persistence.SELECTION_ACTIVE, pid)
+    except Exception as exc:  # noqa: BLE001
+        parts.append(f"Auswahl nicht gespeichert ({exc}) — gilt nur in dieser Session.")
+        warn = True
+    STATE.set_ms_portfolio(df, portfolio_id=pid)
+    parts.insert(0, f"„{STATE.active_portfolio_name or pid}“ ist jetzt das aktive Portfolio.")
+    return _outputs(_render_main(), select_status=" · ".join(parts), select_warn=warn)
+
+
+def _handle_delete(selected):
+    if selected in (None, ""):
+        return _outputs(
+            select_status="Kein Portfolio ausgewählt.", select_warn=True
+        )
+    pid = int(selected)
+    name = STATE.portfolio_name(pid) or str(pid)
+    try:
+        persistence.delete_ms_portfolio(pid)
+    except Exception as exc:  # noqa: BLE001
+        return _outputs(
+            select_status=f"Löschen fehlgeschlagen: {exc}", select_warn=True
+        )
+    STATE.refresh_portfolios()
+    parts = [f"Portfolio „{name}“ gelöscht."]
+    if STATE.active_portfolio_id is None or pid == STATE.active_portfolio_id:
+        new_id = persistence.get_active_portfolio_id()
+        df = persistence.load_ms_portfolio_by_id(new_id) if new_id else None
+        if df is not None and not df.empty:
+            try:
+                persistence.set_portfolio_selection(persistence.SELECTION_ACTIVE, new_id)
+            except Exception as exc:  # noqa: BLE001
+                parts.append(f"Auswahl nicht gespeichert ({exc}).")
+            STATE.set_ms_portfolio(df, portfolio_id=new_id)
+            parts.append(f"„{STATE.active_portfolio_name or new_id}“ ist jetzt aktiv.")
+        else:
+            STATE.reset_ms_portfolio()
+            parts.append("Kein Portfolio mehr gespeichert — Standard-Fallback aktiv.")
+    return _outputs(_render_main(), select_status=" · ".join(parts))
+
+
+@callback(
+    Output("pf-main", "children"),
+    Output("pf-select", "options"),
+    Output("pf-select", "value"),
+    Output("pf-upload-status", "children"),
+    Output("pf-upload-status", "className"),
+    Output("pf-select-status", "children"),
+    Output("pf-select-status", "className"),
+    Input("pf-upload", "contents"),
+    Input("pf-select", "value"),
+    Input("pf-delete", "submit_n_clicks"),
+    State("pf-upload", "filename"),
+    State("pf-upload-name", "value"),
+    prevent_initial_call=True,
+)
+def _on_portfolio_action(contents, selected, n_delete, filename, name_input):
+    """Ein Sammel-Callback für Upload, Auswahl und Löschen — so besitzt
+    jede Output-Property genau einen Callback (keine allow_duplicate)."""
+    trigger = _triggered_id()
+    if trigger == "pf-upload":
+        return _handle_upload(contents, filename, name_input)
+    if trigger == "pf-select":
+        return _handle_select(selected)
+    if trigger == "pf-delete":
+        if not n_delete:
+            return _outputs()
+        return _handle_delete(selected)
+    return (no_update,) * 7
 
 
 register_page(__name__, path="/portfolios", name="M&S Portfolio", layout=layout)

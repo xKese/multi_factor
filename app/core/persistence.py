@@ -41,7 +41,16 @@ _DEFAULT_ARCHIVE_DIR = os.path.join("data", "archive")
 _SECTOR_SNAPSHOT_TABLE = "sector_momentum_snapshots"
 _SECTOR_SCORE_HISTORY_TABLE = "sector_score_history"
 _SIGNAL_HISTORY_TABLE = "universe_signal_history"
-_MS_PORTFOLIO_TABLE = "ms_portfolio"
+_MS_PORTFOLIO_TABLE = "ms_portfolio"  # Legacy (Ein-Portfolio-Schema, nur Migration)
+_MS_PORTFOLIOS_TABLE = "ms_portfolios"
+_MS_PORTFOLIO_POSITIONS_TABLE = "ms_portfolio_positions"
+_MS_PORTFOLIO_SELECTION_TABLE = "ms_portfolio_selection"
+# Name, unter dem ein Bestands-Portfolio aus dem Legacy-Schema übernommen wird.
+LEGACY_PORTFOLIO_NAME = "M&S Portfolio"
+# Schlüssel der Auswahl-Tabelle: aktives Portfolio (/portfolios, Risiko,
+# Momentum-Linse) und Bestandsportfolio für den Modellportfolio-Abgleich.
+SELECTION_ACTIVE = "active"
+SELECTION_MODEL_SOURCE = "model_source"
 _SETTINGS_TABLE = "app_settings"
 _FACTOR_TIMING_TABLE = "factor_timing_inputs"
 _AGENT_ANALYSES_TABLE = "agent_analyses"
@@ -797,19 +806,120 @@ def _ensure_ms_portfolio_table(conn) -> None:
     _ensure_column(conn, _MS_PORTFOLIO_TABLE, "weight", "DOUBLE PRECISION")
 
 
-def save_ms_portfolio(df: pd.DataFrame) -> int:
-    """Ersetzt den Inhalt von ``ms_portfolio`` durch ``df`` (Spalten
-    ``ticker``, optional ``name`` und ``weight``; Position =
-    Zeilenreihenfolge). Raised bei DB-Problemen — der Aufrufer zeigt eine
-    UI-Warnung. Liefert Zeilenzahl.
+def _ensure_ms_portfolios_tables(conn) -> None:
+    """Legt die Multi-Portfolio-Tabellen an und migriert einmalig den
+    Bestand des Legacy-Schemas ``ms_portfolio`` (ein Portfolio ohne Namen)
+    als Portfolio ``id = 1`` „M&S Portfolio“.
+
+    Idempotent: Migriert wird nur, wenn ``ms_portfolios`` leer ist UND die
+    Legacy-Tabelle Zeilen hat; danach wird die Legacy-Tabelle geleert (nicht
+    gedroppt), damit ein späteres Löschen aller Portfolios keine
+    Re-Migration auslöst. Läuft in der Transaktion des Aufrufers.
     """
 
-    engine = get_engine()
-    if engine is None:
-        raise RuntimeError("Datenbank-Engine nicht verfügbar")
-    if df is None or df.empty:
-        return 0
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_MS_PORTFOLIOS_TABLE} ("
+            "id INTEGER PRIMARY KEY, "
+            "name TEXT NOT NULL UNIQUE, "
+            "source_filename TEXT, "
+            "imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_MS_PORTFOLIO_POSITIONS_TABLE} ("
+            "portfolio_id INTEGER NOT NULL, "
+            "position INTEGER NOT NULL, "
+            "ticker TEXT NOT NULL, "
+            "name TEXT, "
+            "weight DOUBLE PRECISION, "
+            "PRIMARY KEY (portfolio_id, position))"
+        )
+    )
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_MS_PORTFOLIO_SELECTION_TABLE} ("
+            "key TEXT PRIMARY KEY, "
+            "portfolio_id INTEGER NOT NULL, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
 
+    if not inspect(conn).has_table(_MS_PORTFOLIO_TABLE):
+        return
+    n_new = conn.execute(
+        text(f"SELECT COUNT(*) FROM {_MS_PORTFOLIOS_TABLE}")
+    ).scalar_one()
+    n_legacy = conn.execute(
+        text(f"SELECT COUNT(*) FROM {_MS_PORTFOLIO_TABLE}")
+    ).scalar_one()
+    if int(n_new) > 0 or int(n_legacy) == 0:
+        return
+
+    # Bestands-DBs vor Einführung der Gewichtsspalte.
+    _ensure_column(conn, _MS_PORTFOLIO_TABLE, "weight", "DOUBLE PRECISION")
+    imported = conn.execute(
+        text(f"SELECT MIN(imported_at) FROM {_MS_PORTFOLIO_TABLE}")
+    ).scalar()
+    imported_at = _coerce_timestamp(imported) or datetime.now()
+    conn.execute(
+        text(
+            f"INSERT INTO {_MS_PORTFOLIOS_TABLE} (id, name, imported_at) "
+            "VALUES (1, :name, :imported_at)"
+        ),
+        {"name": LEGACY_PORTFOLIO_NAME, "imported_at": imported_at},
+    )
+    conn.execute(
+        text(
+            f"INSERT INTO {_MS_PORTFOLIO_POSITIONS_TABLE} "
+            "(portfolio_id, position, ticker, name, weight) "
+            f"SELECT 1, position, ticker, name, weight FROM {_MS_PORTFOLIO_TABLE}"
+        )
+    )
+    _upsert_selection(conn, SELECTION_ACTIVE, 1)
+    conn.execute(text(f"DELETE FROM {_MS_PORTFOLIO_TABLE}"))
+    log.info(
+        "Legacy-Portfolio nach %s migriert (id 1, %d Positionen)",
+        _MS_PORTFOLIOS_TABLE,
+        int(n_legacy),
+    )
+
+
+def _coerce_timestamp(value) -> datetime | None:
+    """SQLite liefert TIMESTAMP-Spalten als String — auf datetime bringen."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        ts = pd.to_datetime(value)
+    except (ValueError, TypeError):
+        return None
+    if pd.isna(ts):
+        return None
+    return ts.to_pydatetime()
+
+
+def _upsert_selection(conn, key: str, portfolio_id: int) -> None:
+    conn.execute(
+        text(
+            f"INSERT INTO {_MS_PORTFOLIO_SELECTION_TABLE} "
+            "(key, portfolio_id, updated_at) "
+            "VALUES (:key, :pid, CURRENT_TIMESTAMP) "
+            "ON CONFLICT (key) DO UPDATE SET "
+            "portfolio_id = EXCLUDED.portfolio_id, "
+            "updated_at = EXCLUDED.updated_at"
+        ),
+        {"key": key, "pid": int(portfolio_id)},
+    )
+
+
+def _portfolio_rows(df: pd.DataFrame) -> list[dict]:
+    """Upload-/DB-Frame (``ticker``, optional ``name``/``weight``) in
+    INSERT-Zeilen (Position = Zeilenreihenfolge) umsetzen."""
+    if df is None or df.empty:
+        return []
     has_weight = "weight" in df.columns
     rows = []
     for i, (_, r) in enumerate(df.iterrows()):
@@ -824,49 +934,337 @@ def save_ms_portfolio(df: pd.DataFrame) -> int:
                 "weight": None if weight is None or pd.isna(weight) else float(weight),
             }
         )
+    return rows
+
+
+def _next_portfolio_id(conn) -> int:
+    return int(
+        conn.execute(
+            text(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {_MS_PORTFOLIOS_TABLE}")
+        ).scalar_one()
+    )
+
+
+def _find_portfolio_id_by_name(conn, name: str) -> int | None:
+    row = conn.execute(
+        text(
+            f"SELECT id FROM {_MS_PORTFOLIOS_TABLE} "
+            "WHERE LOWER(name) = LOWER(:name)"
+        ),
+        {"name": name},
+    ).fetchone()
+    return int(row[0]) if row else None
+
+
+def _portfolio_exists(conn, portfolio_id: int) -> bool:
+    row = conn.execute(
+        text(f"SELECT 1 FROM {_MS_PORTFOLIOS_TABLE} WHERE id = :pid"),
+        {"pid": int(portfolio_id)},
+    ).fetchone()
+    return row is not None
+
+
+def _selection(conn, key: str) -> int | None:
+    """Ausgewählte Portfolio-ID zu ``key`` — nur, wenn das Portfolio noch
+    existiert (verwaiste Selektionen zählen nicht)."""
+    row = conn.execute(
+        text(
+            f"SELECT s.portfolio_id FROM {_MS_PORTFOLIO_SELECTION_TABLE} s "
+            f"JOIN {_MS_PORTFOLIOS_TABLE} p ON p.id = s.portfolio_id "
+            "WHERE s.key = :key"
+        ),
+        {"key": key},
+    ).fetchone()
+    return int(row[0]) if row else None
+
+
+def _active_portfolio_id(conn) -> int | None:
+    """Aktives Portfolio: Selektion ``active``, sonst das mit der kleinsten
+    ID, sonst ``None`` (kein Portfolio vorhanden)."""
+    pid = _selection(conn, SELECTION_ACTIVE)
+    if pid is not None:
+        return pid
+    row = conn.execute(
+        text(f"SELECT MIN(id) FROM {_MS_PORTFOLIOS_TABLE}")
+    ).fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def list_ms_portfolios() -> list[dict]:
+    """Alle hochgeladenen Portfolios (``id, name, n_positions, imported_at,
+    source_filename``), nach ID sortiert. Fail-open: ``[]``."""
+
+    engine = get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            _ensure_ms_portfolios_tables(conn)
+            rows = conn.execute(
+                text(
+                    "SELECT p.id, p.name, p.imported_at, p.source_filename, "
+                    "COUNT(x.portfolio_id) AS n_positions "
+                    f"FROM {_MS_PORTFOLIOS_TABLE} p "
+                    f"LEFT JOIN {_MS_PORTFOLIO_POSITIONS_TABLE} x "
+                    "ON x.portfolio_id = p.id "
+                    "GROUP BY p.id, p.name, p.imported_at, p.source_filename "
+                    "ORDER BY p.id ASC"
+                )
+            ).mappings().fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Auflisten der Portfolios fehlgeschlagen: %s", exc)
+        return []
+    return [
+        {
+            "id": int(r["id"]),
+            "name": str(r["name"]),
+            "n_positions": int(r["n_positions"] or 0),
+            "imported_at": _coerce_timestamp(r["imported_at"]),
+            "source_filename": r["source_filename"],
+        }
+        for r in rows
+    ]
+
+
+def save_ms_portfolio_named(
+    df: pd.DataFrame,
+    name: str,
+    *,
+    portfolio_id: int | None = None,
+    source_filename: str | None = None,
+    imported_at: datetime | None = None,
+) -> tuple[int, int]:
+    """Speichert ``df`` (Spalten ``ticker``, optional ``name``/``weight``)
+    als benanntes Portfolio.
+
+    Ziel: ``portfolio_id`` falls gegeben, sonst ein bestehendes Portfolio
+    gleichen Namens (case-insensitiv), sonst ein neues. Bestehende
+    Positionen werden ersetzt. Raised ``RuntimeError`` ohne Engine,
+    ``ValueError`` bei leerem Namen/Frame. Liefert ``(portfolio_id,
+    n_positionen)``.
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    name = str(name or "").strip()
+    if not name:
+        raise ValueError("Portfolioname darf nicht leer sein.")
+    rows = _portfolio_rows(df)
     if not rows:
-        return 0
+        raise ValueError("Portfolio enthält keine Positionen.")
+    ts = imported_at or datetime.now()
 
     with engine.begin() as conn:
-        _ensure_ms_portfolio_table(conn)
-        conn.execute(text(f"DELETE FROM {_MS_PORTFOLIO_TABLE}"))
+        _ensure_ms_portfolios_tables(conn)
+        pid = int(portfolio_id) if portfolio_id is not None else None
+        if pid is not None and not _portfolio_exists(conn, pid):
+            pid = None
+        if pid is None:
+            pid = _find_portfolio_id_by_name(conn, name)
+        if pid is None:
+            pid = _next_portfolio_id(conn)
+            conn.execute(
+                text(
+                    f"INSERT INTO {_MS_PORTFOLIOS_TABLE} "
+                    "(id, name, source_filename, imported_at) "
+                    "VALUES (:id, :name, :fn, :ts)"
+                ),
+                {"id": pid, "name": name, "fn": source_filename, "ts": ts},
+            )
+        else:
+            other = _find_portfolio_id_by_name(conn, name)
+            if other is not None and other != pid:
+                raise ValueError(
+                    f"Der Name „{name}“ wird bereits von einem anderen "
+                    "Portfolio verwendet."
+                )
+            conn.execute(
+                text(
+                    f"UPDATE {_MS_PORTFOLIOS_TABLE} SET name = :name, "
+                    "source_filename = :fn, imported_at = :ts WHERE id = :id"
+                ),
+                {"id": pid, "name": name, "fn": source_filename, "ts": ts},
+            )
         conn.execute(
             text(
-                f"INSERT INTO {_MS_PORTFOLIO_TABLE} "
-                "(position, ticker, name, weight) "
-                "VALUES (:position, :ticker, :name, :weight)"
+                f"DELETE FROM {_MS_PORTFOLIO_POSITIONS_TABLE} "
+                "WHERE portfolio_id = :pid"
             ),
-            rows,
+            {"pid": pid},
         )
-    return len(rows)
+        conn.execute(
+            text(
+                f"INSERT INTO {_MS_PORTFOLIO_POSITIONS_TABLE} "
+                "(portfolio_id, position, ticker, name, weight) "
+                "VALUES (:pid, :position, :ticker, :name, :weight)"
+            ),
+            [{**r, "pid": pid} for r in rows],
+        )
+    return pid, len(rows)
 
 
-def load_ms_portfolio() -> pd.DataFrame | None:
-    """Lädt das M&S-Portfolio (Spalten ``ticker, name, weight, imported_at``,
-    sortiert nach Position). ``None`` bei fehlender Tabelle/DB. Raised nie.
-    """
+def load_ms_portfolio_by_id(portfolio_id: int | None) -> pd.DataFrame | None:
+    """Positionen eines Portfolios (Spalten ``ticker, name, weight,
+    imported_at``, nach Position sortiert; ``imported_at`` ist der
+    Kopf-Zeitstempel, je Zeile wiederholt — kompatibel zu
+    ``AppState.set_ms_portfolio``). ``None`` bei unbekannter ID/DB-Fehler.
+    Raised nie."""
+
+    engine = get_engine()
+    if engine is None or portfolio_id is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_ms_portfolios_tables(conn)
+            df = pd.read_sql(
+                text(
+                    "SELECT x.ticker, x.name, x.weight, p.imported_at "
+                    f"FROM {_MS_PORTFOLIO_POSITIONS_TABLE} x "
+                    f"JOIN {_MS_PORTFOLIOS_TABLE} p ON p.id = x.portfolio_id "
+                    "WHERE x.portfolio_id = :pid "
+                    "ORDER BY x.position ASC"
+                ),
+                conn,
+                params={"pid": int(portfolio_id)},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden des Portfolios %s fehlgeschlagen: %s", portfolio_id, exc)
+        return None
+    if df.empty:
+        return None
+    df["name"] = df["name"].fillna("")
+    return df
+
+
+def delete_ms_portfolio(portfolio_id: int) -> None:
+    """Löscht Portfolio, Positionen und alle darauf zeigenden Selektionen.
+    Raised bei DB-Problemen."""
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    pid = int(portfolio_id)
+    with engine.begin() as conn:
+        _ensure_ms_portfolios_tables(conn)
+        conn.execute(
+            text(
+                f"DELETE FROM {_MS_PORTFOLIO_POSITIONS_TABLE} "
+                "WHERE portfolio_id = :pid"
+            ),
+            {"pid": pid},
+        )
+        conn.execute(
+            text(
+                f"DELETE FROM {_MS_PORTFOLIO_SELECTION_TABLE} "
+                "WHERE portfolio_id = :pid"
+            ),
+            {"pid": pid},
+        )
+        conn.execute(
+            text(f"DELETE FROM {_MS_PORTFOLIOS_TABLE} WHERE id = :pid"),
+            {"pid": pid},
+        )
+
+
+def get_portfolio_selection(key: str) -> int | None:
+    """Gespeicherte Portfolio-Auswahl zu ``key`` (nur existierende
+    Portfolios). Fail-open: ``None``."""
 
     engine = get_engine()
     if engine is None:
         return None
     try:
         with engine.begin() as conn:
-            _ensure_ms_portfolio_table(conn)
-            df = pd.read_sql(
-                text(
-                    f"SELECT ticker, name, weight, imported_at "
-                    f"FROM {_MS_PORTFOLIO_TABLE} "
-                    "ORDER BY position ASC"
-                ),
-                conn,
-            )
+            _ensure_ms_portfolios_tables(conn)
+            return _selection(conn, key)
     except SQLAlchemyError as exc:
-        log.warning("Laden des M&S-Portfolios fehlgeschlagen: %s", exc)
+        log.warning("Laden der Portfolio-Auswahl %s fehlgeschlagen: %s", key, exc)
         return None
-    if df.empty:
+
+
+def set_portfolio_selection(key: str, portfolio_id: int) -> None:
+    """Persistiert die Portfolio-Auswahl zu ``key``. Raised bei DB-Problemen."""
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    with engine.begin() as conn:
+        _ensure_ms_portfolios_tables(conn)
+        _upsert_selection(conn, key, int(portfolio_id))
+
+
+def get_active_portfolio_id() -> int | None:
+    """ID des aktiven Portfolios (Selektion ``active``, sonst kleinste ID).
+    Fail-open: ``None``."""
+
+    engine = get_engine()
+    if engine is None:
         return None
-    df["name"] = df["name"].fillna("")
-    return df
+    try:
+        with engine.begin() as conn:
+            _ensure_ms_portfolios_tables(conn)
+            return _active_portfolio_id(conn)
+    except SQLAlchemyError as exc:
+        log.warning("Ermitteln des aktiven Portfolios fehlgeschlagen: %s", exc)
+        return None
+
+
+def find_ms_portfolio(name_or_id: str) -> dict | None:
+    """Portfolio per ID (numerisch) oder Name (case-insensitiv) suchen —
+    für CLI-Argumente. Fail-open: ``None``."""
+
+    key = str(name_or_id or "").strip()
+    if not key:
+        return None
+    portfolios = list_ms_portfolios()
+    if key.isdigit():
+        for p in portfolios:
+            if p["id"] == int(key):
+                return p
+    for p in portfolios:
+        if p["name"].lower() == key.lower():
+            return p
+    return None
+
+
+def save_ms_portfolio(df: pd.DataFrame) -> int:
+    """Kompatibilitäts-Wrapper: schreibt ``df`` in das **aktive** Portfolio
+    (legt „M&S Portfolio“ an, wenn noch keines existiert) und setzt es
+    aktiv. Raised bei DB-Problemen. Liefert Zeilenzahl (0 bei leerem Frame).
+    """
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    if df is None or df.empty or not _portfolio_rows(df):
+        return 0
+    with engine.begin() as conn:
+        _ensure_ms_portfolios_tables(conn)
+        pid = _active_portfolio_id(conn)
+        name = None
+        if pid is not None:
+            row = conn.execute(
+                text(f"SELECT name FROM {_MS_PORTFOLIOS_TABLE} WHERE id = :pid"),
+                {"pid": pid},
+            ).fetchone()
+            name = str(row[0]) if row else None
+    pid, n = save_ms_portfolio_named(
+        df, name or LEGACY_PORTFOLIO_NAME, portfolio_id=pid
+    )
+    set_portfolio_selection(SELECTION_ACTIVE, pid)
+    return n
+
+
+def load_ms_portfolio() -> pd.DataFrame | None:
+    """Kompatibilitäts-Wrapper: lädt das **aktive** Portfolio (Spalten
+    ``ticker, name, weight, imported_at``). ``None`` ohne Portfolio/DB.
+    Raised nie."""
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    return load_ms_portfolio_by_id(get_active_portfolio_id())
 
 
 _SIGNAL_HISTORY_COLS: tuple[str, ...] = (
@@ -1842,6 +2240,10 @@ def _ensure_model_portfolio_meta_table(conn) -> None:
             "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
     )
+    # Nachvollziehbarkeit: gegen welches Bestandsportfolio wurde abgeglichen
+    # (Bestands-DBs per ALTER nachgerüstet, PK bleibt snapshot_date).
+    _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "source_portfolio_id", "INTEGER")
+    _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "source_portfolio_name", "TEXT")
 
 
 def save_model_portfolio(
@@ -1891,10 +2293,12 @@ def save_model_portfolio(
                 f"INSERT INTO {_MODEL_PORTFOLIO_META_TABLE} "
                 "(snapshot_date, rebalance_mode, n_titles, te_ex_ante, "
                 "te_coverage, turnover_oneway, n_trades, n_deferred, "
-                "settings_hash, diagnostics, updated_at) "
+                "settings_hash, diagnostics, source_portfolio_id, "
+                "source_portfolio_name, updated_at) "
                 "VALUES (:snapshot_date, :rebalance_mode, :n_titles, "
                 ":te_ex_ante, :te_coverage, :turnover_oneway, :n_trades, "
                 ":n_deferred, :settings_hash, :diagnostics, "
+                ":source_portfolio_id, :source_portfolio_name, "
                 "CURRENT_TIMESTAMP) "
                 "ON CONFLICT (snapshot_date) DO UPDATE SET "
                 "rebalance_mode = EXCLUDED.rebalance_mode, "
@@ -1906,6 +2310,8 @@ def save_model_portfolio(
                 "n_deferred = EXCLUDED.n_deferred, "
                 "settings_hash = EXCLUDED.settings_hash, "
                 "diagnostics = EXCLUDED.diagnostics, "
+                "source_portfolio_id = EXCLUDED.source_portfolio_id, "
+                "source_portfolio_name = EXCLUDED.source_portfolio_name, "
                 "updated_at = CURRENT_TIMESTAMP"
             ),
             {
@@ -1919,6 +2325,12 @@ def save_model_portfolio(
                 "n_deferred": meta.get("n_deferred"),
                 "settings_hash": meta.get("settings_hash"),
                 "diagnostics": meta.get("diagnostics"),
+                "source_portfolio_id": (
+                    None
+                    if meta.get("source_portfolio_id") is None
+                    else int(meta["source_portfolio_id"])
+                ),
+                "source_portfolio_name": meta.get("source_portfolio_name"),
             },
         )
 

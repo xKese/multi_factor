@@ -344,8 +344,9 @@ def layout(**_) -> html.Div:
             [
                 page_title("Risiko & Benchmark"),
                 _hint_card(
-                    "Kein M&S-Portfolio vorhanden — bitte zuerst auf "
-                    "„M&S Portfolio“ eine Watchlist importieren."
+                    "Kein aktives Portfolio vorhanden — bitte zuerst auf "
+                    "„M&S Portfolio“ eine Watchlist hochladen bzw. ein "
+                    "Portfolio auswählen."
                 ),
             ]
         )
@@ -370,7 +371,12 @@ def layout(**_) -> html.Div:
         [
             page_title(
                 "Risiko & Benchmark",
-                f"Benchmark {res['benchmark']} · EUR-Sicht ohne Currency-"
+                (
+                    f"Portfolio {STATE.active_portfolio_name} · "
+                    if STATE.active_portfolio_name
+                    else ""
+                )
+                + f"Benchmark {res['benchmark']} · EUR-Sicht ohne Currency-"
                 "Hedging · Interne Analyse, keine Anlageberatung; "
                 "renditebasierte Schätzung, rückwärtsgerichtet.",
             ),

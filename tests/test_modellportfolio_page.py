@@ -42,6 +42,31 @@ def test_run_without_universe(page_module, monkeypatch):
     from app.core.state import STATE
 
     monkeypatch.setattr(STATE, "scored", pd.DataFrame(), raising=False)
-    content, status = page_module._run(0, 0, "live", "auto")
+    content, status = page_module._run(0, 0, "live", None, "auto")
     assert content is not None
     assert status == ""
+
+
+def test_controls_offer_source_portfolio_selector(page_module, monkeypatch):
+    """Der Bestandsportfolio-Selektor listet die hochgeladenen Portfolios
+    und ist mit der gespeicherten Auswahl vorbelegt."""
+    from app.core.state import STATE
+
+    catalog = [
+        {"id": 1, "name": "Depot A", "n_positions": 3},
+        {"id": 2, "name": "Depot B", "n_positions": 5},
+    ]
+    monkeypatch.setattr(STATE, "refresh_portfolios", lambda: None)
+    monkeypatch.setattr(STATE, "ms_portfolios", catalog, raising=False)
+    monkeypatch.setattr(STATE, "model_source_portfolio_id", lambda: 2)
+
+    controls = page_module._controls()
+    dropdowns = {
+        c.children.id: c.children
+        for c in controls.children
+        if hasattr(c, "children") and hasattr(c.children, "id")
+    }
+    source = dropdowns["mp-source"]
+    assert [o["value"] for o in source.options] == [1, 2]
+    assert "Depot B" in source.options[1]["label"]
+    assert source.value == 2

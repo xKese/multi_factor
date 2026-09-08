@@ -3,6 +3,7 @@
 Usage:
     python -m app.tools.model_portfolio build [--snapshot YYYY-MM-DD]
                                               [--mode full|interim|monitor]
+                                              [--portfolio ID|NAME]
                                               [--dry-run] [--out DIR]
     python -m app.tools.model_portfolio compare [--v1] [--v2]
                                                 [--snapshot YYYY-MM-DD]
@@ -10,9 +11,11 @@ Usage:
 ``build`` erzeugt das Zielportfolio ohne UI, schreibt (außer bei
 ``--dry-run``) in ``model_portfolio`` und gibt einen Markdown-Report
 ``reports/modellportfolio_YYYY-MM-DD.md`` aus (Kopfdaten, Diagnosen,
-Trade-Liste, Exposures). ``compare`` vergleicht die Rangfolgen v1
-(``total_score``) und v2 (``composite_z``). Exit-Codes: 0 ohne
-Diagnose-Fehler, 1 bei Warnungen, 2 bei Fehlern.
+Trade-Liste, Exposures). Als Bestand dient das mit ``--portfolio``
+gewählte hochgeladene Portfolio, sonst die auf der Modellportfolio-Seite
+gespeicherte Auswahl bzw. das aktive Portfolio. ``compare`` vergleicht die
+Rangfolgen v1 (``total_score``) und v2 (``composite_z``). Exit-Codes: 0
+ohne Diagnose-Fehler, 1 bei Warnungen, 2 bei Fehlern.
 """
 
 from __future__ import annotations
@@ -153,6 +156,7 @@ def _write_build_report(
     lines = [
         f"# Modellportfolio — Snapshot {snap.isoformat()}",
         "",
+        "- Bestandsportfolio: " + str(meta.get("source_portfolio_name") or "–"),
         f"- Rebalance-Modus: **{meta['rebalance_mode']}**",
         f"- Titel: {meta['n_titles']}",
         f"- Ex-ante-TE: {_fmt(meta['te_ex_ante'], 2, percent=True)}"
@@ -238,7 +242,29 @@ def _cmd_build(args: argparse.Namespace) -> int:
         )
         return 2
     settings = STATE.settings
-    current = STATE.portfolio_weights()
+    # Bestandsportfolio: --portfolio (ID oder Name), sonst die auf der
+    # Modellportfolio-Seite gespeicherte Auswahl bzw. das aktive Portfolio.
+    if getattr(args, "portfolio", None):
+        found = persistence.find_ms_portfolio(args.portfolio)
+        if found is None:
+            print(
+                f"Portfolio '{args.portfolio}' nicht gefunden — verfügbar: "
+                + (
+                    ", ".join(
+                        f"{p['id']} ({p['name']})" for p in STATE.ms_portfolios
+                    )
+                    or "keine"
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        source_id = int(found["id"])
+    else:
+        source_id = STATE.model_source_portfolio_id()
+    current = STATE.portfolio_weights(portfolio_id=source_id)
+    source_name = STATE.portfolio_name(source_id) or (
+        "Standard-Portfolio (nicht gespeichert)" if source_id is None else f"#{source_id}"
+    )
     overrides = persistence.load_overrides()
     last_meta = persistence.load_model_portfolio_meta()
     uids = sorted(set(universe.get("uid", pd.Series(dtype=str)).astype(str)))
@@ -254,6 +280,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
         risk_cache=risk_cache,
         last_meta=last_meta,
     )
+    result["meta"]["source_portfolio_id"] = source_id
+    result["meta"]["source_portfolio_name"] = source_name
 
     if not args.dry_run and result["mode"] != "monitor":
         persistence.save_model_portfolio(result["portfolio"], result["meta"], snap)
@@ -330,6 +358,13 @@ def main(argv: list[str] | None = None) -> int:
     p_build = sub.add_parser("build", help="Zielportfolio erzeugen")
     p_build.add_argument("--snapshot", help="Archivierter Snapshot (YYYY-MM-DD)")
     p_build.add_argument("--mode", choices=["full", "interim", "monitor"])
+    p_build.add_argument(
+        "--portfolio",
+        help=(
+            "Bestandsportfolio (ID oder Name eines hochgeladenen Portfolios); "
+            "Default: Auswahl der Modellportfolio-Seite, sonst aktives Portfolio"
+        ),
+    )
     p_build.add_argument("--dry-run", action="store_true")
     p_build.add_argument("--out", help="Report-Verzeichnis (Default: reports/)")
     p_build.set_defaults(func=_cmd_build)
