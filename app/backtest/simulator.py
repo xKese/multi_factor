@@ -445,6 +445,7 @@ class Simulator:
         missing_since = 0
         delist_since = 0
         prev_weights: dict[str, float] = {}
+        prev_prices: dict[str, float] = {}
         prev_bm = bm0
         last_rebalance: date | None = None
         mode = MODE_FULL
