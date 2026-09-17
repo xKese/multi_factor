@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .gics import assign_industry_group
 from .schema import KOYFIN_COLUMNS, OPTIONAL_COLUMNS, OPTIONAL_TEXT_COLUMNS
 from .uid import assign_uids
 
@@ -88,6 +89,18 @@ def _match_ipo_date(raw: str, normalized: str) -> bool:
     return "ipo" in normalized
 
 
+def _match_industry_group(raw: str, normalized: str) -> bool:
+    """GICS-Industriegruppe, z. B. ``Industry Group`` oder
+    ``industry_group`` (die Basisspalte ``Industry`` bleibt positional)."""
+    return normalized in {"industrygroup", "gicsindustrygroup"}
+
+
+def _match_industry_group_source(raw: str, normalized: str) -> bool:
+    """Herkunft der Industriegruppe (``industry_group_source``) — nur in
+    Snapshots, die das Modell selbst geschrieben hat (Backtest-CSV)."""
+    return normalized == "industrygroupsource"
+
+
 _OPTIONAL_MATCHERS = {
     "sma_20": _match_sma20,
     "fwd_rev_growth": _match_fwd_rev_growth,
@@ -97,6 +110,8 @@ _OPTIONAL_MATCHERS = {
     "adv_3m": _match_adv_3m,
     "avg_volume": _match_avg_volume,
     "ipo_date": _match_ipo_date,
+    "industry_group": _match_industry_group,
+    "industry_group_source": _match_industry_group_source,
 }
 
 
@@ -203,6 +218,7 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
         elif name in OPTIONAL_TEXT_COLUMNS:
             # ``ipo_date`` bleibt Text (ISO-Datum); Parsen übernimmt der
             # IPO-Filter, damit ein unlesbares Datum keinen Import blockiert.
+            # ``industry_group`` ist ebenfalls Text.
             df[name] = series.astype("string").str.strip().values
         else:
             df[name] = pd.to_numeric(series, errors="coerce").values
@@ -224,6 +240,15 @@ def load_koyfin_csv(source: str | bytes | io.StringIO) -> pd.DataFrame:
         df = df.loc[~(df["name"].isna() & df["last_price"].isna())]
 
     df = df.dropna(subset=["ticker"]).reset_index(drop=True)
+
+    # GICS-Industriegruppe (Ebene 2) aus ``industry`` über gics_map.csv;
+    # nicht zuordenbare Industrien fallen auf den Sektor (Spec Sequenzielle
+    # Neutralisierung 1.4; Diagnose im v2-Scoring). Eine bereits im Export
+    # vorhandene Gruppen-Spalte wird kanonisiert übernommen.
+    for col in ("industry_group", "industry_group_source"):
+        if col in df.columns:
+            df[col] = df[col].astype("object").where(df[col].notna(), None)
+    df = assign_industry_group(df)
 
     # Eindeutige interne Kennung je Zeile — Koyfin-Ticker sind ohne
     # Börsensuffix nicht garantiert eindeutig (z. B. "SAN" = Sanofi UND

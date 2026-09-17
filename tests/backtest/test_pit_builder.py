@@ -150,3 +150,39 @@ def test_snapshot_schema(dataset, config):
     snap8 = AlphaVantageSnapshotSource(dataset, cfg8).build_snapshot(d)
     assert snap8["eps_revisions_3m"].notna().any()
     assert snap8["eps_revisions_3m"].abs().max() <= 1.0
+
+
+def test_pit_builder_industry_group(dataset, config):
+    """Alpha-Vantage-Snapshot enthält ``industry_group`` (Test 12 der Spec
+    Sequenzielle Neutralisierung): Mapping OVERVIEW.Industry → GICS über
+    av_industry_to_gics.csv, Fallback auf den Sektor ohne Zuordnung; der
+    CSV-Roundtrip erhält Gruppe und Herkunft."""
+    d = date(2014, 3, 31)
+    # Zwei Titel mit realen SIC-Beschreibungen, der Rest ("Industry 0/1/2")
+    # bleibt ohne Mapping.
+    dataset.overview["T00"]["industry"] = "SEMICONDUCTORS & RELATED DEVICES"
+    dataset.overview["T01"]["industry"] = "State Commercial Banks"
+    src = AlphaVantageSnapshotSource(dataset, config)
+    snap = src.build_snapshot(d).set_index("ticker")
+    assert "industry_group" in snap.columns and snap["industry_group"].notna().all()
+    assert snap.loc["T00", "industry_group"] == "Semiconductors & Semiconductor Equipment"
+    assert snap.loc["T00", "industry_group_source"] == "av"
+    assert snap.loc["T01", "industry_group"] == "Banks"
+    others = snap.drop(index=["T00", "T01"])
+    assert (others["industry_group"] == others["sector"]).all()
+    assert (others["industry_group_source"] == "sector").all()
+
+    loaded = load_koyfin_csv(write_snapshot_csv(snap.reset_index()).encode("utf-8")).set_index("ticker")
+    assert loaded.loc["T00", "industry_group"] == "Semiconductors & Semiconductor Equipment"
+    assert loaded.loc["T00", "industry_group_source"] == "av"
+    assert (loaded.drop(index=["T00", "T01"])["industry_group_source"] == "sector").all()
+
+    # Im Scoring landet ein zurückgefallener Titel in der Sektorgruppe, nie
+    # in einer Pseudo-Gruppe; ohne Mapping-Warnung bleibt der Import nicht.
+    settings = config.settings()
+    scored = compute_scores(loaded.reset_index(), settings)
+    scored, diags = compute_scores_v2(scored, settings, snapshot_date=d)
+    assert any(d.code == "industry_not_in_gics_map" for d in diags)
+    levels = set(scored["neut_level_gp_ta"].dropna())
+    assert levels <= {"industry_group>region", "sector>region", "global>region",
+                      "industry_group", "sector", "global"}

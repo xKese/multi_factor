@@ -23,7 +23,13 @@ from datetime import date
 from pathlib import Path
 
 from . import av_client as avc
-from .config import BacktestConfig, SENSITIVITY_VARIANTS, VARIANT_BASE, load_config
+from .config import (
+    BacktestConfig,
+    OPTIONAL_SENSITIVITY_VARIANTS,
+    SENSITIVITY_VARIANTS,
+    VARIANT_BASE,
+    load_config,
+)
 
 log = logging.getLogger(__name__)
 
@@ -178,8 +184,9 @@ def _cmd_run(args) -> int:
         cfg.bt_start = date.fromisoformat(args.start)
     if args.end:
         cfg.bt_end = date.fromisoformat(args.end)
-    if args.variant and args.variant not in SENSITIVITY_VARIANTS and args.variant != VARIANT_BASE:
-        print(f"Unbekannte Variante {args.variant!r}; bekannt: {', '.join(SENSITIVITY_VARIANTS)}",
+    known_variants = {*SENSITIVITY_VARIANTS, *OPTIONAL_SENSITIVITY_VARIANTS}
+    if args.variant and args.variant not in known_variants and args.variant != VARIANT_BASE:
+        print(f"Unbekannte Variante {args.variant!r}; bekannt: {', '.join(sorted(known_variants))}",
               file=sys.stderr)
         return 2
     cache = avc.BacktestCache(cfg.cache_dir)
@@ -333,7 +340,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--start")
     p.add_argument("--end")
     p.add_argument("--no-sensitivities", action="store_true")
-    p.add_argument("--variant", help="Nur diese Variante (plus Basisfall), z. B. S3_equal_weight")
+    p.add_argument("--variant", help="Nur diese Variante (plus Basisfall), z. B. S3_equal_weight "
+                                     "oder die optionale S12_neut_global")
     p.set_defaults(func=_cmd_run)
 
     p = sub.add_parser("report", help="Report aus gespeichertem Lauf erzeugen")

@@ -32,10 +32,19 @@ Bewertung (`scoring_version = "v2"`, umschaltbar in den Einstellungen;
 v1 bleibt Vergleichsmodus und wird bei jedem Import mitberechnet).
 Vollständige Methodik in `MODEL_DESCRIPTION.md` (§11/§12) — Kurzfassung:
 
-- **Faktoren** (Region×Sektor-neutrale Z-Scores, Winsorisierung 3 %/97 %,
-  Cap ±3, keine Median-Imputation): Value (0,30) · Quality (0,30) ·
-  Momentum (0,25) · Investment (0,15). Financials mit eigenem
-  Indikatorensatz; Growth und Low Volatility sind keine Faktoren mehr.
+- **Faktoren** (sequenziell neutralisierte Z-Scores: Ebene 1
+  GICS-Industriegruppe global, Ebene 2 Region — Schema je Indikator
+  wählbar, Momentum nur Region, Bilanzdynamik Sektor → Region; das
+  Altschema Region×Sektor bleibt wählbar; Winsorisierung 3 %/97 %, Cap
+  ±3, Richtung nur auf Ebene 1, keine Median-Imputation): Value (0,30) ·
+  Quality (0,30) · Momentum (0,25) · Investment (0,15). Financials mit
+  eigenem Indikatorensatz; Growth und Low Volatility sind keine Faktoren
+  mehr. Die Industriegruppe wird beim Import über
+  `data/reference/gics_map.csv` aus der Koyfin-Industrie abgeleitet
+  (Fallback Sektor mit Warnung); Vergleich zweier Schemata per
+  `python -m app.tools.model_portfolio compare --scheme-a region_sector
+  --scheme-b industry_group_then_region [--csv export.csv]` → Report
+  `reports/neutralisierung_vergleich_<datum>.md`.
 - **Ergebnis je Titel**: `composite_z` / `composite_score` (0–100,
   Perzentil), Klasse A ≥ 90 · B+ ≥ 80 · B ≥ 66,7 · C ≥ 50 · D ≥ 33 · F,
   sowie die **Zone** KANDIDAT / HALTEN / VERKAUFEN / FILTER — sie ersetzt
@@ -46,7 +55,7 @@ Vollständige Methodik in `MODEL_DESCRIPTION.md` (§11/§12) — Kurzfassung:
   eine Diagnose (Fehler/Warnung/Info), sichtbar beim Daten-Import, im
   Dashboard und in der Kopfzeile.
 - **Optionale CSV-Zusatzspalten** (Header-Erkennung): `ev_ebit`,
-  `net_debt_ebitda`, `fcf_yield`, `adv_3m`, `ipo_date`.
+  `net_debt_ebitda`, `fcf_yield`, `adv_3m`, `ipo_date`, `industry_group`.
 - **Modellportfolio** (`/modellportfolio`, CLI
   `python -m app.tools.model_portfolio build`): regelbasierte Konstruktion
   eines Zielportfolios von 35 Titeln — Sektor-/Regions-Bandbreiten,
@@ -410,8 +419,9 @@ Abschnitt 14; Spezifikation der Parameter in `configs/backtest_us_default.yaml`.
 export ALPHAVANTAGE_API_KEY=…                                   # nie in Config/Cache/Report
 python -m app.backtest fetch  --config configs/backtest_us_default.yaml   # Cache füllen (~80 min bei 75/min)
 python -m app.backtest snapshot --config … --date 2015-03-31 --out snapshot.csv --score
-python -m app.backtest run    --config configs/backtest_us_default.yaml   # Basisfall + S1–S10
+python -m app.backtest run    --config configs/backtest_us_default.yaml   # Basisfall + S1–S11
 python -m app.backtest run    --config … --no-sensitivities --variant S3_equal_weight
+python -m app.backtest run    --config … --variant S12_neut_global         # optional: ohne Neutralisierung
 python -m app.backtest report --run backtest_backtest_us_default_<ts>     # aus gespeichertem Lauf
 python -m app.backtest paper update      # täglich per Cron; --no-fetch ohne API-Calls
 python -m app.backtest paper report

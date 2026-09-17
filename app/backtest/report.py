@@ -343,6 +343,10 @@ def _section_sensitivities(run: dict) -> list[str]:
                   f"{fmt(IR_WARNING_THRESHOLD, 1)} ab — die Faktorgewichte treiben das Ergebnis.", ""]
     lines += ["S8 belegt `eps_revisions_3m` mit risikoadjustiertem 6-1-Momentum (Sensitivität, nicht "
               "Basisfall); der Basisfall nutzt nur `mom_12_1_adj` (dokumentierte Degradation).", ""]
+    lines += ["S11 rechnet mit dem Altschema der Neutralisierung (region×sector-Kaskade für alle "
+              "Indikatoren); Basisfall vs. S11 zeigt, ob die sequenzielle Neutralisierung "
+              "(Industriegruppe → Region) Wert schafft. Die optionale S12 (`--variant S12_neut_global`) "
+              "schaltet die Neutralisierung ganz ab.", ""]
     return lines
 
 
@@ -416,6 +420,8 @@ def sensitivity_row(name: str, result, metrics: dict, turnover: float) -> dict:
         "S8_momentum_proxy": "eps_revisions_3m := risikoadjustiertes 6-1-Momentum",
         "S9_lag_120": "Reporting-Lag 120 statt 90 Tage",
         "S10_top500": "Universum 500 statt 1.000 Titel",
+        "S11_neut_region_sector": "Neutralisierung Altschema region×sector (alle Indikatoren)",
+        "S12_neut_global": "keine Neutralisierung (alle Indikatoren global, optional)",
     }
     m = metrics
     return {

@@ -25,6 +25,7 @@ import pandas as pd
 
 from app.core import portfolio_construction as pc
 from app.core.config import V2_CLEAN_BOUNDS
+from app.core.gics import assign_industry_group_av
 from app.core.schema import KOYFIN_COLUMNS, OPTIONAL_COLUMNS
 from app.core.uid import assign_uids
 
@@ -162,6 +163,15 @@ class AlphaVantageSnapshotSource(SnapshotSource):
         snap["sector"] = uni.frame["sector"].reindex(tickers).fillna(SECTOR_UNKNOWN)
         snap["industry"] = uni.frame["industry"].reindex(tickers).fillna(SECTOR_UNKNOWN)
         snap["region"] = REGION_US
+        # GICS-Industriegruppe für die sequenzielle Neutralisierung: Alpha
+        # Vantage klassifiziert SIC-basiert, daher Mapping der
+        # OVERVIEW.Industry über data/reference/av_industry_to_gics.csv
+        # (manuell gepflegt); unvollständige Zuordnungen fallen auf den
+        # Sektor. Die Spalte läuft als optionale Text-Spalte durch den
+        # CSV-Roundtrip des produktiven Loaders.
+        snap["industry_group"], snap["industry_group_source"] = assign_industry_group_av(
+            snap["industry"], snap["sector"]
+        )
 
         # Kurse in EUR (≤ d).
         cols = [t for t in tickers if t in ds.adj_close.columns]
@@ -257,6 +267,8 @@ class AlphaVantageSnapshotSource(SnapshotSource):
                 snap[col] = np.nan
         snap = snap[list(SNAPSHOT_COLUMNS)].reset_index(drop=True)
         snap["ipo_date"] = snap["ipo_date"].astype("string")
+        for col in ("industry_group", "industry_group_source"):
+            snap[col] = snap[col].astype("string")
         snap = assign_uids(snap)
         return snap
 

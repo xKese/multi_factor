@@ -702,15 +702,51 @@ def _use_v2(version: str) -> bool:
     return version == "auto" and is_v2()
 
 
+def _apply_filters(
+    df: pd.DataFrame, active_sector: str | None, active_group: str | None = None
+) -> pd.DataFrame:
+    """Sektor-Drilldown und Industriegruppen-Filter (kombinierbar)."""
+    src = df if not active_sector else df[df["sector"] == active_sector]
+    if active_group and "industry_group" in src.columns:
+        src = src[src["industry_group"] == active_group]
+    return src
+
+
+def _industry_group_filter(df: pd.DataFrame) -> html.Div:
+    """Dropdown-Filter nach GICS-Industriegruppe (Spec Sequenzielle
+    Neutralisierung 7); liegt außerhalb der neu gerenderten Container,
+    damit die Auswahl beim Sektor-Klick erhalten bleibt."""
+    groups = (
+        sorted(g for g in df["industry_group"].dropna().unique() if isinstance(g, str) and g)
+        if "industry_group" in df.columns
+        else []
+    )
+    return html.Div(
+        [
+            html.Label("Industriegruppe", className="small text-muted me-2"),
+            dcc.Dropdown(
+                id="dash-ig-filter",
+                options=[{"label": g, "value": g} for g in groups],
+                value=None,
+                placeholder="Alle Industriegruppen",
+                clearable=True,
+                style={"minWidth": "320px"},
+            ),
+        ],
+        className="d-flex align-items-center gap-2 mb-2",
+    )
+
+
 def _top_table(
     df: pd.DataFrame,
     active_sector: str | None,
     n: int = 25,
     version: str = "auto",
+    active_group: str | None = None,
 ) -> html.Div:
     v2 = _use_v2(version)
     score_col = "composite_score" if v2 else "total_score"
-    src = df if not active_sector else df[df["sector"] == active_sector]
+    src = _apply_filters(df, active_sector, active_group)
     src = src.dropna(subset=[score_col]).sort_values(score_col, ascending=False).head(n)
 
     # Neueste Agenten-Bewertung je Ticker (leer bei DB-Fehler / ohne Analysen).
@@ -846,9 +882,12 @@ def _top_table(
     )
 
 
-def _section_head(active_sector: str | None, n_rows: int) -> html.Div:
-    if active_sector:
-        title = f"Top-Aktien · {active_sector}"
+def _section_head(
+    active_sector: str | None, n_rows: int, active_group: str | None = None
+) -> html.Div:
+    if active_sector or active_group:
+        parts = [p for p in (active_sector, active_group) if p]
+        title = "Top-Aktien · " + " · ".join(parts)
         meta = html.Span([
             "Filter aktiv – ",
             html.A("zurücksetzen", id="dash-sector-reset", n_clicks=0,
@@ -936,6 +975,7 @@ def layout(**_) -> html.Div:
         ),
         dcc.Store(id="dash-sector-filter", data=None),
         html.Div(_section_head(None, 25), id="dash-top-section"),
+        _industry_group_filter(df),
         html.Div(
             _top_table(df, None, 25),
             id="dash-top-table",
@@ -1016,11 +1056,12 @@ def _on_sector_click(n_clicks_list, current):
 
 @callback(
     Output("dash-sector-filter", "data", allow_duplicate=True),
+    Output("dash-ig-filter", "value"),
     Input("dash-sector-reset", "n_clicks"),
     prevent_initial_call=True,
 )
 def _on_sector_reset(_n_clicks):
-    return None
+    return None, None
 
 
 @callback(
@@ -1028,15 +1069,16 @@ def _on_sector_reset(_n_clicks):
     Output("dash-top-section", "children"),
     Output("dash-top-table", "children"),
     Input("dash-sector-filter", "data"),
+    Input("dash-ig-filter", "value"),
     prevent_initial_call=True,
 )
-def _render_filtered(active_sector):
+def _render_filtered(active_sector, active_group=None):
     df = STATE.scored
     if df.empty:
         return no_update, no_update, no_update
     n = 25
     score_col = "composite_score" if _use_v2("auto") else "total_score"
-    src = df if not active_sector else df[df["sector"] == active_sector]
+    src = _apply_filters(df, active_sector, active_group)
     n_rows = min(n, len(src.dropna(subset=[score_col])))
     return (
         [
@@ -1044,8 +1086,8 @@ def _render_filtered(active_sector):
             _sector_ranking_card(df, active_sector),
             _movers_card(df),
         ],
-        _section_head(active_sector, n_rows),
-        _top_table(df, active_sector, n),
+        _section_head(active_sector, n_rows, active_group),
+        _top_table(df, active_sector, n, active_group=active_group),
     )
 
 

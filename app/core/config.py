@@ -98,6 +98,74 @@ V2_CLEAN_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     "eps_revisions_3m": (-1.0, 1.0),
 }
 
+# ── Composite v2: Neutralisierungsschemata (Spec Sequenzielle Neutralisierung)
+# Ein Schema ist eine geordnete Liste von Gruppierungsebenen; die
+# Standardisierung (Winsorisierung, Z-Score, Cap) läuft je Ebene nacheinander,
+# die Richtung wird nur auf Ebene 1 angewendet (Abschnitt 2).
+NEUT_SCHEME_REGION_SECTOR = "region_sector"  # heutiges Verhalten (Kaskade)
+NEUT_SCHEME_IG_REGION = "industry_group_then_region"
+NEUT_SCHEME_SECTOR_REGION = "sector_then_region"
+NEUT_SCHEME_REGION_ONLY = "region_only"
+NEUT_SCHEME_GLOBAL = "global"
+NEUT_SCHEMES: tuple[str, ...] = (
+    NEUT_SCHEME_REGION_SECTOR,
+    NEUT_SCHEME_IG_REGION,
+    NEUT_SCHEME_SECTOR_REGION,
+    NEUT_SCHEME_REGION_ONLY,
+    NEUT_SCHEME_GLOBAL,
+)
+
+# Alle v2-Indikatoren (Schlüssel der Schema-Zuordnung). ``fcf_yield`` wird
+# auf der kombinierten Serie (FCF/EV, Fallback 1/pfcf = ``fcf_yield_calc``)
+# gescort; beide Namen sind als Schlüssel zulässig.
+V2_INDICATORS: tuple[str, ...] = (
+    "ev_ebitda",
+    "ev_ebit",
+    "fcf_yield",
+    "fcf_yield_calc",
+    "pb",
+    "pe",
+    "gp_ta",
+    "roic",
+    "roe",
+    "net_debt_ebitda",
+    "debt_ebit",
+    "debt_equity",
+    "accruals",
+    "asset_growth",
+    "share_issuance",
+    "mom_12_1_adj",
+    "eps_revisions_3m",
+)
+
+# Default-Zuordnung Indikator → Schema (Spec Abschnitt 4).
+V2_NEUT_SCHEME_DEFAULTS: dict[str, str] = {
+    # Branchenabhängige Bewertungs- und Profitabilitätskennzahlen brauchen
+    # die feine Ebene (Industriegruppe global, dann Region): Multiples,
+    # Kapitalrenditen und Verschuldung sind stark durch das Geschäftsmodell
+    # der Industriegruppe geprägt.
+    "ev_ebitda": NEUT_SCHEME_IG_REGION,
+    "ev_ebit": NEUT_SCHEME_IG_REGION,
+    "fcf_yield": NEUT_SCHEME_IG_REGION,
+    "fcf_yield_calc": NEUT_SCHEME_IG_REGION,
+    "pb": NEUT_SCHEME_IG_REGION,  # Financials
+    "pe": NEUT_SCHEME_IG_REGION,  # Financials
+    "gp_ta": NEUT_SCHEME_IG_REGION,
+    "roic": NEUT_SCHEME_IG_REGION,
+    "roe": NEUT_SCHEME_IG_REGION,  # Financials
+    "net_debt_ebitda": NEUT_SCHEME_IG_REGION,
+    "debt_ebit": NEUT_SCHEME_IG_REGION,
+    "debt_equity": NEUT_SCHEME_IG_REGION,
+    # Bilanzdynamik-Kennzahlen sind schwächer branchenabhängig: Sektor
+    # (global) genügt als Ebene 1.
+    "accruals": NEUT_SCHEME_SECTOR_REGION,
+    "asset_growth": NEUT_SCHEME_SECTOR_REGION,
+    "share_issuance": NEUT_SCHEME_SECTOR_REGION,
+    # Momentum behält bewusst seine Industriekomponente: nur Region.
+    "mom_12_1_adj": NEUT_SCHEME_REGION_ONLY,
+    "eps_revisions_3m": NEUT_SCHEME_REGION_ONLY,
+}
+
 # Portfoliokonstruktion: feste Verfahrensparameter (keine Settings, weil sie
 # den Algorithmus definieren, nicht die Politik).
 PC_TE_STEP: float = 0.005
@@ -296,9 +364,27 @@ class Settings:
     # Composite nur, wenn die Gewichte vorhandener Faktoren mindestens diesen
     # Anteil stellen und Value oder Quality dabei ist (Spec 3.4).
     v2_min_factor_weight: float = 0.70
-    # Neutralisierungsgruppen: Mindestanzahl gültiger Werte je Gruppe, sonst
-    # Fallback region×sector → sector → global (Spec 3.1).
+    # Neutralisierungsgruppen des Schemas ``region_sector`` (Kompatibilität):
+    # Mindestanzahl gültiger Werte je Gruppe, sonst Fallback
+    # region×sector → sector → global (Spec 3.1).
     v2_min_group_size: int = 20
+    # ── Sequenzielle Neutralisierung (Spec Sequenzielle Neutralisierung 3) ──
+    # Schema für Indikatoren ohne Eintrag in ``v2_neut_scheme_by_indicator``.
+    # Umstellung auf ``industry_group_then_region`` nach Sichtung des
+    # Vergleichsreports (reports/neutralisierung_vergleich_2026-04-10.md,
+    # Änderungsprotokoll in MODEL_DESCRIPTION.md).
+    v2_neut_scheme_default: str = NEUT_SCHEME_IG_REGION
+    # Schema je Indikator (Spec Abschnitt 4); Schlüssel müssen v2-Indikatoren
+    # sein, Werte Schema-IDs aus ``NEUT_SCHEMES`` (``validate_neut_schemes``).
+    v2_neut_scheme_by_indicator: dict[str, str] = field(
+        default_factory=lambda: dict(V2_NEUT_SCHEME_DEFAULTS)
+    )
+    # Mindestanzahl gültiger Werte auf Ebene 1 (Industriegruppe/Sektor →
+    # Fallback Sektor → global) und Ebene 2 (Region → Ebene 2 entfällt).
+    v2_min_group_size_l1: int = 20
+    v2_min_group_size_l2: int = 30
+    # Altschema für Vergleichsläufe (CLI ``compare``, Sensitivität S11).
+    v2_neut_scheme_legacy: str = NEUT_SCHEME_REGION_SECTOR
     # Unter dieser Anzahl gültiger Werte in der (finalen) Gruppe wird z = 0
     # gesetzt und die Diagnose vermerkt (Spec 3.2).
     v2_min_group_valid: int = 5
@@ -422,6 +508,65 @@ class Settings:
             "momentum": self.v2_weight_momentum,
             "investment": self.v2_weight_investment,
         }
+
+    def neut_scheme_for(self, indicator: str) -> str:
+        """Neutralisierungsschema eines Indikators (Eintrag im Dict, sonst
+        ``v2_neut_scheme_default``)."""
+        return str(self.v2_neut_scheme_by_indicator.get(indicator, self.v2_neut_scheme_default))
+
+    def neut_scheme_map(self) -> dict[str, str]:
+        """Aufgelöstes Schema je v2-Indikator (sortierte Schlüssel)."""
+        return {name: self.neut_scheme_for(name) for name in sorted(V2_INDICATORS)}
+
+    def validate_neut_schemes(self) -> None:
+        """Validiert die Neutralisierungs-Settings (Spec Sequenzielle
+        Neutralisierung 3): jede Schema-ID muss aus ``NEUT_SCHEMES`` stammen,
+        jeder Indikator im Dict ein v2-Indikator sein. Wird beim Import
+        (``compute_scores_v2``) und beim Speichern der Einstellungen
+        aufgerufen; eine Verletzung ist ein Import-Fehler."""
+        for label, scheme in (
+            ("v2_neut_scheme_default", self.v2_neut_scheme_default),
+            ("v2_neut_scheme_legacy", self.v2_neut_scheme_legacy),
+        ):
+            if scheme not in NEUT_SCHEMES:
+                raise ValueError(
+                    f"Unbekanntes Neutralisierungsschema in {label}: {scheme!r} "
+                    f"(zulässig: {', '.join(NEUT_SCHEMES)})."
+                )
+        if not isinstance(self.v2_neut_scheme_by_indicator, dict):
+            raise ValueError("v2_neut_scheme_by_indicator muss ein Dict sein.")
+        for indicator, scheme in self.v2_neut_scheme_by_indicator.items():
+            if indicator not in V2_INDICATORS:
+                raise ValueError(
+                    f"Unbekannter v2-Indikator in v2_neut_scheme_by_indicator: "
+                    f"{indicator!r} (zulässig: {', '.join(V2_INDICATORS)})."
+                )
+            if scheme not in NEUT_SCHEMES:
+                raise ValueError(
+                    f"Unbekanntes Neutralisierungsschema für {indicator!r}: "
+                    f"{scheme!r} (zulässig: {', '.join(NEUT_SCHEMES)})."
+                )
+        for label, value in (
+            ("v2_min_group_size_l1", self.v2_min_group_size_l1),
+            ("v2_min_group_size_l2", self.v2_min_group_size_l2),
+        ):
+            if int(value) < 1:
+                raise ValueError(f"{label} muss mindestens 1 sein.")
+
+    def neut_scheme_hash(self) -> str:
+        """SHA-256 über das deterministisch (sortierte Schlüssel)
+        serialisierte Schema-Dict (Default + aufgelöste Zuordnung je
+        Indikator) — ordnet Snapshots und Modellportfolios ihrem
+        Neutralisierungsschema zu (Spec Sequenzielle Neutralisierung 5.4)."""
+        import hashlib
+        import json
+
+        payload = {
+            "default": self.v2_neut_scheme_default,
+            "by_indicator": self.neut_scheme_map(),
+        }
+        blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     def validate_v2_weights(self) -> None:
         """Validiert die v2-Faktorgewichte (Summe 1,0 ± 0,001, Spec 2.4).

@@ -9,7 +9,7 @@ from dash import ALL, Input, Output, State, callback, ctx, html, register_page
 from dash.exceptions import PreventUpdate
 
 from app.core import agents_client
-from app.core.config import Settings
+from app.core.config import NEUT_SCHEMES, V2_INDICATORS, Settings
 from app.core.persistence import (
     delete_sector_snapshot,
     list_sector_snapshot_dates,
@@ -37,7 +37,9 @@ V2_SETTINGS_FIELDS: list[tuple[str, str, float, bool]] = [
     ("v2_weight_momentum", "Gewicht Momentum", 0.01, False),
     ("v2_weight_investment", "Gewicht Investment", 0.01, False),
     ("v2_min_factor_weight", "Min. Faktorgewichts-Summe", 0.05, False),
-    ("v2_min_group_size", "Min. Gruppengröße (Neutralisierung)", 1, True),
+    ("v2_min_group_size", "Min. Gruppengröße (Altschema region_sector)", 1, True),
+    ("v2_min_group_size_l1", "Min. Gruppengröße Ebene 1 (Industriegruppe/Sektor)", 1, True),
+    ("v2_min_group_size_l2", "Min. Gruppengröße Ebene 2 (Region)", 1, True),
     ("v2_min_group_valid", "Min. gültige Werte je Gruppe", 1, True),
     ("v2_winsor_lower", "Winsorisierung unten", 0.01, False),
     ("v2_winsor_upper", "Winsorisierung oben", 0.01, False),
@@ -84,6 +86,20 @@ PC_SETTINGS_FIELDS: list[tuple[str, str, float, bool]] = [
 _V2_INT_FIELDS = {f for f, _, _, is_int in V2_SETTINGS_FIELDS if is_int} | {
     f for f, _, _, is_int in PC_SETTINGS_FIELDS if is_int
 }
+
+# Neutralisierungsschemata (Spec Sequenzielle Neutralisierung 2): Anzeige-
+# Label je Schema-ID für die Dropdowns in den Einstellungen.
+NEUT_SCHEME_LABELS: dict[str, str] = {
+    "region_sector": "region×sector (Altschema, Kaskade)",
+    "industry_group_then_region": "Industriegruppe → Region",
+    "sector_then_region": "Sektor → Region",
+    "region_only": "nur Region",
+    "global": "global (ohne Neutralisierung)",
+}
+_NEUT_SCHEME_OPTIONS = [
+    {"label": NEUT_SCHEME_LABELS.get(scheme, scheme), "value": scheme}
+    for scheme in NEUT_SCHEMES
+]
 
 
 def _weight_row(fid: str, label: str, value: float, step: float = 0.01) -> dbc.Row:
@@ -460,6 +476,40 @@ def _v2_card() -> dbc.Card:
                     True,
                 )
             )
+    neut_rows = [
+        dbc.Row(
+            [
+                dbc.Col(html.Label("Neutralisierung: Default-Schema"), md=7),
+                dbc.Col(
+                    dbc.Select(
+                        id="v2-neut-default",
+                        options=_NEUT_SCHEME_OPTIONS,
+                        value=s.v2_neut_scheme_default,
+                    ),
+                    md=5,
+                ),
+            ],
+            className="mb-2",
+        )
+    ]
+    for indicator in V2_INDICATORS:
+        neut_rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(html.Label(label_for(indicator), className="small"), md=7),
+                    dbc.Col(
+                        dbc.Select(
+                            id={"type": "v2-neut", "index": indicator},
+                            options=_NEUT_SCHEME_OPTIONS,
+                            value=s.neut_scheme_for(indicator),
+                            size="sm",
+                        ),
+                        md=5,
+                    ),
+                ],
+                className="mb-1",
+            )
+        )
     return dbc.Card(
         [
             dbc.CardHeader("Composite v2"),
@@ -507,6 +557,16 @@ def _v2_card() -> dbc.Card:
                     html.Div("Mindestabdeckungen je Faktor",
                              className="fw-bold small mb-2"),
                     *minvalid_rows,
+                    html.Hr(),
+                    html.Div("Neutralisierungsschema je Indikator",
+                             className="fw-bold small mb-2"),
+                    html.Div(
+                        "Ebene 1 (Industriegruppe global bzw. Sektor), danach "
+                        "Ebene 2 (Region). Änderungen wirken auf den "
+                        "Settings-Hash des Modellportfolios.",
+                        className="text-muted small mb-2",
+                    ),
+                    *neut_rows,
                 ]
             ),
         ],
@@ -1019,15 +1079,32 @@ def _parse_months(raw: str | None, fallback: list[int]) -> list[int]:
     State("pc-interim-months", "value"),
     State("pc-sector-asof", "value"),
     State("pc-region-weights", "value"),
+    State("v2-neut-default", "value"),
+    State({"type": "v2-neut", "index": ALL}, "value"),
+    State({"type": "v2-neut", "index": ALL}, "id"),
     prevent_initial_call=True,
 )
 def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
              scoring_version, timing_mode, benchmark_source, rebalance_months,
-             interim_months, sector_asof, region_weights_text):
+             interim_months, sector_asof, region_weights_text,
+             neut_default=None, neut_vals=None, neut_ids=None):
     if not n_clicks:
         raise PreventUpdate
     s = STATE.settings
     defaults = Settings()
+    # Neutralisierungsschema (Spec Sequenzielle Neutralisierung 7): erst
+    # validieren, dann übernehmen — ungültige Werte werden nicht gespeichert.
+    candidate = Settings()
+    candidate.v2_neut_scheme_default = neut_default or defaults.v2_neut_scheme_default
+    candidate.v2_neut_scheme_by_indicator = {
+        ident["index"]: str(val)
+        for val, ident in zip(neut_vals or [], neut_ids or [], strict=False)
+        if val
+    }
+    try:
+        candidate.validate_neut_schemes()
+    except ValueError as exc:
+        return dbc.Alert(f"Nicht gespeichert: {exc}", color="danger")
 
     for vals, ids in ((v2_vals, v2_ids), (pc_vals, pc_ids)):
         for val, ident in zip(vals or [], ids or [], strict=False):
@@ -1048,15 +1125,19 @@ def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
     s.scoring_version = scoring_version or "v2"
     s.factor_timing_mode = timing_mode or "monitor"
     s.pc_benchmark_source = benchmark_source or "universe"
+    s.v2_neut_scheme_default = candidate.v2_neut_scheme_default
+    s.v2_neut_scheme_by_indicator = candidate.v2_neut_scheme_by_indicator
     s.pc_rebalance_months = _parse_months(
         rebalance_months, defaults.pc_rebalance_months
     )
     s.pc_interim_months = _parse_months(interim_months, defaults.pc_interim_months)
     s.risk_benchmark_sector_weights_asof = (sector_asof or "").strip()
 
-    # Validierung der v2-Faktorgewichte (Summe 1,0 ± 0,001, Spec 2.4).
+    # Validierung der v2-Faktorgewichte (Summe 1,0 ± 0,001, Spec 2.4) und
+    # der Neutralisierungs-Settings (Schema-IDs, Mindestgrößen).
     try:
         s.validate_v2_weights()
+        s.validate_neut_schemes()
     except ValueError as exc:
         return dbc.Alert(f"Nicht gespeichert: {exc}", color="danger")
 
