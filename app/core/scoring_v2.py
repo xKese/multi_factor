@@ -1,4 +1,4 @@
-"""Composite v2: 4-Faktor-Composite (Z-Score-basiert, Region×Sektor-neutral).
+"""Composite v2: 4-Faktor-Composite (Z-Score-basiert, neutralisiert).
 
 Implementiert die Spec-Abschnitte 1.3 (abgeleitete Kennzahlen), 2
 (Faktor-Definitionen), 3 (Standardisierung und Aggregation) und die Zonen
@@ -6,6 +6,15 @@ aus 5.2. Läuft parallel zu Scoring v1 (``app.core.scoring``) und verändert
 dessen Spalten nicht: Alle Bereinigungen (negative Multiples, Gültigkeits-
 bänder) wirken nur auf interne Kopien; ins DataFrame geschrieben werden
 ausschließlich neue v2-Spalten (``z_*``, ``cov_*``, ``composite_*``, …).
+
+Neutralisierung (Spec „Sequenzielle Neutralisierung"): Das Schema wird je
+Indikator aus den Settings gelesen (``Settings.neut_scheme_for``). Default
+ist die sequenzielle Neutralisierung — Z-Score innerhalb der GICS-
+Industriegruppe (global), anschließend Z-Score des Ergebnisses innerhalb
+der Region (``industry_group_then_region``); Momentum-Indikatoren nutzen
+``region_only``, Bilanzdynamik ``sector_then_region``. Das bisherige
+Schema ``region_sector`` (Kaskade region×sector → sector → global) bleibt
+wählbar und liefert bitidentische Ergebnisse zum früheren Stand.
 """
 
 from __future__ import annotations
@@ -14,13 +23,42 @@ import numpy as np
 import pandas as pd
 
 from .config import (
+    NEUT_SCHEME_GLOBAL,
+    NEUT_SCHEME_IG_REGION,
+    NEUT_SCHEME_REGION_ONLY,
+    NEUT_SCHEME_REGION_SECTOR,
+    NEUT_SCHEME_SECTOR_REGION,
     Settings,
     V2_CLEAN_BOUNDS,
     V2_NEGATIVE_IS_INVALID,
 )
 from .diagnostics import SEV_ERROR, SEV_INFO, SEV_WARNING, Diagnostic
+from .gics import (
+    SOURCE_SECTOR,
+    assign_industry_group,
+    industry_group_diagnostics,
+    industry_group_names,
+    industry_group_size_stats,
+)
 from .momentum import MOMENTUM_DEATH, classify_momentum
 from .piotroski import is_financial_sector, is_real_estate_sector
+
+# Gruppenschlüssel für Titel, auf die ein Indikator nicht anwendbar ist
+# (Segment-Maske) — sie sehen weder Score noch Gruppenbildung.
+_NA_GROUP = "__na__"
+_GLOBAL_GROUP = "__global__"
+_SKIP_GROUP = "__skip__"
+
+# Vorgesehene Ebene-1-Beschriftung je Schema (für die Fallback-Diagnose).
+_INTENDED_LEVEL1: dict[str, str] = {
+    NEUT_SCHEME_REGION_SECTOR: "region_sector",
+    NEUT_SCHEME_IG_REGION: "industry_group",
+    NEUT_SCHEME_SECTOR_REGION: "sector",
+    NEUT_SCHEME_REGION_ONLY: "region",
+    NEUT_SCHEME_GLOBAL: "global",
+}
+# Anteil der Titel, ab dem ein Ebene-1-Fallback als Warnung gilt (Spec 6).
+_FALLBACK_WARN_SHARE = 0.25
 
 # Faktor → Liste (Indikator, Richtung). Richtung −1: niedriger Wert ist gut
 # (Z-Score wird mit −1 multipliziert). ``__leverage__`` ist ein Platzhalter,
@@ -210,6 +248,14 @@ def derive_v2_indicators(
     out["is_financial"] = is_financial_sector(out)
     out["is_real_estate"] = is_real_estate_sector(out) & ~out["is_financial"]
 
+    # GICS-Industriegruppe (Ebene 1 der sequenziellen Neutralisierung): der
+    # Loader ordnet sie beim Import zu; Bestands-Frames ohne Spalte (ältere
+    # DB-Universen, Test-Frames) werden hier nachgerüstet. Vorhandene Werte
+    # (z. B. Alpha-Vantage-Mapping im Backtest) bleiben erhalten.
+    if not optional_column_available(out, "industry_group"):
+        out = assign_industry_group(out)
+    diags.extend(industry_group_diagnostics(out))
+
     # Fehlende optionale Spalten einmalig je Import vermerken (Info).
     optional_v2 = ("ev_ebit", "net_debt_ebitda", "fcf_yield", "adv_3m", "ipo_date")
     for name in optional_v2:
@@ -264,6 +310,167 @@ def assign_neutralization_group(
     return groups, level
 
 
+def _text_series(df: pd.DataFrame, column: str) -> pd.Series:
+    """Textspalte ohne NaN (fehlende Werte → „")."""
+    if column not in df.columns:
+        return pd.Series("", index=df.index, dtype="object")
+    return df[column].map(lambda v: "" if v is None or pd.isna(v) else str(v))
+
+
+def _industry_group_series(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """(Industriegruppe, echte-Gruppe-Maske) je Titel.
+
+    Titel, deren ``industry_group`` auf den Sektor zurückgefallen ist
+    (Spec 2.3), zählen nicht als eigene Pseudo-Gruppe, sondern werden auf
+    Ebene 1 der Sektorgruppe zugeordnet. Erkennung über
+    ``industry_group_source`` (falls vorhanden), sonst über die Menge der
+    kanonischen Gruppennamen des Mappings.
+    """
+    group = _text_series(df, "industry_group")
+    if "industry_group_source" in df.columns:
+        source = _text_series(df, "industry_group_source")
+        is_group = (group != "") & (source != SOURCE_SECTOR)
+    else:
+        names = industry_group_names()
+        is_group = group.map(lambda g: g in names)
+    return group, is_group.astype(bool)
+
+
+def _valid_counts(valid: pd.Series, key: pd.Series) -> pd.Series:
+    """Anzahl gültiger Werte je Gruppenschlüssel, auf die Titel gemappt."""
+    counts = valid.groupby(key).sum()
+    return key.map(counts).fillna(0).astype(float)
+
+
+def assign_neutralization_groups(
+    df: pd.DataFrame,
+    indicator: str,
+    scheme: str,
+    settings: Settings,
+    valid_mask: pd.Series | None = None,
+) -> tuple[pd.Series, pd.Series | None, pd.Series]:
+    """Gruppenzuordnung je Ebene für EINEN Indikator (Spec Sequenzielle
+    Neutralisierung 2.2 / 5.1).
+
+    Liefert ``(level1_groups, level2_groups, level_labels)``: Gruppen-
+    schlüssel der Ebene 1, der Ebene 2 (``None``, wenn das Schema keine
+    zweite Ebene hat; je Titel ``None``, wenn Ebene 2 für ihn entfällt) und
+    die tatsächlich verwendete Ebenenfolge je Titel als String, z. B.
+    ``"industry_group>region"``, ``"sector>region"``, ``"global>region"``
+    oder ``"industry_group"`` (Ebene 2 entfallen).
+
+    Fallback je Titel und Indikator: unterschreitet die Gruppe auf Ebene 1
+    ``v2_min_group_size_l1`` gültige Werte (``valid_mask``), weicht
+    ``industry_group`` auf ``sector`` (global) und weiter auf ``global``
+    aus; ``sector`` direkt auf ``global``; ``region`` (Schema
+    ``region_only``) auf ``global``. Unterschreitet die Region auf Ebene 2
+    ``v2_min_group_size_l2``, entfällt Ebene 2. Für ``region_sector`` gilt
+    die bestehende Kaskade (:func:`assign_neutralization_group`) unverändert.
+    """
+    valid = (
+        valid_mask if valid_mask is not None else pd.Series(True, index=df.index)
+    )
+    valid = valid.fillna(False).astype(bool)
+
+    if scheme == NEUT_SCHEME_REGION_SECTOR:
+        groups, level = assign_neutralization_group(
+            df, valid, min_group_size=settings.v2_min_group_size
+        )
+        return groups, None, level
+
+    if scheme == NEUT_SCHEME_GLOBAL:
+        groups = pd.Series(_GLOBAL_GROUP, index=df.index, dtype="object")
+        return groups, None, pd.Series("global", index=df.index, dtype="object")
+
+    min_l1 = int(settings.v2_min_group_size_l1)
+    min_l2 = int(settings.v2_min_group_size_l2)
+    region = _text_series(df, "region")
+    sector = _text_series(df, "sector")
+    reg_n = _valid_counts(valid, region).where(region != "", 0.0)
+
+    if scheme == NEUT_SCHEME_REGION_ONLY:
+        level1 = pd.Series("global", index=df.index, dtype="object")
+        level1 = level1.mask(reg_n >= min_l1, "region")
+        groups1 = pd.Series(_GLOBAL_GROUP, index=df.index, dtype="object")
+        groups1 = groups1.mask(level1 == "region", "reg:" + region)
+        return groups1, None, level1
+
+    sec_n = _valid_counts(valid, sector).where(sector != "", 0.0)
+    level1 = pd.Series("global", index=df.index, dtype="object")
+    level1 = level1.mask(sec_n >= min_l1, "sector")
+    groups1 = pd.Series(_GLOBAL_GROUP, index=df.index, dtype="object")
+    groups1 = groups1.mask(level1 == "sector", "sec:" + sector)
+
+    if scheme == NEUT_SCHEME_IG_REGION:
+        group, is_group = _industry_group_series(df)
+        ig_key = group.where(is_group, "")
+        ig_n = _valid_counts(valid, ig_key).where(is_group, 0.0)
+        use_ig = is_group & (ig_n >= min_l1)
+        level1 = level1.mask(use_ig, "industry_group")
+        groups1 = groups1.mask(use_ig, "ig:" + group)
+    elif scheme != NEUT_SCHEME_SECTOR_REGION:
+        raise ValueError(f"Unbekanntes Neutralisierungsschema: {scheme!r}")
+
+    has_l2 = (reg_n >= min_l2) & (region != "")
+    groups2 = pd.Series(None, index=df.index, dtype="object")
+    groups2 = groups2.mask(has_l2, "reg:" + region)
+    labels = level1.where(~has_l2, level1 + ">region")
+    return groups1, groups2, labels
+
+
+def zscore_sequential(
+    series: pd.Series,
+    groups_by_level: list[pd.Series | None],
+    direction: float,
+    settings: Settings,
+) -> tuple[pd.Series, list[str]]:
+    """Sequenzielle Standardisierung über die Ebenen (Spec Sequenzielle
+    Neutralisierung 2.1 / 5.2).
+
+    Ebene 1: Winsorisierung, Z-Score, Cap ±3 und Richtung
+    (:func:`zscore_within_group`). Jede weitere Ebene wendet denselben
+    Ablauf — ohne erneute Richtung — auf die Z-Scores der Vorebene an;
+    Titel ohne Gruppe auf dieser Ebene (``None``/leer, Ebene entfallen)
+    behalten den Wert der Vorebene. Der Cap der letzten Ebene ist final.
+    Liefert (z, degenerierte Gruppen als ``"Ebene k: <Gruppe>"``).
+    """
+    z = series
+    degenerate: list[str] = []
+    for level_idx, groups in enumerate(groups_by_level):
+        if groups is None:
+            continue
+        if level_idx == 0:
+            z, deg = zscore_within_group(
+                z,
+                groups,
+                direction=direction,
+                lower_pct=settings.v2_winsor_lower,
+                upper_pct=settings.v2_winsor_upper,
+                cap=settings.v2_zscore_cap,
+                min_valid=settings.v2_min_group_valid,
+            )
+        else:
+            has = groups.notna() & (groups.astype("object") != "")
+            if not has.any():
+                continue
+            z_level, deg = zscore_within_group(
+                z.where(has),
+                groups.where(has, _SKIP_GROUP),
+                direction=1.0,
+                lower_pct=settings.v2_winsor_lower,
+                upper_pct=settings.v2_winsor_upper,
+                cap=settings.v2_zscore_cap,
+                min_valid=settings.v2_min_group_valid,
+            )
+            z = z_level.where(has, z)
+        degenerate.extend(
+            f"Ebene {level_idx + 1}: {g}"
+            for g in deg
+            if g not in (_NA_GROUP, _SKIP_GROUP)
+        )
+    return z, degenerate
+
+
 def zscore_within_group(
     series: pd.Series,
     groups: pd.Series,
@@ -301,6 +508,69 @@ def zscore_within_group(
         z = ((wins - wins.mean()) / std).clip(-cap, cap) * direction
         result.loc[valid.index] = z
     return result, degenerate
+
+
+def _neutralization_fallback_diagnostics(
+    indicator: str, scheme: str, labels: pd.Series, mask: pd.Series
+) -> list[Diagnostic]:
+    """Fallback-Statistik je Indikator (Spec Sequenzielle Neutralisierung 6):
+    Anzahl Titel, deren Ebene 1 nicht in der vorgesehenen Gruppe stand
+    (Sektor/Global), Anzahl mit entfallener Ebene 2; Warnung ab 25 %."""
+    diags: list[Diagnostic] = []
+    used = labels[mask.fillna(False).astype(bool)].dropna().astype(str)
+    n = int(len(used))
+    if n == 0 or scheme == NEUT_SCHEME_GLOBAL:
+        return diags
+    intended = _INTENDED_LEVEL1.get(scheme, "")
+    level1 = used.str.split(">").str[0]
+    fallback = level1[level1 != intended]
+    counts = fallback.value_counts().to_dict()
+    n_fallback = int(len(fallback))
+    has_l2 = scheme in (NEUT_SCHEME_IG_REGION, NEUT_SCHEME_SECTOR_REGION)
+    n_l2_skipped = int((~used.str.contains(">region", regex=False)).sum()) if has_l2 else 0
+    if n_fallback or n_l2_skipped:
+        parts = [
+            f"{int(v)} × {k}" for k, v in sorted(counts.items(), key=lambda kv: kv[0])
+        ]
+        text = (
+            f"Indikator '{indicator}' ({scheme}): Ebene 1 nicht in der "
+            f"vorgesehenen Gruppe \u201e{intended}\u201c bei {n_fallback} von {n} Titeln"
+            + (f" ({', '.join(parts)})" if parts else "")
+        )
+        if has_l2:
+            text += f"; Ebene 2 (Region) entfallen bei {n_l2_skipped} Titeln"
+        diags.append(Diagnostic(SEV_INFO, "neut_fallback", text))
+    if n_fallback / n > _FALLBACK_WARN_SHARE:
+        diags.append(
+            Diagnostic(
+                SEV_WARNING,
+                "neut_fallback_share",
+                (
+                    f"Indikator '{indicator}': {n_fallback / n:.0%} der Titel auf "
+                    f"Ebene 1 nicht in der vorgesehenen Gruppe \u201e{intended}\u201c "
+                    f"standardisiert — Universum für Schema {scheme} zu klein"
+                ),
+            )
+        )
+    return diags
+
+
+def _industry_group_size_diagnostics(
+    df: pd.DataFrame, settings: Settings
+) -> list[Diagnostic]:
+    """Verteilung der Industriegruppen-Größen (Spec Sequenzielle
+    Neutralisierung 6): Min, Median, Max, Anzahl Gruppen < Mindestgröße."""
+    stats = industry_group_size_stats(df, int(settings.v2_min_group_size_l1))
+    if not stats:
+        return []
+    text = (
+        f"Industriegruppen: {stats['n_groups']} Gruppen, Größe min "
+        f"{stats['min']} / Median {stats['median']:.0f} / max {stats['max']}; "
+        f"{stats['n_small']} Gruppen < {int(settings.v2_min_group_size_l1)}"
+    )
+    if stats["small"]:
+        text += " (" + ", ".join(stats["small"]) + ")"
+    return [Diagnostic(SEV_INFO, "industry_group_sizes", text)]
 
 
 def factor_zscore(
@@ -521,6 +791,7 @@ def compute_scores_v2(
     die strategischen Faktorgewichte (Spec 9).
     """
     settings.validate_v2_weights()
+    settings.validate_neut_schemes()
     out, diags = derive_v2_indicators(df, settings)
 
     nonfin_map, fin_map, re_map, map_diags = _factor_indicator_map(out)
@@ -556,34 +827,39 @@ def compute_scores_v2(
             series = series.where(~(de < 0))
         applicable = segment.isin(indicator_segments[name])
         series = series.where(applicable)
-        groups, level = assign_neutralization_group(
-            out, series.notna(), min_group_size=settings.v2_min_group_size
+        scheme = settings.neut_scheme_for(name)
+        groups1, groups2, labels = assign_neutralization_groups(
+            out, name, scheme, settings, valid_mask=series.notna()
         )
-        z, degenerate = zscore_within_group(
-            series,
-            groups.where(applicable, "__na__"),
-            direction=direction,
-            lower_pct=settings.v2_winsor_lower,
-            upper_pct=settings.v2_winsor_upper,
-            cap=settings.v2_zscore_cap,
-            min_valid=settings.v2_min_group_valid,
-        )
+        levels: list[pd.Series | None] = [groups1.where(applicable, _NA_GROUP)]
+        if groups2 is not None:
+            levels.append(groups2.where(applicable, None))
+        z, degenerate = zscore_sequential(series, levels, direction, settings)
         out[f"z_{name}"] = z
-        out[f"neut_level_{name}"] = level.where(applicable)
-        real_degenerate = [g for g in degenerate if g != "__na__"]
-        if real_degenerate:
+        out[f"neut_level_{name}"] = labels.where(applicable)
+        if degenerate:
             diags.append(
                 Diagnostic(
                     SEV_INFO,
                     "zscore_degenerate_group",
                     (
-                        f"Indikator '{name}': z = 0 gesetzt in Gruppen ohne "
-                        "Streuung oder mit < "
+                        f"Indikator '{name}' ({scheme}): z = 0 gesetzt in "
+                        "Gruppen ohne Streuung oder mit < "
                         f"{settings.v2_min_group_valid} gültigen Werten: "
-                        + ", ".join(real_degenerate)
+                        + ", ".join(degenerate)
                     ),
                 )
             )
+        diags.extend(
+            _neutralization_fallback_diagnostics(
+                name, scheme, labels, applicable & series.notna()
+            )
+        )
+
+    diags.extend(_industry_group_size_diagnostics(out, settings))
+    # Schema-Hash je Zeile, damit archivierte Snapshots ihrem
+    # Neutralisierungsschema zuordenbar sind (Spec 5.4).
+    out["neut_scheme_hash"] = settings.neut_scheme_hash()
 
     # Faktor-Scores je Segment zusammensetzen.
     for factor in V2_FACTOR_NAMES:

@@ -1,0 +1,84 @@
+industry,industry_group,sector,gics_version
+Energy Equipment and Services,Energy,Energy,2023
+Oil Gas and Consumable Fuels,Energy,Energy,2023
+Chemicals,Materials,Materials,2023
+Construction Materials,Materials,Materials,2023
+Containers and Packaging,Materials,Materials,2023
+Metals and Mining,Materials,Materials,2023
+Paper and Forest Products,Materials,Materials,2023
+Aerospace and Defense,Capital Goods,Industrials,2023
+Building Products,Capital Goods,Industrials,2023
+Construction and Engineering,Capital Goods,Industrials,2023
+Electrical Equipment,Capital Goods,Industrials,2023
+Industrial Conglomerates,Capital Goods,Industrials,2023
+Machinery,Capital Goods,Industrials,2023
+Trading Companies and Distributors,Capital Goods,Industrials,2023
+Commercial Services and Supplies,Commercial & Professional Services,Industrials,2023
+Professional Services,Commercial & Professional Services,Industrials,2023
+Air Freight and Logistics,Transportation,Industrials,2023
+Passenger Airlines,Transportation,Industrials,2023
+Marine Transportation,Transportation,Industrials,2023
+Ground Transportation,Transportation,Industrials,2023
+Transportation Infrastructure,Transportation,Industrials,2023
+Automobile Components,Automobiles & Components,Consumer Discretionary,2023
+Automobiles,Automobiles & Components,Consumer Discretionary,2023
+Household Durables,Consumer Durables & Apparel,Consumer Discretionary,2023
+Leisure Products,Consumer Durables & Apparel,Consumer Discretionary,2023
+Textiles Apparel and Luxury Goods,Consumer Durables & Apparel,Consumer Discretionary,2023
+Hotels Restaurants and Leisure,Consumer Services,Consumer Discretionary,2023
+Diversified Consumer Services,Consumer Services,Consumer Discretionary,2023
+Distributors,Consumer Discretionary Distribution & Retail,Consumer Discretionary,2023
+Broadline Retail,Consumer Discretionary Distribution & Retail,Consumer Discretionary,2023
+Specialty Retail,Consumer Discretionary Distribution & Retail,Consumer Discretionary,2023
+Consumer Staples Distribution and Retail,Consumer Staples Distribution & Retail,Consumer Staples,2023
+Beverages,Food Beverage & Tobacco,Consumer Staples,2023
+Food Products,Food Beverage & Tobacco,Consumer Staples,2023
+Tobacco,Food Beverage & Tobacco,Consumer Staples,2023
+Household Products,Household & Personal Products,Consumer Staples,2023
+Personal Care Products,Household & Personal Products,Consumer Staples,2023
+Health Care Equipment and Supplies,Health Care Equipment & Services,Health Care,2023
+Health Care Providers and Services,Health Care Equipment & Services,Health Care,2023
+Health Care Technology,Health Care Equipment & Services,Health Care,2023
+Biotechnology,Pharmaceuticals Biotechnology & Life Sciences,Health Care,2023
+Pharmaceuticals,Pharmaceuticals Biotechnology & Life Sciences,Health Care,2023
+Life Sciences Tools and Services,Pharmaceuticals Biotechnology & Life Sciences,Health Care,2023
+Banks,Banks,Financials,2023
+Financial Services,Financial Services,Financials,2023
+Consumer Finance,Financial Services,Financials,2023
+Capital Markets,Financial Services,Financials,2023
+Mortgage Real Estate Investment Trusts (REITs),Financial Services,Financials,2023
+Insurance,Insurance,Financials,2023
+IT Services,Software & Services,Information Technology,2023
+Software,Software & Services,Information Technology,2023
+Communications Equipment,Technology Hardware & Equipment,Information Technology,2023
+Technology Hardware Storage and Peripherals,Technology Hardware & Equipment,Information Technology,2023
+Electronic Equipment Instruments and Components,Technology Hardware & Equipment,Information Technology,2023
+Semiconductors and Semiconductor Equipment,Semiconductors & Semiconductor Equipment,Information Technology,2023
+Diversified Telecommunication Services,Telecommunication Services,Communication Services,2023
+Wireless Telecommunication Services,Telecommunication Services,Communication Services,2023
+Media,Media & Entertainment,Communication Services,2023
+Entertainment,Media & Entertainment,Communication Services,2023
+Interactive Media and Services,Media & Entertainment,Communication Services,2023
+Electric Utilities,Utilities,Utilities,2023
+Gas Utilities,Utilities,Utilities,2023
+Multi-Utilities,Utilities,Utilities,2023
+Water Utilities,Utilities,Utilities,2023
+Independent Power and Renewable Electricity Producers,Utilities,Utilities,2023
+Diversified REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Industrial REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Hotel and Resort REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Office REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Health Care REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Residential REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Retail REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Specialized REITs,Equity Real Estate Investment Trusts (REITs),Real Estate,2023
+Real Estate Management and Development,Real Estate Management & Development,Real Estate,2023
+Airlines,Transportation,Industrials,2018
+Road and Rail,Transportation,Industrials,2018
+Auto Components,Automobiles & Components,Consumer Discretionary,2018
+Internet and Direct Marketing Retail,Consumer Discretionary Distribution & Retail,Consumer Discretionary,2018
+Multiline Retail,Consumer Discretionary Distribution & Retail,Consumer Discretionary,2018
+Food and Staples Retailing,Consumer Staples Distribution & Retail,Consumer Staples,2018
+Thrifts and Mortgage Finance,Financial Services,Financials,2018
+Diversified Financial Services,Financial Services,Financials,2018
+Equity Real Estate Investment Trusts (REITs),Equity Real Estate Investment Trusts (REITs),Real Estate,2018

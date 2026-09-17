@@ -24,11 +24,11 @@ def full_run():
 
 
 def test_sensitivities(full_run):
-    """Alle 10 Varianten erzeugen Ergebnisse; Basisfall reproduzierbar (Test 15)."""
+    """Alle 11 Pflicht-Varianten erzeugen Ergebnisse; Basisfall reproduzierbar (Test 15)."""
     cfg, ds, run = full_run
     table = run["sensitivity_table"]
     assert list(table["variant"]) == [VARIANT_BASE, *SENSITIVITY_VARIANTS]
-    assert len(SENSITIVITY_VARIANTS) == 10
+    assert len(SENSITIVITY_VARIANTS) == 11
     assert table["ann_return"].notna().all() and table["nav_hash"].notna().all()
 
     # Reproduzierbarkeit: zweiter Basislauf mit gleichem Cache/Config → gleicher Hash.
@@ -61,7 +61,17 @@ def test_sensitivities(full_run):
         results["S3_equal_weight"].rebalances["mode"] == "full", "date"])
     spread = h[h["date"].isin(full_dates)].groupby("date")["weight"].agg(lambda s: s.max() - s.min())
     assert spread.max() < 0.02
-    assert len(all_variants(cfg)) == 11
+    assert len(all_variants(cfg)) == 12
+    # S11: Altschema der Neutralisierung für alle Indikatoren; S12 optional
+    # (nicht im Pflichtlauf), aber per --variant wählbar.
+    s11 = apply_variant(cfg, "S11_neut_region_sector").settings()
+    assert s11.v2_neut_scheme_default == "region_sector"
+    assert s11.v2_neut_scheme_by_indicator == {}
+    assert all(m == "region_sector" for m in s11.neut_scheme_map().values())
+    assert "S12_neut_global" not in all_variants(cfg)
+    s12 = apply_variant(cfg, "S12_neut_global").settings()
+    assert all(m == "global" for m in s12.neut_scheme_map().values())
+    assert "S11_neut_region_sector" in results
     with pytest.raises(ValueError):
         apply_variant(cfg, "S99")
 

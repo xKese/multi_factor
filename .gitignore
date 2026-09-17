@@ -5,6 +5,9 @@ __pycache__/
 venv/
 .env
 .DS_Store
-data/
+# Laufzeitdaten (DB, Archiv, Backtest-Cache) — die versionierten
+# Referenztabellen unter data/reference/ (GICS-Mapping) bleiben im Repo.
+data/*
+!data/reference/
 TradingAgents/
 reports/backtest/

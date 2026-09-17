@@ -56,6 +56,30 @@ SENSITIVITY_VARIANTS: dict[str, dict[str, dict[str, Any]]] = {
     },
     "S9_lag_120": {"config": {"bt_reporting_lag_days": 120}, "settings": {}},
     "S10_top500": {"config": {"bt_universe_top_n": 500}, "settings": {}},
+    # Altschema der Neutralisierung (region×sector-Kaskade) für alle
+    # Indikatoren: Basisfall vs. S11 ist die empirische Antwort, ob die
+    # sequenzielle Neutralisierung (Industriegruppe → Region) Wert schafft.
+    "S11_neut_region_sector": {
+        "config": {},
+        "settings": {
+            "v2_neut_scheme_default": "region_sector",
+            "v2_neut_scheme_by_indicator": {},
+        },
+    },
+}
+
+# Optionale Sensitivitäten: per ``--variant`` wählbar, nicht Teil des
+# Pflichtlaufs (``all_variants``).
+OPTIONAL_SENSITIVITY_VARIANTS: dict[str, dict[str, dict[str, Any]]] = {
+    # Keine Neutralisierung (alle Indikatoren global): zeigt, wie viel die
+    # Neutralisierung überhaupt bewirkt.
+    "S12_neut_global": {
+        "config": {},
+        "settings": {
+            "v2_neut_scheme_default": "global",
+            "v2_neut_scheme_by_indicator": {},
+        },
+    },
 }
 
 VARIANT_BASE = "base"
@@ -146,8 +170,11 @@ class BacktestConfig:
                 raise ValueError(f"Unbekanntes Settings-Feld in settings_overrides: {key}")
             if key == "pc_exit_pct" and value == "__entry__":
                 value = s.pc_entry_pct
+            if isinstance(value, dict):
+                value = dict(value)
             setattr(s, key, value)
         s.validate_v2_weights()
+        s.validate_neut_schemes()
         return s
 
     def to_dict(self) -> dict:
@@ -202,12 +229,12 @@ def apply_variant(config: BacktestConfig, variant: str) -> BacktestConfig:
     """Config einer Sensitivitätsvariante (Spec 9). ``base`` = unverändert."""
     if variant == VARIANT_BASE:
         return replace(config, settings_overrides=dict(config.settings_overrides))
-    if variant not in SENSITIVITY_VARIANTS:
+    spec = SENSITIVITY_VARIANTS.get(variant) or OPTIONAL_SENSITIVITY_VARIANTS.get(variant)
+    if spec is None:
         raise ValueError(
             f"Unbekannte Variante {variant!r}; bekannt: "
-            + ", ".join(SENSITIVITY_VARIANTS)
+            + ", ".join([*SENSITIVITY_VARIANTS, *OPTIONAL_SENSITIVITY_VARIANTS])
         )
-    spec = SENSITIVITY_VARIANTS[variant]
     overrides = dict(spec["config"])
     if overrides.get("bt_delisting_haircut") == "__sensitivity__":
         overrides["bt_delisting_haircut"] = config.bt_delisting_haircut_sensitivity
@@ -218,7 +245,7 @@ def apply_variant(config: BacktestConfig, variant: str) -> BacktestConfig:
 
 
 def all_variants(config: BacktestConfig) -> dict[str, BacktestConfig]:
-    """Basisfall plus alle 10 Pflicht-Sensitivitäten."""
+    """Basisfall plus alle 11 Pflicht-Sensitivitäten (S12 ist optional)."""
     out = {VARIANT_BASE: apply_variant(config, VARIANT_BASE)}
     for name in SENSITIVITY_VARIANTS:
         out[name] = apply_variant(config, name)

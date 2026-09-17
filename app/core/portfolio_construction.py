@@ -1153,6 +1153,7 @@ def build_model_portfolio(
             "n_trades": 0,
             "n_deferred": 0,
             "settings_hash": settings_hash_v2(settings),
+            "neut_scheme_hash": settings.neut_scheme_hash(),
             "diagnostics": diags_to_json(diags),
         }
         return {
@@ -1302,6 +1303,7 @@ def build_model_portfolio(
         "n_trades": n_trades,
         "n_deferred": trades.n_deferred,
         "settings_hash": settings_hash_v2(settings),
+        "neut_scheme_hash": settings.neut_scheme_hash(),
         "diagnostics": diags_to_json(diags),
     }
     return {

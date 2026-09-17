@@ -74,6 +74,13 @@ KOYFIN_COLUMNS: list[str] = [
 # ``avg_volume`` (durchschnittliches Handelsvolumen in Stück, Koyfin
 # "Avg Volume"): Fallback-Basis für ``adv_3m`` — der Tagesumsatz wird in
 # ``derive_v2_indicators`` als avg_volume × last_price approximiert.
+# ``industry_group`` (GICS-Industriegruppe, Ebene 2): wird normalerweise
+# beim Import aus ``industry`` über ``data/reference/gics_map.csv``
+# abgeleitet (``app.core.gics``); liefert der Export bereits eine Spalte
+# „Industry Group", wird sie übernommen (Backtest-Snapshots tragen so ihr
+# Alpha-Vantage-Mapping durch den CSV-Roundtrip). ``industry_group_source``
+# (``gics`` | ``av`` | ``sector``) hält die Herkunft der Zuordnung fest —
+# ``sector`` markiert den Fallback (Diagnose, Gruppenbildung).
 OPTIONAL_COLUMNS: tuple[str, ...] = (
     "sma_20",
     "fwd_rev_growth",
@@ -83,10 +90,14 @@ OPTIONAL_COLUMNS: tuple[str, ...] = (
     "adv_3m",
     "avg_volume",
     "ipo_date",
+    "industry_group",
+    "industry_group_source",
 )
 
 # Optionale Spalten, die NICHT numerisch koerziert werden dürfen.
-OPTIONAL_TEXT_COLUMNS: frozenset[str] = frozenset({"ipo_date"})
+OPTIONAL_TEXT_COLUMNS: frozenset[str] = frozenset(
+    {"ipo_date", "industry_group", "industry_group_source"}
+)
 
 PERCENT_COLUMNS: set[str] = {
     "div_yield",

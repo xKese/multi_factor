@@ -213,11 +213,34 @@ def _hero_block(r: pd.Series, ranks: dict) -> html.Div:
         cls = _class_of(score_val) if score_val is not None else _class_of(None)
 
     region = str(r.get("region") or "")
-    industry = str(r.get("industry") or r.get("sector") or "")
-    eyebrow_parts = ["Einzelanalyse"]
+    sector = str(r.get("sector") or "")
+    industry = str(r.get("industry") or "")
+    group = r.get("industry_group")
+    group = str(group) if isinstance(group, str) and group else ""
+    eyebrow_parts: list = ["Einzelanalyse"]
     if region: eyebrow_parts.append(region)
+    if sector: eyebrow_parts.append(sector)
+    # Industriegruppe (Ebene 1 der sequenziellen Neutralisierung) neben
+    # Sektor und Industrie; Tooltip mit der Gruppengröße im Universum.
+    if group and group != sector:
+        size = ranks.get("group_size")
+        eyebrow_parts.append(
+            html.Span(
+                group,
+                title=(
+                    f"GICS-Industriegruppe · {fmt_int(size)} Titel im Universum "
+                    "(Neutralisierungsgruppe Ebene 1)"
+                    if size else "GICS-Industriegruppe"
+                ),
+                style={"cursor": "help"},
+            )
+        )
     if industry: eyebrow_parts.append(industry)
-    eyebrow = " · ".join(eyebrow_parts)
+    eyebrow: list = []
+    for i, part in enumerate(eyebrow_parts):
+        if i:
+            eyebrow.append(" · ")
+        eyebrow.append(part)
 
     last_price = r.get("last_price")
     market_cap = r.get("market_cap")
@@ -339,6 +362,9 @@ def _ranks(df: pd.DataFrame, r: pd.Series) -> dict:
         out["sector_total"] = len(sec)
         out["sector_rank"] = int((sec[score_col] > score).sum()) + 1
         out["sector_avg"] = float(sec[score_col].mean())
+    group = r.get("industry_group")
+    if isinstance(group, str) and group and "industry_group" in df.columns:
+        out["group_size"] = int((df["industry_group"] == group).sum())
     return out
 
 
@@ -992,7 +1018,11 @@ def _v2_indicator_card(
                 html.Span(
                     f" · {level}",
                     className="ms-card-h-meta",
-                    title="Neutralisierungsebene des Z-Scores",
+                    title=(
+                        "Verwendete Neutralisierungs-Ebenenfolge des Z-Scores "
+                        "(z. B. industry_group>region = Industriegruppe global, "
+                        "dann Region)"
+                    ),
                 )
             )
 
@@ -1121,7 +1151,7 @@ def _v2_block(df: pd.DataFrame, r: pd.Series) -> html.Div:
         html.Div(
             [
                 html.Div("Composite v2", className="ms-eyebrow"),
-                html.H2("Faktoren & Indikatoren (Region×Sektor-neutral)"),
+                html.H2("Faktoren & Indikatoren (neutralisiert, Ebenenfolge je Indikator)"),
             ],
             className="ms-dash-section",
         ),

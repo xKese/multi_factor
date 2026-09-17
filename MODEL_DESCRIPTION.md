@@ -18,7 +18,8 @@ erweitert. Es handelt sich um ein **Aktien-Screening- und Scoring-System**:
   plus optionale Zusatzspalten per Header-Erkennung).
 - **Kern (primär, `scoring_version = "v2"`):** ein evidenzbasiertes
   **4-Faktor-Composite** (Value, Quality, Momentum, Investment) auf Basis
-  Region×Sektor-neutraler Z-Scores (Abschnitt 11) plus eine **regelbasierte
+  sequenziell neutralisierter Z-Scores (GICS-Industriegruppe → Region,
+  Schema je Indikator, Abschnitt 11.4a) plus eine **regelbasierte
   Portfoliokonstruktion**, die ein verbindliches Zielportfolio von 35 Titeln
   erzeugt (Abschnitt 12).
 - **Vergleichsmodus (v1):** der ursprüngliche **Multi-Faktor-Qualitätsscore
@@ -61,7 +62,12 @@ revenue, cogs, revenue_prev, cogs_prev, sma_50, sma_200, export_date
 ```
 
 - **Optionale Spalten** (per Header-Erkennung, Position beliebig, werden vor dem
-  positionalen Mapping extrahiert): `sma_20`, `fwd_rev_growth`.
+  positionalen Mapping extrahiert): `sma_20`, `fwd_rev_growth`, die
+  v2-Spalten aus 11.1 sowie `industry_group`/`industry_group_source`
+  (nur in Snapshots, die das Modell selbst geschrieben hat).
+- **GICS-Industriegruppe:** Nach dem Parsen ordnet `assign_industry_group`
+  (`app/core/gics.py`) jeder Zeile über `data/reference/gics_map.csv` die
+  Industriegruppe (GICS-Ebene 2) zu — Details in 11.4a.
 - Trennzeichen `;` oder `,` wird automatisch erkannt; deutsche Dezimalkommas
   werden geparst.
 - **Prozent-Spalten** (`PERCENT_COLUMNS`) liegen im Export bereits als
@@ -567,8 +573,10 @@ werden ohne Datenverlust erweitert); neue Spalten späterer Exporte werden
 per `ALTER TABLE` nachgerüstet (SQLite und Postgres). Seit Composite v2
 enthält jeder Snapshot zusätzlich alle v2-Spalten: `z_*`, `cov_*`,
 `composite_raw/z/pct/score`, `classification_v2`, `zone_v2`,
-`filter_pass`, `filter_reasons` (JSON-Text), `neut_level_*`,
-`data_coverage_v2`, `trend_warning`, `fcf_yield_source` u. a.;
+`filter_pass`, `filter_reasons` (JSON-Text), `neut_level_*`
+(Ebenenfolge je Indikator), `neut_scheme_hash`, `industry_group`,
+`industry_group_source`, `data_coverage_v2`, `trend_warning`,
+`fcf_yield_source` u. a.;
 Listen-Spalten werden vor dem Schreiben JSON-serialisiert. Die unveränderte
 Roh-CSV wird unter `data/archive/koyfin_<snapshot_date>.csv` abgelegt
 (gleicher Dateiname wird überschrieben; Pfad via `KOYFIN_ARCHIVE_DIR`
@@ -607,8 +615,8 @@ python -m pytest tests -q              # Testsuite
 ## 11. Composite v2 (primäres Scoring)
 
 Implementiert in `app/core/scoring_v2.py` (+ `app/core/universe_filter.py`,
-`app/core/diagnostics.py`). Vier Faktoren, Z-Score-basiert,
-Region×Sektor-neutral. Alle Parameter sind `Settings`-Felder
+`app/core/diagnostics.py`, `app/core/gics.py`). Vier Faktoren, Z-Score-basiert,
+sequenziell neutralisiert (11.4a). Alle Parameter sind `Settings`-Felder
 (`app_settings`), Verfahrenskonstanten (`V2_CLEAN_BOUNDS`,
 `V2_NEGATIVE_IS_INVALID`, `PC_TE_STEP = 0,005`, `PC_TE_MAX_ITER = 40`,
 `PC_CAPFLOOR_MAX_ITER = 50`) liegen in `app/core/config.py`.
@@ -680,14 +688,22 @@ und Altman wandern vollständig in die Filter (12.1).
 
 ### 11.4 Standardisierung und Aggregation
 
-1. **Neutralisierungsgruppen** (`assign_neutralization_group`, je
-   Indikator): Primärgruppe `region × sector`; hat sie weniger als
-   `v2_min_group_size = 20` gültige Werte → Fallback `sector` (global) →
-   `global`. Ebene je Titel/Indikator in `neut_level_<indikator>`
-   (`region_sector` | `sector` | `global`).
-2. **Winsorisierung + Z-Score** (`zscore_within_group`, je Indikator und
-   Gruppe): Clip auf die 3 %/97 %-Quantile (`v2_winsor_lower/upper`),
-   `z = (x_w − mean) / std(ddof=1)`, Clip ±3 (`v2_zscore_cap`), ·Richtung.
+1. **Neutralisierungsgruppen** (`assign_neutralization_groups`, je
+   Indikator nach dem Schema aus 11.4a): Standardschema ist die
+   sequenzielle Neutralisierung — Ebene 1 GICS-Industriegruppe (global),
+   Ebene 2 Region; Fallbacks je Ebene und die tatsächlich verwendete
+   Ebenenfolge je Titel/Indikator in `neut_level_<indikator>` (z. B.
+   `industry_group>region`, `sector>region`, `global>region`,
+   `industry_group`). Das Altschema `region_sector` (Primärgruppe
+   `region × sector`, < `v2_min_group_size = 20` gültige Werte → `sector`
+   (global) → `global`; Beschriftung `region_sector` | `sector` | `global`)
+   bleibt wählbar und liefert bitidentische Ergebnisse.
+2. **Winsorisierung + Z-Score** (`zscore_within_group`, je Ebene,
+   Indikator und Gruppe; `zscore_sequential` verkettet die Ebenen): Clip
+   auf die 3 %/97 %-Quantile (`v2_winsor_lower/upper`),
+   `z = (x_w − mean) / std(ddof=1)`, Clip ±3 (`v2_zscore_cap`), ·Richtung
+   **nur auf Ebene 1**. Ebene 2 wendet denselben Ablauf (ohne Richtung)
+   auf die Z-Scores der Ebene 1 an; der Cap der letzten Ebene ist final.
    `std == 0` oder < 5 gültige Werte (`v2_min_group_valid`) → `z = 0` +
    Diagnose. NaN bleibt NaN — **keine Median-Imputation**.
 3. **Faktor-Score** (`factor_zscore`): Mittel der gültigen Indikator-Z.
@@ -707,6 +723,112 @@ und Altman wandern vollständig in die Filter (12.1).
    übernommen — stattdessen `zone_v2`.
 6. **Datenabdeckung v2:** `data_coverage_v2` = faktorgewichtetes Mittel der
    `cov_*` (fehlende Faktoren zählen 0).
+
+### 11.4a Neutralisierung (Spec „Sequenzielle Neutralisierung")
+
+**GICS-Hierarchie und Mapping.** Die Koyfin-Spalte `industry` liegt auf
+**GICS-Ebene 3 (Industry)** — Ergebnis der Ebenenprüfung auf dem Universum
+vom 10.04.2026 (1.296 Titel): 73 distinkte Werte, alle in der GICS-2023-
+Liste der 74 Industrien enthalten (es fehlt nur „Hotel and Resort REITs");
+Koyfin schreibt `&` als „and" und lässt Kommata weg („Hotels Restaurants
+and Leisure"). Die statische Tabelle `data/reference/gics_map.csv`
+(versioniert; Spalten `industry, industry_group, sector, gics_version`)
+enthält alle 74 Industrien (GICS 2023) mit Gruppe (25) und Sektor (11)
+sowie neun Alt-Namen der GICS-2018-Struktur (z. B. „Airlines", „Road and
+Rail"), damit ältere Exporte zuordenbar bleiben. Zuordnung beim Import
+(`assign_industry_group`, `app/core/gics.py`): Left-Join über den
+normalisierten Namen (Trim, Kleinschreibung, `&` → `and`, Satzzeichen
+entfernt, Mehrfach-Leerzeichen zusammengezogen). Nicht zuordenbare Werte
+erhalten `industry_group = sector` (`industry_group_source = "sector"`)
+und werden als **Warnung** „Industrie nicht im GICS-Mapping: <Wert>
+(<n> Titel)" gelistet; weicht der Koyfin-Sektor vom Mapping-Sektor ab
+(aktuell nur „Mortgage Real Estate Investment Trusts (REITs)": Koyfin
+Real Estate, GICS 2023 Financials), bleibt der Koyfin-Wert und die
+Abweichung wird als Info gelistet. `industry_group` und
+`industry_group_source` werden in `koyfin_universe` und
+`koyfin_universe_history` persistiert.
+
+**Schemata** (`NEUT_SCHEMES`, `app/core/config.py`) — geordnete Liste von
+Gruppierungsebenen; Eingabe der Ebene k ist die Ausgabe der Ebene k−1:
+
+| Schema-ID | Ebenenfolge | Verwendung |
+|---|---|---|
+| `region_sector` | `[region×sector]` mit Kaskade `sector` → `global` | Altschema (Kompatibilität, Sensitivität S11) |
+| `industry_group_then_region` | `[industry_group (global)]` → `[region]` | Default für branchenabhängige Kennzahlen |
+| `sector_then_region` | `[sector (global)]` → `[region]` | Default für schwach branchenabhängige Kennzahlen |
+| `region_only` | `[region]` | Default für Momentum-Indikatoren |
+| `global` | `[global]` | Debug/Sensitivität S12 |
+
+**Mindestgrößen und Fallback je Titel und Indikator** (gezählt werden
+gültige Werte des Indikators): Ebene 1 `v2_min_group_size_l1 = 20` —
+`industry_group` → `sector` (global) → `global`; `sector` → `global`;
+`region` (Schema `region_only`) → `global`. Ebene 2
+`v2_min_group_size_l2 = 30` — unterschreitet die Region die Mindestgröße,
+entfällt Ebene 2 für die betroffenen Titel (Beschriftung ohne `>region`;
+im Universum vom 10.04.2026 betrifft das „Africa / Middle East" mit 16
+und „Latin America and Caribbean" mit 7 Titeln). Titel, deren
+Industriegruppe auf den Sektor zurückgefallen ist, werden auf Ebene 1 der
+Sektorgruppe zugeordnet — nie einer eigenen Pseudo-Gruppe.
+
+**Default-Zuordnung je Indikator** (`v2_neut_scheme_by_indicator`,
+Indikatoren ohne Eintrag erhalten `v2_neut_scheme_default =
+industry_group_then_region`):
+
+| Indikator | Schema |
+|---|---|
+| `ev_ebitda`, `ev_ebit`, `fcf_yield`/`fcf_yield_calc`, `pb`, `pe`, `gp_ta`, `roic`, `roe`, `net_debt_ebitda`/`debt_ebit`/`debt_equity` | `industry_group_then_region` |
+| `accruals`, `asset_growth`, `share_issuance` | `sector_then_region` |
+| `mom_12_1_adj`, `eps_revisions_3m` | `region_only` |
+
+Begründung: branchenabhängige Bewertungs- und Profitabilitätskennzahlen
+brauchen die feine Ebene; Bilanzdynamik-Kennzahlen sind schwächer
+branchenabhängig; Momentum behält bewusst seine Industriekomponente. Die
+Sonderbehandlung der Indikatorlisten für Financials und Real Estate (11.3)
+bleibt unverändert; nur die Gruppenbildung ändert sich (Banks,
+Financial Services, Insurance, Equity REITs, Real Estate Management &
+Development sind eigenständige GICS-Gruppen).
+
+**Validierung** (`Settings.validate_neut_schemes`, beim Import und beim
+Speichern der Einstellungen): jede Schema-ID muss aus `NEUT_SCHEMES`
+stammen, jeder Schlüssel des Dicts ein v2-Indikator (`V2_INDICATORS`)
+sein — sonst Import-Fehler. Die Settings fließen in den `settings_hash`
+des Modellportfolios ein (Dict sortiert serialisiert); zusätzlich wird
+`neut_scheme_hash` (SHA-256 über Default + aufgelöste Zuordnung je
+Indikator, `Settings.neut_scheme_hash`) je Snapshot in
+`koyfin_universe_history` und je Lauf in `model_portfolio_meta` abgelegt.
+
+**Diagnose** (Diagnoseliste je Import): Warnung je Industrie ohne Mapping;
+Info je Indikator mit Anzahl der Titel, deren Ebene 1 auf Sektor bzw.
+Global zurückfiel, und Anzahl mit entfallener Ebene 2 (`neut_fallback`);
+Info zur Verteilung der Industriegruppen-Größen (Min, Median, Max, Anzahl
+< 20; `industry_group_sizes`); Warnung `neut_fallback_share`, wenn bei
+einem Indikator mehr als 25 % der Titel auf Ebene 1 nicht in der
+vorgesehenen Gruppe standardisiert wurden (Universum für das Schema zu
+klein). Die Einzelanalyse zeigt je Indikator den Z-Score und daneben die
+verwendete Ebenenfolge sowie die Industriegruppe (Tooltip: Gruppengröße);
+das Dashboard filtert zusätzlich nach Industriegruppe.
+
+**Vergleich vor Umstellung** (Pflicht, CLI
+`python -m app.tools.model_portfolio compare --scheme-a region_sector
+--scheme-b industry_group_then_region [--snapshot …|--csv …]`, Report
+`reports/neutralisierung_vergleich_<datum>.md` mit Spearman-Rangkorrelation
+gesamt/je Sektor/je Region, Rangänderungen > 20 Perzentilpunkte,
+Top-35-Zusammensetzung und -Schnittmenge, Gruppengrößenstatistik und
+Fallback-Zählung): Ergebnis auf dem Universum vom 10.04.2026
+(`reports/neutralisierung_vergleich_2026-04-10.md`, Datenbasis
+`tests/fixtures/koyfin_universe_sample.csv` = Sheet „Daten_Import" der
+Excel-Vorlage): Rangkorrelation der `composite_z` **0,914** (je Sektor
+0,80–0,97, je Region 0,75–0,94; die kleinen Regionen Africa / Middle
+East und Latin America liegen bei 0,75/0,76), 131 von 1.290 Titeln mit
+Rangänderung > 20 Punkte (vor allem Banken, Lebensmittelhandel und
+Titel kleiner Regionen, die zuvor in der Sektor-Kaskade standen),
+Top-35-Schnittmenge 23 Titel, alle 1.296 Titel im Mapping,
+Industriegruppen 16–172 Titel (Median 45, eine Gruppe < 20: Household &
+Personal Products), `ev_ebitda` bei 98,4 % der Titel in der
+Industriegruppe standardisiert (Abnahmekriterium ≥ 85 %). Nach dem
+Interpretationshinweis (> 0,90 → Umstellung ändert wenig) wurde der
+Default am 17.09.2026 auf `industry_group_then_region` umgestellt
+(Änderungsprotokoll, Abschnitt 15).
 
 ### 11.5 Zonen (Spec 5.2)
 
@@ -870,7 +992,8 @@ cte, action, reason, rebalance_mode, override_id`; Unique
 `model_portfolio_meta` (`rebalance_mode, n_titles, te_ex_ante,
 te_coverage, turnover_oneway, n_trades, n_deferred, settings_hash,
 diagnostics` JSON, `source_portfolio_id, source_portfolio_name` des
-abgeglichenen Bestandsportfolios), `risk_benchmark_region_weights`.
+abgeglichenen Bestandsportfolios, `neut_scheme_hash` des
+Neutralisierungsschemas), `risk_benchmark_region_weights`.
 `settings_hash` = SHA-256 über die JSON-serialisierten, sortierten
 v2-/pc-/filter-Settings (die Portfolio-Auswahl liegt bewusst nicht in den
 Settings, sondern in `ms_portfolio_selection`, und ändert den Hash nicht).
@@ -886,7 +1009,12 @@ gewähltes Portfolio, sonst gespeicherte Auswahl der Seite bzw. aktives
 Portfolio; Report
 `reports/modellportfolio_<datum>.md`; Exit 0 ohne Fehler-Diagnosen, 1 bei
 Warnungen, 2 bei Fehlern) bzw. `… compare --v1 --v2` (Spearman v1/v2,
-Rangänderungen > 30 Perzentilpunkte, Sektorverteilung der Top-35).
+Rangänderungen > 30 Perzentilpunkte, Sektorverteilung der Top-35) und
+`… compare --scheme-a … --scheme-b … [--snapshot …|--csv …] [--out DIR]`
+(Vergleich zweier Neutralisierungsschemata, Report
+`reports/neutralisierung_vergleich_<datum>.md`, Abschnitt 11.4a; Schema =
+Schema-ID für alle Indikatoren oder `settings` für die Zuordnung je
+Indikator).
 
 ---
 
@@ -939,7 +1067,7 @@ Feldmapping mit Fallbacks (`ebit → operatingIncome`,
 Je Stichtag: `LISTING_STATUS(date=d)` mit `assetType = Stock`, Börse ∈
 {NYSE, NASDAQ, NYSE ARCA, NYSE MKT}; raus: Suffixe `-P/-WS/-U/-R`,
 OVERVIEW ≠ Common Stock, Land ≠ USA (fehlt OVERVIEW: Titel bleibt, Sektor
-`Unknown` → Neutralisierungsgruppe global), < 250 Kurstage, Doppelgattungen
+`Unknown` → Neutralisierungsgruppe Sektor „Unknown" bzw. global), < 250 Kurstage, Doppelgattungen
 (gleicher Firmenname → liquidere Gattung nach 3M-Dollar-Volumen); dann
 `market_cap(d) ≥ bt_min_market_cap` (1.000 Mio EUR) und die größten
 `bt_universe_top_n` (1.000). Alpha-Vantage-Sektoren (SIC-basiert) werden
@@ -961,7 +1089,13 @@ Retained Earnings, EBIT, Marktkapitalisierung, Umsatz); optionale Spalten
 `ev_ebit`, `net_debt_ebitda`, `fcf_yield`, `adv_3m`, `ipo_date` gefüllt;
 `eps_revisions_3m` = NaN (Momentum nur `mom_12_1_adj`; S8 belegt die Spalte
 mit risikoadjustiertem 6-1-Momentum, auf das Gültigkeitsband geclippt).
-`region` = „United States" (Regionsband inaktiv). Benchmark SPY (EUR);
+`region` = „United States" (Regionsband inaktiv; Ebene 2 der
+sequenziellen Neutralisierung ist damit eine einzige Region).
+`industry_group` entsteht über `data/reference/av_industry_to_gics.csv`
+(manuell gepflegtes Mapping der SIC-basierten `OVERVIEW.Industry` auf die
+GICS-Industrie, dann `gics_map.csv`; unvollständige Zuordnungen fallen
+auf den Sektor, `industry_group_source = "sector"`, Warnung in der
+Diagnose). Benchmark SPY (EUR);
 Sektorgewichte für die Bandbreiten = kapitalisierungsgewichtete Anteile der
 500 größten Universumstitel (Proxy, `select_portfolio` erhält sie als
 Parameter). `snapshot --date … --out … [--score]` schreibt eine CSV, die
@@ -997,10 +1131,14 @@ mit 11 Abschnitten (Vorbehaltsblock zuerst) plus Lauf-Verzeichnis mit
 `nav_daily.csv`, `holdings_by_date.csv`, `trades.csv`, `diagnostics.csv`,
 `sensitivities.csv`, `factor_regression.csv`, `chart_data.csv`, `run.json`;
 `report --run <run_id>` rendert daraus erneut. Pflicht-Sensitivitäten
-S1–S10 (`SENSITIVITY_VARIANTS`): gleiche Faktorgewichte, keine Pufferzone,
+S1–S11 (`SENSITIVITY_VARIANTS`): gleiche Faktorgewichte, keine Pufferzone,
 1/N, ohne TE-Schritt, jedes Quartal `full`, Kosten × 2, Delisting-Haircut,
-Momentum-Proxy, Lag 120, Top-500. Weicht der IR von Basisfall und S1 um
-mehr als 0,2 ab, steht ein Warnhinweis im Report.
+Momentum-Proxy, Lag 120, Top-500, Neutralisierung im Altschema
+`region_sector` für alle Indikatoren (S11 — Basisfall vs. S11 ist die
+empirische Antwort, ob die sequenzielle Neutralisierung Wert schafft).
+Optional (`--variant S12_neut_global`, `OPTIONAL_SENSITIVITY_VARIANTS`):
+S12 ohne Neutralisierung (alle Indikatoren `global`). Weicht der IR von
+Basisfall und S1 um mehr als 0,2 ab, steht ein Warnhinweis im Report.
 
 ### 14.7 Paper-Portfolio (`paper.py`)
 
@@ -1095,3 +1233,21 @@ Reproduzierbarkeit, Vorbehaltsblock zuerst, Paper-Update.
   Settings-Dict mit `risk_benchmark_sector_weights_asof` (120-Tage-Check),
   Regionsgewichte in der Tabelle `risk_benchmark_region_weights`. Die
   TE-Kontrolle rechnet in beiden Fällen gegen die ACWI-Kurszeitreihe.
+
+---
+
+## 15. Änderungsprotokoll
+
+- **2026-09-17 — Sequenzielle Neutralisierung (Industriegruppe → Region).**
+  Neutralisierungsschema je Indikator (`v2_neut_scheme_by_indicator`,
+  `v2_neut_scheme_default`, Mindestgrößen `v2_min_group_size_l1 = 20`,
+  `v2_min_group_size_l2 = 30`), GICS-Mapping `data/reference/gics_map.csv`
+  (Koyfin-`industry` = GICS-Ebene 3), Spalten `industry_group`,
+  `industry_group_source`, `neut_scheme_hash`; Compare-CLI und Report
+  `reports/neutralisierung_vergleich_2026-04-10.md` (Spearman 0,914);
+  Backtest-Sensitivitäten S11 (Altschema) und S12 (global, optional);
+  Alpha-Vantage-Mapping `data/reference/av_industry_to_gics.csv`.
+  **Default umgestellt** von `region_sector` auf
+  `industry_group_then_region` (Momentum `region_only`, Bilanzdynamik
+  `sector_then_region`) nach Sichtung des Vergleichsreports; das Altschema
+  bleibt wählbar und bitidentisch (`tests/test_neutralization.py`).

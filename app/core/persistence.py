@@ -122,6 +122,12 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "v2_min_factor_weight",
     "v2_min_group_size",
     "v2_min_group_valid",
+    # Sequenzielle Neutralisierung (Schema je Indikator, Mindestgrößen).
+    "v2_neut_scheme_default",
+    "v2_neut_scheme_by_indicator",
+    "v2_min_group_size_l1",
+    "v2_min_group_size_l2",
+    "v2_neut_scheme_legacy",
     "v2_winsor_lower",
     "v2_winsor_upper",
     "v2_zscore_cap",
@@ -1430,6 +1436,12 @@ def _apply_settings_dict(s: Settings, payload: dict) -> None:
             defaults = getattr(s, key, {})
             stored = {k: float(v) for k, v in value.items()}
             value = {**defaults, **stored} if isinstance(defaults, dict) else stored
+        elif field_types.get(key) == "dict[str, str]" and isinstance(value, dict):
+            # Schema-Zuordnung je Indikator: neue Indikatoren erhalten ihren
+            # Default, gespeicherte Einträge gewinnen (analog Gewichts-Dicts).
+            defaults = getattr(s, key, {})
+            stored = {str(k): str(v) for k, v in value.items()}
+            value = {**defaults, **stored} if isinstance(defaults, dict) else stored
         setattr(s, key, value)
 
 
@@ -2174,7 +2186,10 @@ def load_region_weights() -> tuple[dict[str, float], date | None]:
 
 def settings_hash_v2(settings: Settings) -> str:
     """SHA-256 über die JSON-serialisierten, sortierten v2- und pc-Settings
-    (Spec 10) — ordnet jede Portfolioversion ihrer Parametrisierung zu."""
+    (Spec 10) — ordnet jede Portfolioversion ihrer Parametrisierung zu.
+    Die Neutralisierungs-Settings (``v2_neut_*``, Dict mit sortierten
+    Schlüsseln) sind enthalten; das Schema allein hasht
+    ``Settings.neut_scheme_hash``."""
     import hashlib
 
     payload = {
@@ -2244,6 +2259,9 @@ def _ensure_model_portfolio_meta_table(conn) -> None:
     # (Bestands-DBs per ALTER nachgerüstet, PK bleibt snapshot_date).
     _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "source_portfolio_id", "INTEGER")
     _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "source_portfolio_name", "TEXT")
+    # Neutralisierungsschema des Laufs (SHA-256 über das Schema-Dict, Spec
+    # Sequenzielle Neutralisierung 5.4).
+    _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "neut_scheme_hash", "TEXT")
 
 
 def save_model_portfolio(
@@ -2294,12 +2312,12 @@ def save_model_portfolio(
                 "(snapshot_date, rebalance_mode, n_titles, te_ex_ante, "
                 "te_coverage, turnover_oneway, n_trades, n_deferred, "
                 "settings_hash, diagnostics, source_portfolio_id, "
-                "source_portfolio_name, updated_at) "
+                "source_portfolio_name, neut_scheme_hash, updated_at) "
                 "VALUES (:snapshot_date, :rebalance_mode, :n_titles, "
                 ":te_ex_ante, :te_coverage, :turnover_oneway, :n_trades, "
                 ":n_deferred, :settings_hash, :diagnostics, "
                 ":source_portfolio_id, :source_portfolio_name, "
-                "CURRENT_TIMESTAMP) "
+                ":neut_scheme_hash, CURRENT_TIMESTAMP) "
                 "ON CONFLICT (snapshot_date) DO UPDATE SET "
                 "rebalance_mode = EXCLUDED.rebalance_mode, "
                 "n_titles = EXCLUDED.n_titles, "
@@ -2312,6 +2330,7 @@ def save_model_portfolio(
                 "diagnostics = EXCLUDED.diagnostics, "
                 "source_portfolio_id = EXCLUDED.source_portfolio_id, "
                 "source_portfolio_name = EXCLUDED.source_portfolio_name, "
+                "neut_scheme_hash = EXCLUDED.neut_scheme_hash, "
                 "updated_at = CURRENT_TIMESTAMP"
             ),
             {
@@ -2331,6 +2350,7 @@ def save_model_portfolio(
                     else int(meta["source_portfolio_id"])
                 ),
                 "source_portfolio_name": meta.get("source_portfolio_name"),
+                "neut_scheme_hash": meta.get("neut_scheme_hash"),
             },
         )
 
