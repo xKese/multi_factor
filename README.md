@@ -64,6 +64,19 @@ Vollständige Methodik in `MODEL_DESCRIPTION.md` (§11/§12) — Kurzfassung:
   Override-Register und PIT-Historie. Welches hochgeladene Portfolio als
   Bestand abgeglichen wird, wählt das Dropdown „Bestand“ auf der Seite
   (gespeichert; CLI: `--portfolio ID|NAME`).
+- **Konstruktionsprofile** (Einstellungen → Block „Portfoliokonstruktion“):
+  Die Konstruktionskriterien (`pc_*`: Zielanzahl, Bandbreiten, Gewichts-
+  Floor/Cap, TE-Zielband, Turnover-Budget, Rebalancing-Monate,
+  Benchmark-Quelle) lassen sich in mehreren benannten Versionen speichern
+  (z. B. „Konservativ“, „Dynamisch“) und in der Karte
+  „Konstruktionsprofile je Portfolio“ jedem hochgeladenen Portfolio
+  zuordnen. Modellportfolio-Seite und CLI rechnen mit dem Profil des
+  gewählten Bestandsportfolios; ohne Zuordnung gelten die globalen
+  Einstellungen (Standard). Universumsfilter, Scoring und
+  Benchmark-Stammdaten bleiben global. Das verwendete Profil wird im
+  Lauf protokolliert (Diagnose, Hero, Meta-Tabelle `pc_profile_id`/
+  `pc_profile_name`) und geht in den Settings-Hash ein. Tabellen:
+  `pc_profiles`, `pc_profile_assignments`.
 
 ## Scoring-Logik v1 (Vergleichsmodus)
 

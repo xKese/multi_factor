@@ -5,15 +5,22 @@ from __future__ import annotations
 from datetime import date
 
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, callback, ctx, html, register_page
+from dash import ALL, Input, Output, State, callback, ctx, html, no_update, register_page
 from dash.exceptions import PreventUpdate
 
 from app.core import agents_client
-from app.core.config import NEUT_SCHEMES, V2_INDICATORS, Settings
+from app.core.config import NEUT_SCHEMES, PC_PROFILE_FIELDS, V2_INDICATORS, Settings
+from app.core.pc_profiles import DEFAULT_PROFILE_LABEL, apply_profile
 from app.core.persistence import (
+    delete_pc_profile,
     delete_sector_snapshot,
+    get_pc_profile,
+    list_pc_profile_assignments,
+    list_pc_profiles,
     list_sector_snapshot_dates,
+    save_pc_profile,
     save_settings,
+    set_pc_profile_assignment,
 )
 from app.core.state import STATE
 from app.pages.common import page_title
@@ -86,6 +93,10 @@ PC_SETTINGS_FIELDS: list[tuple[str, str, float, bool]] = [
 _V2_INT_FIELDS = {f for f, _, _, is_int in V2_SETTINGS_FIELDS if is_int} | {
     f for f, _, _, is_int in PC_SETTINGS_FIELDS if is_int
 }
+
+# Dropdown-Wert des Standards (globale Einstellungen, kein Profil).
+PC_PROFILE_DEFAULT = "default"
+_PC_PROFILE_SET = frozenset(PC_PROFILE_FIELDS)
 
 # Neutralisierungsschemata (Spec Sequenzielle Neutralisierung 2): Anzeige-
 # Label je Schema-ID für die Dropdowns in den Einstellungen.
@@ -574,14 +585,115 @@ def _v2_card() -> dbc.Card:
     )
 
 
+def _pc_profile_options() -> list[dict]:
+    """Dropdown-Optionen: Standard (global) + gespeicherte Profile."""
+    options = [{"label": DEFAULT_PROFILE_LABEL, "value": PC_PROFILE_DEFAULT}]
+    for profile in list_pc_profiles():
+        options.append({"label": profile["name"], "value": str(profile["id"])})
+    return options
+
+
+def _pc_profile_id(value) -> int | None:
+    """Dropdown-Wert → Profil-ID (``None`` = Standard)."""
+    if value in (None, "", PC_PROFILE_DEFAULT):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pc_profile_section() -> html.Div:
+    """Kopf des Konstruktions-Blocks: Auswahl der Kriterien-Version.
+
+    Die Felder unten zeigen immer die gewählte Version; „Speichern" (Button
+    unter den Karten) schreibt in genau diese Version — Standard = globale
+    Einstellungen, sonst das Profil. „Als Profil speichern" legt aus den
+    aktuellen Feldwerten eine (neue) benannte Version an.
+    """
+    return html.Div(
+        [
+            dbc.Row(
+                [
+                    dbc.Col(html.Label("Version der Kriterien (Profil)"), md=7),
+                    dbc.Col(
+                        dbc.Select(
+                            id="pc-profile-select",
+                            options=_pc_profile_options(),
+                            value=PC_PROFILE_DEFAULT,
+                        ),
+                        md=5,
+                    ),
+                ],
+                className="mb-2",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dbc.Input(
+                            id="pc-profile-name",
+                            placeholder="Profilname, z. B. Konservativ",
+                            value="",
+                        ),
+                        md=7,
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                dbc.Button(
+                                    "Als Profil speichern",
+                                    id="pc-profile-save",
+                                    color="dark",
+                                    size="sm",
+                                    n_clicks=0,
+                                ),
+                                dbc.Button(
+                                    "Löschen",
+                                    id="pc-profile-delete",
+                                    color="danger",
+                                    outline=True,
+                                    size="sm",
+                                    n_clicks=0,
+                                ),
+                            ],
+                            className="d-flex gap-1",
+                        ),
+                        md=5,
+                    ),
+                ],
+                className="mb-2",
+            ),
+            html.Div(id="pc-profile-status"),
+            html.Div(
+                "Profile speichern die Konstruktionskriterien unten (Zielanzahl, "
+                "Bandbreiten, Gewichtung/TE, Rebalancing, Benchmark-Quelle) als "
+                "eigene Version — z. B. je Risikoprofil. Die Zuordnung zu den "
+                "Portfolios erfolgt in der Karte „Konstruktionsprofile je "
+                "Portfolio“. Universumsfilter und Benchmark-Stammdaten gelten "
+                "immer global.",
+                className="small text-muted mb-2",
+            ),
+            html.Hr(),
+        ]
+    )
+
+
 def _pc_card() -> dbc.Card:
     """Einstellungs-Block „Portfoliokonstruktion" (Spec 11.2)."""
     s = STATE.settings
+    filter_rows = [
+        _numeric_row(
+            {"type": "pc-set", "index": field}, label, getattr(s, field), step, is_int
+        )
+        for field, label, step, is_int in PC_SETTINGS_FIELDS
+        if field not in _PC_PROFILE_SET
+    ]
     rows = [
         _numeric_row(
             {"type": "pc-set", "index": field}, label, getattr(s, field), step, is_int
         )
         for field, label, step, is_int in PC_SETTINGS_FIELDS
+        if field in _PC_PROFILE_SET
     ]
     from app.core.persistence import load_region_weights
 
@@ -594,6 +706,13 @@ def _pc_card() -> dbc.Card:
             dbc.CardHeader("Portfoliokonstruktion"),
             dbc.CardBody(
                 [
+                    _pc_profile_section(),
+                    html.Div("Universumsfilter (global)", className="fw-bold mb-2"),
+                    *filter_rows,
+                    html.Hr(),
+                    html.Div(
+                        "Konstruktionskriterien (je Profil)", className="fw-bold mb-2"
+                    ),
                     dbc.Row(
                         [
                             dbc.Col(html.Label("Benchmark-Quelle (Bänder/Exposures)"), md=7),
@@ -683,6 +802,84 @@ def _pc_card() -> dbc.Card:
                         "(Speichern setzt den Stand auf heute)",
                         className="small text-muted",
                     ),
+                ]
+            ),
+        ],
+        className="mb-3",
+    )
+
+
+def _pc_assignment_body() -> html.Div:
+    """Eine Zeile je hochgeladenem Portfolio mit Profil-Dropdown."""
+    STATE.refresh_portfolios()
+    portfolios = STATE.ms_portfolios
+    options = _pc_profile_options()
+    assignments = list_pc_profile_assignments()
+    if not portfolios:
+        return html.Div(
+            "Noch kein Portfolio hochgeladen — Portfolios werden auf der "
+            "Seite „Portfolios“ als Koyfin-Watchlist importiert.",
+            className="small text-muted",
+        )
+    rows = []
+    for p in portfolios:
+        pid = int(p["id"])
+        assigned = assignments.get(pid)
+        rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Label(
+                            f"{p['name']} · "
+                            f"{fmt_de(int(p.get('n_positions') or 0), 0)} Pos."
+                        ),
+                        md=7,
+                    ),
+                    dbc.Col(
+                        dbc.Select(
+                            id={"type": "pc-assign", "index": pid},
+                            options=options,
+                            value=(
+                                str(assigned) if assigned is not None
+                                else PC_PROFILE_DEFAULT
+                            ),
+                        ),
+                        md=5,
+                    ),
+                ],
+                className="mb-2",
+            )
+        )
+    rows.append(
+        dbc.Button(
+            "Zuordnung speichern",
+            id="pc-assign-save",
+            color="dark",
+            size="sm",
+            n_clicks=0,
+            className="mt-1",
+        )
+    )
+    return html.Div(rows)
+
+
+def _pc_assignment_card() -> dbc.Card:
+    """Karte „Konstruktionsprofile je Portfolio": welches Profil beim
+    Modellportfolio-Abgleich für welches Bestandsportfolio gilt."""
+    return dbc.Card(
+        [
+            dbc.CardHeader("Konstruktionsprofile je Portfolio"),
+            dbc.CardBody(
+                [
+                    html.Div(
+                        "Beim Berechnen des Modellportfolios gilt das dem gewählten "
+                        "Bestandsportfolio zugeordnete Profil (Seite "
+                        "„Modellportfolio“ und CLI). Ohne Zuordnung gelten die "
+                        "globalen Einstellungen (Standard).",
+                        className="small text-muted mb-2",
+                    ),
+                    html.Div(_pc_assignment_body(), id="pc-assign-body"),
+                    html.Div(id="pc-assign-status", className="mt-2"),
                 ]
             ),
         ],
@@ -877,6 +1074,7 @@ def layout(**_) -> html.Div:
                 className="mb-2",
             ),
             html.Div(id="v2-settings-status", className="mb-3"),
+            _pc_assignment_card(),
             _agents_card(),
             _snapshot_card(),
             html.Div(
@@ -1082,16 +1280,28 @@ def _parse_months(raw: str | None, fallback: list[int]) -> list[int]:
     State("v2-neut-default", "value"),
     State({"type": "v2-neut", "index": ALL}, "value"),
     State({"type": "v2-neut", "index": ALL}, "id"),
+    State("pc-profile-select", "value"),
     prevent_initial_call=True,
 )
 def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
              scoring_version, timing_mode, benchmark_source, rebalance_months,
              interim_months, sector_asof, region_weights_text,
-             neut_default=None, neut_vals=None, neut_ids=None):
+             neut_default=None, neut_vals=None, neut_ids=None,
+             pc_profile=None):
     if not n_clicks:
         raise PreventUpdate
     s = STATE.settings
     defaults = Settings()
+    # Ziel der Konstruktionskriterien: Standard → globale Settings, sonst
+    # das im Dropdown gewählte Profil (die Felder zeigen dessen Werte).
+    profile_id = _pc_profile_id(pc_profile)
+    target_profile = get_pc_profile(profile_id) if profile_id is not None else None
+    if profile_id is not None and target_profile is None:
+        return dbc.Alert(
+            "Nicht gespeichert: Das gewählte Konstruktionsprofil existiert "
+            "nicht mehr — bitte Seite neu laden.",
+            color="danger",
+        )
     # Neutralisierungsschema (Spec Sequenzielle Neutralisierung 7): erst
     # validieren, dann übernehmen — ungültige Werte werden nicht gespeichert.
     candidate = Settings()
@@ -1106,14 +1316,19 @@ def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
     except ValueError as exc:
         return dbc.Alert(f"Nicht gespeichert: {exc}", color="danger")
 
-    for vals, ids in ((v2_vals, v2_ids), (pc_vals, pc_ids)):
-        for val, ident in zip(vals or [], ids or [], strict=False):
-            field = ident["index"]
-            if val is None:
-                val = getattr(defaults, field)
-            setattr(
-                s, field, int(val) if field in _V2_INT_FIELDS else float(val)
-            )
+    for val, ident in zip(v2_vals or [], v2_ids or [], strict=False):
+        field = ident["index"]
+        if val is None:
+            val = getattr(defaults, field)
+        setattr(s, field, int(val) if field in _V2_INT_FIELDS else float(val))
+    pc_values = _collect_pc_values(
+        pc_vals, pc_ids, benchmark_source, rebalance_months, interim_months
+    )
+    profile_data = {k: v for k, v in pc_values.items() if k in _PC_PROFILE_SET}
+    for field, value in pc_values.items():
+        if target_profile is not None and field in _PC_PROFILE_SET:
+            continue  # geht ins Profil, nicht in die globalen Settings
+        setattr(s, field, value)
     for val, ident in zip(mv_vals or [], mv_ids or [], strict=False):
         segment, factor = ident["index"].split(":", 1)
         table = (
@@ -1124,13 +1339,8 @@ def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
 
     s.scoring_version = scoring_version or "v2"
     s.factor_timing_mode = timing_mode or "monitor"
-    s.pc_benchmark_source = benchmark_source or "universe"
     s.v2_neut_scheme_default = candidate.v2_neut_scheme_default
     s.v2_neut_scheme_by_indicator = candidate.v2_neut_scheme_by_indicator
-    s.pc_rebalance_months = _parse_months(
-        rebalance_months, defaults.pc_rebalance_months
-    )
-    s.pc_interim_months = _parse_months(interim_months, defaults.pc_interim_months)
     s.risk_benchmark_sector_weights_asof = (sector_asof or "").strip()
 
     # Validierung der v2-Faktorgewichte (Summe 1,0 ± 0,001, Spec 2.4) und
@@ -1142,6 +1352,19 @@ def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
         return dbc.Alert(f"Nicht gespeichert: {exc}", color="danger")
 
     alerts = []
+    if target_profile is not None:
+        try:
+            save_pc_profile(
+                target_profile["name"], profile_data, profile_id=profile_id
+            )
+        except Exception as exc:  # noqa: BLE001
+            alerts.append(
+                dbc.Alert(
+                    f"Warnung: Konstruktionsprofil „{target_profile['name']}“ "
+                    f"nicht gespeichert ({exc}).",
+                    color="warning",
+                )
+            )
     # Regionsgewichte in die Tabelle risk_benchmark_region_weights schreiben.
     region_weights: dict[str, float] = {}
     for line in str(region_weights_text or "").splitlines():
@@ -1172,10 +1395,15 @@ def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
         )
 
     STATE.recompute()
+    saved_into = (
+        f"Konstruktionskriterien im Profil „{target_profile['name']}“"
+        if target_profile is not None
+        else "Portfoliokonstruktion (Standard)"
+    )
     alerts.insert(
         0,
         dbc.Alert(
-            "Composite v2 / Portfoliokonstruktion gespeichert. Scores wurden "
+            f"Composite v2 / {saved_into} gespeichert. Scores wurden "
             "neu berechnet.",
             color="success",
             duration=4000,
@@ -1189,6 +1417,202 @@ def _save_v2(n_clicks, v2_vals, v2_ids, mv_vals, mv_ids, pc_vals, pc_ids,
                 f"Warnung: Datenbank-Speicherung fehlgeschlagen ({exc}).",
                 color="warning",
             )
+        )
+    return html.Div(alerts)
+
+
+def _collect_pc_values(
+    pc_vals, pc_ids, benchmark_source, rebalance_months, interim_months
+) -> dict:
+    """Feldwerte des Konstruktions-Blocks (Filter + pc_*) als typisiertes
+    Dict; leere Eingaben fallen auf den Dataclass-Default zurück."""
+    defaults = Settings()
+    out: dict = {}
+    for val, ident in zip(pc_vals or [], pc_ids or [], strict=False):
+        field = ident["index"]
+        if val is None:
+            val = getattr(defaults, field)
+        out[field] = int(val) if field in _V2_INT_FIELDS else float(val)
+    out["pc_benchmark_source"] = benchmark_source or "universe"
+    out["pc_rebalance_months"] = _parse_months(
+        rebalance_months, defaults.pc_rebalance_months
+    )
+    out["pc_interim_months"] = _parse_months(
+        interim_months, defaults.pc_interim_months
+    )
+    return out
+
+
+def _pc_field_values(profile: dict | None, pc_ids: list[dict]) -> tuple:
+    """Werte für die Felder des Konstruktions-Blocks: globale Settings,
+    überlagert mit dem Profil (wenn gegeben)."""
+    settings = (
+        apply_profile(STATE.settings, profile.get("data"))
+        if profile is not None
+        else STATE.settings
+    )
+    values = [getattr(settings, ident["index"]) for ident in pc_ids or []]
+    return (
+        values,
+        settings.pc_benchmark_source,
+        ", ".join(str(m) for m in settings.pc_rebalance_months),
+        ", ".join(str(m) for m in settings.pc_interim_months),
+        str(profile["name"]) if profile is not None else "",
+    )
+
+
+@callback(
+    Output({"type": "pc-set", "index": ALL}, "value"),
+    Output("pc-benchmark-source", "value"),
+    Output("pc-rebalance-months", "value"),
+    Output("pc-interim-months", "value"),
+    Output("pc-profile-name", "value"),
+    Input("pc-profile-select", "value"),
+    State({"type": "pc-set", "index": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def _load_pc_profile(selected, pc_ids):
+    """Gewählte Kriterien-Version in die Felder laden (Standard = globale
+    Einstellungen)."""
+    profile_id = _pc_profile_id(selected)
+    profile = get_pc_profile(profile_id) if profile_id is not None else None
+    if profile_id is not None and profile is None:
+        raise PreventUpdate
+    return _pc_field_values(profile, pc_ids)
+
+
+@callback(
+    Output("pc-profile-select", "options"),
+    Output("pc-profile-select", "value"),
+    Output("pc-profile-status", "children"),
+    Output("pc-assign-body", "children"),
+    Input("pc-profile-save", "n_clicks"),
+    Input("pc-profile-delete", "n_clicks"),
+    State("pc-profile-select", "value"),
+    State("pc-profile-name", "value"),
+    State({"type": "pc-set", "index": ALL}, "value"),
+    State({"type": "pc-set", "index": ALL}, "id"),
+    State("pc-benchmark-source", "value"),
+    State("pc-rebalance-months", "value"),
+    State("pc-interim-months", "value"),
+    prevent_initial_call=True,
+)
+def _manage_pc_profiles(n_save, n_delete, selected, name, pc_vals, pc_ids,
+                        benchmark_source, rebalance_months, interim_months):
+    """„Als Profil speichern" (aktuelle Feldwerte unter Name anlegen bzw.
+    gleichnamiges Profil überschreiben) und „Löschen" (gewähltes Profil
+    samt Zuordnungen; Portfolios fallen auf Standard zurück)."""
+    trigger = ctx.triggered_id
+    if trigger == "pc-profile-delete":
+        if not n_delete:
+            raise PreventUpdate
+        profile_id = _pc_profile_id(selected)
+        if profile_id is None:
+            return (
+                no_update,
+                no_update,
+                dbc.Alert(
+                    "Der Standard (globale Einstellungen) kann nicht gelöscht "
+                    "werden.",
+                    color="warning",
+                    duration=4000,
+                ),
+                no_update,
+            )
+        profile = get_pc_profile(profile_id)
+        label = profile["name"] if profile else f"#{profile_id}"
+        try:
+            delete_pc_profile(profile_id)
+        except Exception as exc:  # noqa: BLE001
+            return (
+                no_update,
+                no_update,
+                dbc.Alert(f"Löschen fehlgeschlagen: {exc}", color="danger"),
+                no_update,
+            )
+        return (
+            _pc_profile_options(),
+            PC_PROFILE_DEFAULT,
+            dbc.Alert(
+                f"Profil „{label}“ gelöscht — zugeordnete Portfolios nutzen "
+                "wieder den Standard.",
+                color="success",
+                duration=4000,
+            ),
+            _pc_assignment_body(),
+        )
+    if trigger == "pc-profile-save":
+        if not n_save:
+            raise PreventUpdate
+        clean = str(name or "").strip()
+        if not clean:
+            return (
+                no_update,
+                no_update,
+                dbc.Alert(
+                    "Bitte einen Profilnamen eingeben.",
+                    color="warning",
+                    duration=4000,
+                ),
+                no_update,
+            )
+        values = _collect_pc_values(
+            pc_vals, pc_ids, benchmark_source, rebalance_months, interim_months
+        )
+        data = {k: v for k, v in values.items() if k in _PC_PROFILE_SET}
+        try:
+            pid = save_pc_profile(clean, data)
+        except Exception as exc:  # noqa: BLE001
+            return (
+                no_update,
+                no_update,
+                dbc.Alert(f"Profil nicht gespeichert: {exc}", color="danger"),
+                no_update,
+            )
+        return (
+            _pc_profile_options(),
+            str(pid),
+            dbc.Alert(
+                f"Profil „{clean}“ gespeichert ({fmt_de(len(data), 0)} "
+                "Kriterien). Zuordnung zu Portfolios unten.",
+                color="success",
+                duration=4000,
+            ),
+            _pc_assignment_body(),
+        )
+    raise PreventUpdate
+
+
+@callback(
+    Output("pc-assign-status", "children"),
+    Input("pc-assign-save", "n_clicks"),
+    State({"type": "pc-assign", "index": ALL}, "value"),
+    State({"type": "pc-assign", "index": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def _save_pc_assignments(n_clicks, values, ids):
+    """Profil-Zuordnung je Portfolio persistieren (Standard = Zuordnung
+    entfernen)."""
+    if not n_clicks:
+        raise PreventUpdate
+    errors: list[str] = []
+    n_saved = 0
+    for val, ident in zip(values or [], ids or [], strict=False):
+        try:
+            set_pc_profile_assignment(int(ident["index"]), _pc_profile_id(val))
+            n_saved += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{STATE.portfolio_name(int(ident['index']))}: {exc}")
+    alerts = [
+        dbc.Alert(
+            f"Zuordnung für {fmt_de(n_saved, 0)} Portfolio(s) gespeichert.",
+            color="success",
+            duration=4000,
+        )
+    ]
+    if errors:
+        alerts.append(
+            dbc.Alert("Nicht gespeichert: " + "; ".join(errors), color="danger")
         )
     return html.Div(alerts)
 

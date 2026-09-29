@@ -91,6 +91,19 @@ bleibt als „Scoring v1 (Vergleich)" aufklappbar):
   Portfolio als Bestand mit dem Zielportfolio abgeglichen wird
   (Trade-Liste, Δw, Turnover); die Auswahl wird gespeichert und gilt auch
   für das CLI. Der Daten-Import meldet den erkannten Rebalance-Modus.
+- **Konstruktionsprofile** (Seite *Einstellungen*, Block
+  „Portfoliokonstruktion"): Die Konstruktionskriterien (Zielanzahl,
+  Bandbreiten, Gewichtung/TE, Turnover, Rebalancing, Benchmark-Quelle)
+  können als mehrere benannte Versionen gespeichert werden — z. B.
+  „Konservativ" mit engerem TE-Band und niedrigerem Gewichts-Cap,
+  „Dynamisch" mit weniger Titeln. Ablauf: Werte im Block anpassen →
+  Profilname eingeben → „Als Profil speichern"; das Dropdown „Version der
+  Kriterien" lädt eine Version in die Felder, „Speichern" schreibt in die
+  gerade gewählte Version (Standard = globale Einstellungen). In der Karte
+  „Konstruktionsprofile je Portfolio" wird jedem hochgeladenen Portfolio
+  ein Profil zugeordnet; das Modellportfolio rechnet dann mit dem Profil
+  des gewählten Bestands (sichtbar im Hero und in den Diagnosen). Ohne
+  Zuordnung gilt der Standard. Universumsfilter bleiben global.
 - **Faktor-Timing** wirkt seit v2 nur noch als Monitoring und fließt
   nicht in das Composite ein.
 

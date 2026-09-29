@@ -20,6 +20,11 @@ from app.core.diagnostics import (
     diags_from_json,
     diags_to_json,
 )
+from app.core.pc_profiles import (
+    DEFAULT_PROFILE_LABEL,
+    apply_profile,
+    resolve_construction_settings,
+)
 from app.core.portfolio_construction import (
     ACTION_HOLD,
     build_model_portfolio,
@@ -47,18 +52,55 @@ def _fmt_pct(value, digits: int = 1) -> str:
 # ── Layout ──────────────────────────────────────────────────────────────
 
 
+def _profile_names_by_portfolio() -> dict[int, str]:
+    """Zugeordnetes Konstruktionsprofil je Portfolio-ID (fail-open: leer)."""
+    try:
+        assignments = persistence.list_pc_profile_assignments()
+        if not assignments:
+            return {}
+        names = {p["id"]: p["name"] for p in persistence.list_pc_profiles()}
+    except Exception:  # noqa: BLE001
+        return {}
+    return {
+        pid: names[prof_id]
+        for pid, prof_id in assignments.items()
+        if prof_id in names
+    }
+
+
 def _source_options() -> list[dict]:
-    """Hochgeladene Portfolios als Dropdown-Optionen (Werte: int-IDs)."""
-    return [
-        {
-            "label": (
-                f"Bestand: {p['name']} · "
-                f"{fmt_de(int(p.get('n_positions') or 0), 0)} Pos."
-            ),
-            "value": int(p["id"]),
-        }
-        for p in STATE.ms_portfolios
-    ]
+    """Hochgeladene Portfolios als Dropdown-Optionen (Werte: int-IDs); mit
+    dem zugeordneten Konstruktionsprofil, sofern eines gesetzt ist."""
+    profiles = _profile_names_by_portfolio()
+    options = []
+    for p in STATE.ms_portfolios:
+        label = (
+            f"Bestand: {p['name']} · "
+            f"{fmt_de(int(p.get('n_positions') or 0), 0)} Pos."
+        )
+        profile_name = profiles.get(int(p["id"]))
+        if profile_name:
+            label += f" · Profil: {profile_name}"
+        options.append({"label": label, "value": int(p["id"])})
+    return options
+
+
+def _te_band_text(meta: dict) -> str:
+    """TE-Zielband des Laufs: aus den Meta-Daten (Live-Lauf), sonst aus dem
+    im Lauf verwendeten Profil bzw. den globalen Einstellungen."""
+    low, high = meta.get("te_target_low"), meta.get("te_target_high")
+    if low is None or high is None:
+        settings = STATE.settings
+        profile_id = meta.get("pc_profile_id")
+        if profile_id is not None:
+            try:
+                profile = persistence.get_pc_profile(int(profile_id))
+            except Exception:  # noqa: BLE001
+                profile = None
+            if profile is not None:
+                settings = apply_profile(settings, profile.get("data"))
+        low, high = settings.pc_te_target_low, settings.pc_te_target_high
+    return f"{fmt_de(float(low) * 100, 1)}–{fmt_de(float(high) * 100, 1)} %"
 
 
 def _controls() -> html.Div:
@@ -322,6 +364,10 @@ def _hero_mp(
     if source_name:
         meta_row.append(html.Span("·", className="ms-sep"))
         meta_row.append(html.Span(["Bestand ", html.Strong(str(source_name))]))
+    profile_name = meta.get("pc_profile_name")
+    if profile_name:
+        meta_row.append(html.Span("·", className="ms-sep"))
+        meta_row.append(html.Span(["Profil ", html.Strong(str(profile_name))]))
     if counts[SEV_ERROR] or counts[SEV_WARNING]:
         meta_row.append(html.Span("·", className="ms-sep"))
         meta_row.append(
@@ -369,7 +415,7 @@ def _hero_mp(
                                 "TE ex-ante ",
                                 html.Strong(_fmt_pct(meta.get("te_ex_ante"), 2)),
                             ]),
-                            html.Span(["Zielband ", html.Strong("4,5–5,5 %")]),
+                            html.Span(["Zielband ", html.Strong(_te_band_text(meta))]),
                         ],
                         className="ms-score-ctx",
                     ),
@@ -549,7 +595,8 @@ def _exposures_block(portfolio: pd.DataFrame, universe: pd.DataFrame,
 
 
 def _render_result(result: dict, snap: date, universe: pd.DataFrame,
-                   current: dict[str, float]) -> html.Div:
+                   current: dict[str, float], settings=None) -> html.Div:
+    settings = settings if settings is not None else STATE.settings
     diags = result["diagnostics"]
     sections = [
         _hero_mp(result["meta"], snap, result["portfolio"], diags),
@@ -589,7 +636,7 @@ def _render_result(result: dict, snap: date, universe: pd.DataFrame,
                 panel(
                     "Exposures",
                     _exposures_block(result["portfolio"], universe,
-                                     STATE.settings, snap),
+                                     settings, snap),
                 ),
             ]
         )
@@ -698,7 +745,9 @@ def _run(n_dry, n_save, history, source, mode_choice):
             "",
         )
     snap = snapshot_date_from_universe(STATE.raw, None)
-    settings = STATE.settings
+    # Konstruktionskriterien: das dem Bestandsportfolio zugeordnete Profil
+    # (Einstellungen → „Konstruktionsprofile je Portfolio“), sonst global.
+    settings, pc_profile = resolve_construction_settings(STATE.settings, source_id)
     overrides = persistence.load_overrides()
     last_meta = persistence.load_model_portfolio_meta()
     resolved_source = STATE.resolve_portfolio(portfolio_id=source_id)
@@ -739,6 +788,18 @@ def _run(n_dry, n_save, history, source, mode_choice):
     n_ok = int((resolved_source["status"] == "ok").sum()) if n_src else 0
     result["meta"]["source_portfolio_id"] = source_id
     result["meta"]["source_portfolio_name"] = source_name
+    result["meta"]["pc_profile_id"] = pc_profile["id"] if pc_profile else None
+    result["meta"]["pc_profile_name"] = pc_profile["name"] if pc_profile else None
+    result["meta"]["te_target_low"] = settings.pc_te_target_low
+    result["meta"]["te_target_high"] = settings.pc_te_target_high
+    result["diagnostics"].append(
+        Diagnostic(
+            SEV_INFO,
+            "pc_profile",
+            "Konstruktionsprofil: "
+            + (pc_profile["name"] if pc_profile else DEFAULT_PROFILE_LABEL),
+        )
+    )
     result["diagnostics"].append(
         Diagnostic(
             SEV_INFO if n_src else SEV_WARNING,
@@ -786,7 +847,7 @@ def _run(n_dry, n_save, history, source, mode_choice):
         )
     if status_notes:
         status = html.Div(status_notes + ([status] if status != "" else []))
-    return _render_result(result, snap, df, current), status
+    return _render_result(result, snap, df, current, settings), status
 
 
 @callback(
