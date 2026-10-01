@@ -56,6 +56,10 @@ _FACTOR_TIMING_TABLE = "factor_timing_inputs"
 _AGENT_ANALYSES_TABLE = "agent_analyses"
 _TICKER_MAPPINGS_TABLE = "ticker_mappings"
 _FACTOR_TIMING_HISTORY_TABLE = "factor_timing_history"
+# Konstruktionsprofile: benannte Versionen der pc_*-Kriterien und ihre
+# Zuordnung zu hochgeladenen Portfolios (Risikoprofile je Portfolio).
+_PC_PROFILES_TABLE = "pc_profiles"
+_PC_PROFILE_ASSIGNMENTS_TABLE = "pc_profile_assignments"
 
 # Vollständige Liste der Eingabefelder der Factor-Timing-Seite (Makro-,
 # Sentiment- und Faktor-Momentum-Werte). Wird beim Persistieren als JSON-Text
@@ -2262,6 +2266,9 @@ def _ensure_model_portfolio_meta_table(conn) -> None:
     # Neutralisierungsschema des Laufs (SHA-256 über das Schema-Dict, Spec
     # Sequenzielle Neutralisierung 5.4).
     _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "neut_scheme_hash", "TEXT")
+    # Konstruktionsprofil des Laufs (NULL = globale Einstellungen).
+    _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "pc_profile_id", "INTEGER")
+    _ensure_column(conn, _MODEL_PORTFOLIO_META_TABLE, "pc_profile_name", "TEXT")
 
 
 def save_model_portfolio(
@@ -2312,12 +2319,14 @@ def save_model_portfolio(
                 "(snapshot_date, rebalance_mode, n_titles, te_ex_ante, "
                 "te_coverage, turnover_oneway, n_trades, n_deferred, "
                 "settings_hash, diagnostics, source_portfolio_id, "
-                "source_portfolio_name, neut_scheme_hash, updated_at) "
+                "source_portfolio_name, neut_scheme_hash, pc_profile_id, "
+                "pc_profile_name, updated_at) "
                 "VALUES (:snapshot_date, :rebalance_mode, :n_titles, "
                 ":te_ex_ante, :te_coverage, :turnover_oneway, :n_trades, "
                 ":n_deferred, :settings_hash, :diagnostics, "
                 ":source_portfolio_id, :source_portfolio_name, "
-                ":neut_scheme_hash, CURRENT_TIMESTAMP) "
+                ":neut_scheme_hash, :pc_profile_id, :pc_profile_name, "
+                "CURRENT_TIMESTAMP) "
                 "ON CONFLICT (snapshot_date) DO UPDATE SET "
                 "rebalance_mode = EXCLUDED.rebalance_mode, "
                 "n_titles = EXCLUDED.n_titles, "
@@ -2331,6 +2340,8 @@ def save_model_portfolio(
                 "source_portfolio_id = EXCLUDED.source_portfolio_id, "
                 "source_portfolio_name = EXCLUDED.source_portfolio_name, "
                 "neut_scheme_hash = EXCLUDED.neut_scheme_hash, "
+                "pc_profile_id = EXCLUDED.pc_profile_id, "
+                "pc_profile_name = EXCLUDED.pc_profile_name, "
                 "updated_at = CURRENT_TIMESTAMP"
             ),
             {
@@ -2351,6 +2362,12 @@ def save_model_portfolio(
                 ),
                 "source_portfolio_name": meta.get("source_portfolio_name"),
                 "neut_scheme_hash": meta.get("neut_scheme_hash"),
+                "pc_profile_id": (
+                    int(meta["pc_profile_id"])
+                    if meta.get("pc_profile_id") is not None
+                    else None
+                ),
+                "pc_profile_name": meta.get("pc_profile_name"),
             },
         )
 
@@ -2445,3 +2462,242 @@ def load_model_portfolio_meta(snapshot_date: date | None = None) -> dict | None:
     meta = dict(row)
     meta["snapshot_date"] = _coerce_snapshot_date(meta.get("snapshot_date"))
     return meta
+
+
+# ── Konstruktionsprofile (Versionen der pc_*-Kriterien je Portfolio) ─────
+
+
+def _ensure_pc_profile_tables(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_PC_PROFILES_TABLE} ("
+            "id INTEGER PRIMARY KEY, "
+            "name TEXT NOT NULL UNIQUE, "
+            "data TEXT NOT NULL, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_PC_PROFILE_ASSIGNMENTS_TABLE} ("
+            "portfolio_id INTEGER PRIMARY KEY, "
+            "profile_id INTEGER NOT NULL, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
+
+
+def _decode_pc_profile_row(row) -> dict:
+    data = row["data"]
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            data = {}
+    return {
+        "id": int(row["id"]),
+        "name": str(row["name"]),
+        "data": data if isinstance(data, dict) else {},
+        "created_at": _coerce_timestamp(row["created_at"]),
+        "updated_at": _coerce_timestamp(row["updated_at"]),
+    }
+
+
+def list_pc_profiles() -> list[dict]:
+    """Alle Konstruktionsprofile (``id, name, data, created_at, updated_at``),
+    alphabetisch nach Name. Fail-open: ``[]``."""
+
+    engine = get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            _ensure_pc_profile_tables(conn)
+            rows = conn.execute(
+                text(
+                    f"SELECT id, name, data, created_at, updated_at "
+                    f"FROM {_PC_PROFILES_TABLE} ORDER BY LOWER(name), id"
+                )
+            ).mappings().fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Auflisten der Konstruktionsprofile fehlgeschlagen: %s", exc)
+        return []
+    return [_decode_pc_profile_row(r) for r in rows]
+
+
+def get_pc_profile(profile_id: int | None) -> dict | None:
+    """Ein Konstruktionsprofil per ID. Fail-open: ``None``."""
+
+    if profile_id is None:
+        return None
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_pc_profile_tables(conn)
+            row = conn.execute(
+                text(
+                    f"SELECT id, name, data, created_at, updated_at "
+                    f"FROM {_PC_PROFILES_TABLE} WHERE id = :pid"
+                ),
+                {"pid": int(profile_id)},
+            ).mappings().fetchone()
+    except SQLAlchemyError as exc:
+        log.warning("Laden des Konstruktionsprofils %s fehlgeschlagen: %s", profile_id, exc)
+        return None
+    return _decode_pc_profile_row(row) if row is not None else None
+
+
+def save_pc_profile(name: str, data: dict, profile_id: int | None = None) -> int:
+    """Legt ein Konstruktionsprofil an oder aktualisiert es (UPSERT).
+
+    Ohne ``profile_id`` wird per Name (case-insensitiv) gesucht: existiert
+    das Profil, werden Werte (und Schreibweise des Namens) ersetzt, sonst
+    wird es neu angelegt. Mit ``profile_id`` wird dieses Profil umbenannt
+    bzw. überschrieben; kollidiert der neue Name mit einem anderen Profil,
+    wird ein ``ValueError`` geworfen. Liefert die Profil-ID. Raised bei
+    DB-Problemen.
+    """
+
+    clean = str(name or "").strip()
+    if not clean:
+        raise ValueError("Profilname darf nicht leer sein.")
+    payload = json.dumps(dict(data), ensure_ascii=False, default=str)
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    with engine.begin() as conn:
+        _ensure_pc_profile_tables(conn)
+        by_name = conn.execute(
+            text(
+                f"SELECT id FROM {_PC_PROFILES_TABLE} "
+                "WHERE LOWER(name) = LOWER(:name)"
+            ),
+            {"name": clean},
+        ).fetchone()
+        existing_id = int(by_name[0]) if by_name else None
+        if profile_id is None:
+            target = existing_id
+        else:
+            target = int(profile_id)
+            if existing_id is not None and existing_id != target:
+                raise ValueError(f"Ein Profil namens „{clean}“ existiert bereits.")
+        if target is not None:
+            updated = conn.execute(
+                text(
+                    f"UPDATE {_PC_PROFILES_TABLE} SET name = :name, data = :data, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = :pid"
+                ),
+                {"name": clean, "data": payload, "pid": target},
+            ).rowcount
+            if updated:
+                return target
+        new_id = int(
+            conn.execute(
+                text(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {_PC_PROFILES_TABLE}")
+            ).scalar_one()
+        )
+        conn.execute(
+            text(
+                f"INSERT INTO {_PC_PROFILES_TABLE} "
+                "(id, name, data, created_at, updated_at) "
+                "VALUES (:pid, :name, :data, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ),
+            {"pid": new_id, "name": clean, "data": payload},
+        )
+        return new_id
+
+
+def delete_pc_profile(profile_id: int) -> None:
+    """Löscht ein Konstruktionsprofil samt Zuordnungen; betroffene
+    Portfolios fallen auf die globalen Einstellungen zurück. Raised bei
+    DB-Problemen."""
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    with engine.begin() as conn:
+        _ensure_pc_profile_tables(conn)
+        conn.execute(
+            text(
+                f"DELETE FROM {_PC_PROFILE_ASSIGNMENTS_TABLE} "
+                "WHERE profile_id = :pid"
+            ),
+            {"pid": int(profile_id)},
+        )
+        conn.execute(
+            text(f"DELETE FROM {_PC_PROFILES_TABLE} WHERE id = :pid"),
+            {"pid": int(profile_id)},
+        )
+
+
+def set_pc_profile_assignment(portfolio_id: int, profile_id: int | None) -> None:
+    """Ordnet einem hochgeladenen Portfolio ein Konstruktionsprofil zu;
+    ``None`` entfernt die Zuordnung (→ globale Einstellungen). Ein
+    unbekanntes Profil ist ein ``ValueError``. Raised bei DB-Problemen."""
+
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("Datenbank-Engine nicht verfügbar")
+    with engine.begin() as conn:
+        _ensure_pc_profile_tables(conn)
+        if profile_id is None:
+            conn.execute(
+                text(
+                    f"DELETE FROM {_PC_PROFILE_ASSIGNMENTS_TABLE} "
+                    "WHERE portfolio_id = :pf"
+                ),
+                {"pf": int(portfolio_id)},
+            )
+            return
+        exists = conn.execute(
+            text(f"SELECT 1 FROM {_PC_PROFILES_TABLE} WHERE id = :pid"),
+            {"pid": int(profile_id)},
+        ).fetchone()
+        if exists is None:
+            raise ValueError(f"Konstruktionsprofil {profile_id} existiert nicht.")
+        conn.execute(
+            text(
+                f"INSERT INTO {_PC_PROFILE_ASSIGNMENTS_TABLE} "
+                "(portfolio_id, profile_id, updated_at) "
+                "VALUES (:pf, :pid, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (portfolio_id) DO UPDATE SET "
+                "profile_id = EXCLUDED.profile_id, "
+                "updated_at = EXCLUDED.updated_at"
+            ),
+            {"pf": int(portfolio_id), "pid": int(profile_id)},
+        )
+
+
+def list_pc_profile_assignments() -> dict[int, int]:
+    """Zuordnung ``portfolio_id → profile_id`` (nur Profile, die noch
+    existieren). Fail-open: ``{}``."""
+
+    engine = get_engine()
+    if engine is None:
+        return {}
+    try:
+        with engine.begin() as conn:
+            _ensure_pc_profile_tables(conn)
+            rows = conn.execute(
+                text(
+                    f"SELECT a.portfolio_id, a.profile_id "
+                    f"FROM {_PC_PROFILE_ASSIGNMENTS_TABLE} a "
+                    f"JOIN {_PC_PROFILES_TABLE} p ON p.id = a.profile_id"
+                )
+            ).fetchall()
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Profil-Zuordnungen fehlgeschlagen: %s", exc)
+        return {}
+    return {int(r[0]): int(r[1]) for r in rows}
+
+
+def get_pc_profile_assignment(portfolio_id: int | None) -> int | None:
+    """Profil-ID des Portfolios (nur existierende Profile). Fail-open:
+    ``None``."""
+
+    if portfolio_id is None:
+        return None
+    return list_pc_profile_assignments().get(int(portfolio_id))

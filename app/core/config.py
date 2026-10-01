@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from typing import Literal
 
 PercentileMode = Literal["Global", "Sektor", "Industrie"]
@@ -580,3 +581,14 @@ class Settings:
                 "Summe der v2-Faktorgewichte muss 1,0 ± 0,001 ergeben "
                 f"(aktuell {total:.4f})."
             )
+
+
+# ── Konstruktionsprofile ────────────────────────────────────────────────
+# Felder der Portfoliokonstruktion, die je Profil (benannte Version der
+# Kriterien, z. B. „Konservativ“ / „Dynamisch“) abweichend von den globalen
+# Einstellungen gespeichert und einem hochgeladenen Portfolio zugeordnet
+# werden können. Universumsfilter (``filter_*``) und Benchmark-Stammdaten
+# bleiben global, weil sie beim Scoring bzw. für alle Portfolios gelten.
+PC_PROFILE_FIELDS: tuple[str, ...] = tuple(
+    f.name for f in dataclass_fields(Settings) if f.name.startswith("pc_")
+)

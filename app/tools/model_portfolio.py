@@ -17,7 +17,9 @@ Usage:
 ``reports/modellportfolio_YYYY-MM-DD.md`` aus (Kopfdaten, Diagnosen,
 Trade-Liste, Exposures). Als Bestand dient das mit ``--portfolio``
 gewählte hochgeladene Portfolio, sonst die auf der Modellportfolio-Seite
-gespeicherte Auswahl bzw. das aktive Portfolio. ``compare`` vergleicht die
+gespeicherte Auswahl bzw. das aktive Portfolio; die Konstruktionskriterien
+kommen aus dem diesem Portfolio zugeordneten Konstruktionsprofil
+(Einstellungen), sonst aus den globalen Settings. ``compare`` vergleicht die
 Rangfolgen v1 (``total_score``) und v2 (``composite_z``); mit
 ``--scheme-a/--scheme-b`` werden stattdessen zwei Neutralisierungsschemata
 auf demselben Snapshot gerechnet und als Markdown-Report
@@ -45,11 +47,13 @@ from app.core import persistence
 from app.core.config import NEUT_SCHEMES, Settings
 from app.core.diagnostics import (
     SEV_ERROR,
+    SEV_INFO,
     SEV_WARNING,
     Diagnostic,
     count_by_severity,
     sort_diagnostics,
 )
+from app.core.pc_profiles import DEFAULT_PROFILE_LABEL, resolve_construction_settings
 from app.core.portfolio_construction import (
     ACTION_HOLD,
     build_model_portfolio,
@@ -180,6 +184,8 @@ def _write_build_report(
         f"# Modellportfolio — Snapshot {snap.isoformat()}",
         "",
         "- Bestandsportfolio: " + str(meta.get("source_portfolio_name") or "–"),
+        "- Konstruktionsprofil: "
+        + str(meta.get("pc_profile_name") or DEFAULT_PROFILE_LABEL),
         f"- Rebalance-Modus: **{meta['rebalance_mode']}**",
         f"- Titel: {meta['n_titles']}",
         f"- Ex-ante-TE: {_fmt(meta['te_ex_ante'], 2, percent=True)}"
@@ -264,7 +270,6 @@ def _cmd_build(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    settings = STATE.settings
     # Bestandsportfolio: --portfolio (ID oder Name), sonst die auf der
     # Modellportfolio-Seite gespeicherte Auswahl bzw. das aktive Portfolio.
     if getattr(args, "portfolio", None):
@@ -284,6 +289,9 @@ def _cmd_build(args: argparse.Namespace) -> int:
         source_id = int(found["id"])
     else:
         source_id = STATE.model_source_portfolio_id()
+    # Konstruktionskriterien: zugeordnetes Profil des Bestands, sonst global
+    # (gleiche Auflösung wie die Modellportfolio-Seite).
+    settings, pc_profile = resolve_construction_settings(STATE.settings, source_id)
     current = STATE.portfolio_weights(portfolio_id=source_id)
     source_name = STATE.portfolio_name(source_id) or (
         "Standard-Portfolio (nicht gespeichert)" if source_id is None else f"#{source_id}"
@@ -305,6 +313,16 @@ def _cmd_build(args: argparse.Namespace) -> int:
     )
     result["meta"]["source_portfolio_id"] = source_id
     result["meta"]["source_portfolio_name"] = source_name
+    result["meta"]["pc_profile_id"] = pc_profile["id"] if pc_profile else None
+    result["meta"]["pc_profile_name"] = pc_profile["name"] if pc_profile else None
+    result["diagnostics"].append(
+        Diagnostic(
+            SEV_INFO,
+            "pc_profile",
+            "Konstruktionsprofil: "
+            + (pc_profile["name"] if pc_profile else DEFAULT_PROFILE_LABEL),
+        )
+    )
 
     if not args.dry_run and result["mode"] != "monitor":
         persistence.save_model_portfolio(result["portfolio"], result["meta"], snap)
@@ -317,6 +335,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     print(f"Report geschrieben: {path}")
     meta = result["meta"]
     print(
+        f"Profil: {meta.get('pc_profile_name') or DEFAULT_PROFILE_LABEL} · "
         f"Modus: {result['mode']} · Titel: {meta['n_titles']} · "
         f"TE: {_fmt(meta['te_ex_ante'], 2, percent=True)} · "
         f"Turnover: {_fmt(meta['turnover_oneway'], 1, percent=True)}"

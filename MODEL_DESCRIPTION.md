@@ -860,6 +860,25 @@ Alle verletzten Bedingungen werden in `filter_reasons` protokolliert
 | 7 | Extremverschuldung | Nicht-Fin: `debt_equity > 3,0` UND `int_coverage < 2,0` (`filter_max_de`/`filter_min_icr`) | fehlende Werte → greift nicht |
 | 8 | Override | aktiver Override `direction = "exclude"` | — |
 
+### 12.1a Konstruktionsprofile (Versionen der `pc_*`-Parameter)
+
+Alle `pc_*`-Parameter der Abschnitte 12.2–12.5 (Selektion, Benchmark-Quelle,
+Gewichtung/TE, Rebalancing/Turnover) können als benannte **Profile** in
+mehreren Versionen gespeichert werden (Tabelle `pc_profiles`, JSON je
+Profil) und einem hochgeladenen Portfolio zugeordnet werden (Tabelle
+`pc_profile_assignments`, `portfolio_id → profile_id`). Beim Bau des
+Modellportfolios (Seite und CLI) wird das Profil des gewählten
+Bestandsportfolios auf die globalen Settings angewendet
+(`app.core.pc_profiles.resolve_construction_settings`): Felder im Profil
+überschreiben, fehlende Felder behalten den globalen Wert, unbekannte
+Felder werden ignoriert. Ohne Zuordnung gelten die globalen Settings
+unverändert. Universumsfilter (`filter_*`, 12.1), Scoring und
+Benchmark-Stammdaten (Sektor-/Regionsgewichte) sind bewusst **nicht**
+profilierbar, da sie beim Import für das gesamte Universum gelten. Das
+verwendete Profil wird im Lauf protokolliert (Diagnose `pc_profile`,
+Meta-Spalten `pc_profile_id`/`pc_profile_name`) und geht über die
+wirksamen Settings in den `settings_hash` ein.
+
 ### 12.2 Selektion (`select_portfolio`, Spec 5.4)
 
 Parameter: `pc_target_n = 35`, `pc_min_n = 25`, `pc_max_n = 40`,
