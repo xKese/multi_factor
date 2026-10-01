@@ -408,13 +408,19 @@ def load_universe() -> pd.DataFrame | None:
 
 
 def _coerce_snapshot_date(value) -> date | None:
-    """SQLite liefert DATE-Spalten als ISO-String, Postgres als ``date``."""
+    """SQLite liefert DATE-Spalten als ISO-String, Postgres als ``date``.
+    ``None``/NaT (z. B. ``MAX()`` einer leeren Tabelle) → ``None``."""
+    if value is None:
+        return None
     if isinstance(value, date):
         return value
     try:
-        return pd.to_datetime(value).date()
+        parsed = pd.to_datetime(value)
     except (ValueError, TypeError):
         return None
+    if parsed is None or pd.isna(parsed):
+        return None
+    return parsed.date()
 
 
 def load_universe_snapshot(snapshot_date: date) -> pd.DataFrame | None:

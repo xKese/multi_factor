@@ -29,7 +29,8 @@ MAIN_NAV_ORDER = {
     "Modellportfolio": 6,
     "Factor Timing": 7,
     "Risiko & Benchmark": 8,
-    "Daten-Import": 9,
+    "Bericht": 9,
+    "Daten-Import": 10,
 }
 
 # Dauerhaft aus der Tab-Reihe ausgelagert: selten benutzte Seiten, die über

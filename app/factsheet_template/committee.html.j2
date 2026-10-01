@@ -1,0 +1,367 @@
+{# Investment-Komitee-Bericht (A4, Mehrseiter). Kontext: committee_report_pdf.build_pdf_context #}
+{% import "agent_base.html.j2" as base %}<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ pdf_title }}</title>
+  <meta name="author" content="{{ author }}">
+  <link rel="stylesheet" href="committee.css">
+</head>
+<body>
+{{ base.running(kolhead_left, disclaimer) }}
+
+{% macro table(t, cls="") -%}
+{% if t.rows %}
+<table class="cr-table {{ cls }}">
+  <thead><tr>{% for h in t.headers %}<th class="al-{{ h.align }}">{{ h.text }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for row in t.rows %}
+  <tr>{% for c in row %}<td class="al-{{ c.align }} {{ c.cls }}">{{ c.text }}</td>{% endfor %}</tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if t.note %}<div class="cr-note">{{ t.note }}</div>{% endif %}
+{% else %}
+<div class="cr-empty">{{ t.empty }}</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro kv(rows) -%}
+<table class="cr-kv">
+  {% for label, value in rows %}<tr><th>{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}
+</table>
+{%- endmacro %}
+
+{% macro kpi_band(cells) -%}
+<div class="cr-kpis">
+  {% for c in cells %}
+  <div class="cr-kpi">
+    <div class="cr-kpi-label">{{ c.label }}</div>
+    <div class="cr-kpi-value {{ c.tone }}">{{ c.value }}</div>
+    {% if c.sub %}<div class="cr-kpi-sub">{{ c.sub }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro section_head(num, title, sub) -%}
+<div class="sec-headrow">
+  <span class="sec-num">{{ num }}</span>
+  <h1 class="sec-title">{{ title }}</h1>
+</div>
+{% if sub %}<div class="meta">{{ sub }}</div>{% endif %}
+<div class="goldrule goldrule--sm"></div>
+{%- endmacro %}
+
+{% macro unavailable(note) -%}
+<div class="cr-empty cr-empty--block">{{ note or "Abschnitt nicht verfügbar." }}</div>
+{%- endmacro %}
+
+{# ── Deckblatt ─────────────────────────────────────────────────────────── #}
+<section class="cover">
+  <div>
+    <div class="cover-wordmark">Meeder &amp; Seifer</div>
+    <div class="cover-sub">Family Office · Frankfurt am Main</div>
+  </div>
+  <div class="cover-mid">
+    <div class="cover-eyebrow">Multi-Faktor-Modell · interne Besprechung</div>
+    <div class="cover-name cover-name--sm">{{ title }}</div>
+    <div class="cover-ticker">{{ portfolio_name }}</div>
+    <div class="cover-rule"></div>
+    <div class="cover-grid">
+      <div><div class="cover-label">Datenstand</div><div class="cover-value cover-value--sans">{{ asof_long }}</div></div>
+      <div><div class="cover-label">Universum</div><div class="cover-value cover-value--sans">{{ n_universe }} Titel · {{ scoring_version }}</div></div>
+      <div><div class="cover-label">Vergleichsbasis</div><div class="cover-value cover-value--sans">{{ comparison_line }}</div></div>
+      <div><div class="cover-label">Erstellt</div><div class="cover-value cover-value--sans">{{ generated_at }}{% if prepared_by %} · {{ prepared_by }}{% endif %}</div></div>
+    </div>
+  </div>
+  <div class="cover-note">{{ confidentiality }}</div>
+</section>
+
+{# ── Key Findings ──────────────────────────────────────────────────────── #}
+<section class="cr-page">
+  {{ section_head("1", "Key Findings", "Regelbasierte Kernaussagen aus Universum, Portfolio und Modellportfolio · Stand " ~ asof) }}
+  {{ kpi_band(kpis) }}
+  <ul class="cr-findings">
+    {% for f in key_findings %}
+    <li class="{{ f.cls }}"><span class="cr-finding-icon">{{ f.icon }}</span><span>{{ f.text }}</span></li>
+    {% endfor %}
+  </ul>
+  {% if immediate %}
+  <div class="cr-box is-alert">
+    <div class="cr-box-title">Sofortmaßnahmen — Bestandspositionen in FILTER / VERKAUFEN</div>
+    {{ table(immediate) }}
+  </div>
+  {% endif %}
+</section>
+
+{# ── Universum ─────────────────────────────────────────────────────────── #}
+<section class="cr-page">
+  {{ section_head("2", "Investment-Universum", "Zonen- und Klassenverteilung, Kandidaten je Sektor, Top-Kandidaten") }}
+  {% if universe.available %}
+  {{ kpi_band([
+    {"label": "Titel", "value": universe.n, "sub": universe.n_eligible ~ " eligible (" ~ universe.share_eligible ~ ")"},
+    {"label": "Ø " ~ score_label, "value": universe.avg_score, "sub": "Median " ~ universe.median_score},
+    {"label": "Kandidaten", "value": universe.n_candidates_total, "sub": "", "tone": "is-up"},
+    {"label": "Breadth > SMA-200", "value": universe.breadth, "sub": universe.n_golden ~ " Golden · " ~ universe.n_death ~ " Death Cross"},
+    {"label": "Ø Datenabdeckung", "value": universe.avg_coverage, "sub": ""},
+  ]) }}
+  <div class="cr-two">
+    <div>
+      <div class="ov-heading">{{ zone_label }}en-Verteilung</div>
+      <div class="cr-bars">
+        {% for z in universe.zones %}
+        <div class="cr-bar-row"><span class="cr-bar-label {{ z.cls }}">{{ z.zone }}</span><span class="cr-bar"><span class="cr-bar-fill {{ z.cls }}" style="width: {{ z.width }}%"></span></span><span class="cr-bar-val">{{ z.n }} · {{ z.share }}</span></div>
+        {% endfor %}
+      </div>
+    </div>
+    <div>
+      <div class="ov-heading">Klassen</div>
+      <div class="cr-bars">
+        {% for k in universe.classes %}
+        <div class="cr-bar-row"><span class="cr-bar-label">{{ k.klass }}</span><span class="cr-bar"><span class="cr-bar-fill is-gold" style="width: {{ k.width }}%"></span></span><span class="cr-bar-val">{{ k.n }}</span></div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="ov-heading">Kandidaten je Sektor</div>
+  {{ table(universe.sector_candidates, "cr-table--compact") }}
+  <div class="ov-heading">Top-Kandidaten (nach Composite-Z)</div>
+  {{ table(universe.top_candidates, "cr-table--compact") }}
+  <div class="ov-heading">Zone {{ "VERKAUFEN" }} — schwächste Titel</div>
+  {{ table(universe.sell_zone, "cr-table--compact") }}
+  {% else %}{{ unavailable(universe.note) }}{% endif %}
+</section>
+
+{# ── Veränderungen ─────────────────────────────────────────────────────── #}
+<section class="cr-page">
+  {{ section_head("3", "Veränderungen", "Vergleich mit dem Vorimport und dem Snapshot ~1 Monat zuvor (PIT-Archiv)") }}
+  {% if changes.note %}<div class="cr-empty cr-empty--block">{{ changes.note }}</div>{% endif %}
+  {% for blk in [changes.vs_prev, changes.vs_month] %}
+  {% if blk.available %}
+  <div class="cr-sub">
+    <div class="cr-sub-title">Seit {{ blk.label }} ({{ blk.date }})</div>
+    <div class="meta">{{ blk.n_both }} Titel in beiden Snapshots · {{ blk.n_new }} neu{% if blk.new_tickers %} ({{ blk.new_tickers }}){% endif %} · {{ blk.n_gone }} nicht mehr enthalten{% if blk.gone_tickers %} ({{ blk.gone_tickers }}){% endif %} · Ranking-Stabilität Spearman ρ {{ blk.spearman }} · {{ blk.zone_turnover }} Zonenwechsel ({{ blk.n_zone_changed }}) · Ø |Δ Score| {{ blk.avg_abs_delta }}</div>
+    {% if blk.matrix %}
+    <div class="cr-two">
+      <div>
+        <div class="ov-heading">{{ zone_label }}en-Matrix (Zeile: vorher · Spalte: heute)</div>
+        <table class="cr-table cr-matrix">
+          <thead><tr><th></th>{% for c in blk.matrix.columns %}<th class="al-r">{{ c }}</th>{% endfor %}</tr></thead>
+          <tbody>
+          {% for r in blk.matrix.rows %}
+          <tr><th>{{ r.label }}</th>{% for c in r.cells %}<td class="al-r {{ c.cls }}">{{ c.v }}</td>{% endfor %}</tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="ov-heading">Neue Kandidaten</div>
+        {{ table(blk.new_candidates_compact, "cr-table--compact") }}
+      </div>
+    </div>
+    {% endif %}
+    <div class="ov-heading">Ausgeschiedene Kandidaten</div>
+    {{ table(blk.dropped_candidates, "cr-table--compact") }}
+    <div class="cr-two">
+      <div><div class="ov-heading">Größte Verbesserungen</div>{{ table(blk.movers_up, "cr-table--compact") }}</div>
+      <div><div class="ov-heading">Größte Rückgänge</div>{{ table(blk.movers_down, "cr-table--compact") }}</div>
+    </div>
+    <div class="ov-heading">Neu in Zone VERKAUFEN</div>
+    {{ table(blk.new_sell, "cr-table--compact") }}
+    <div class="ov-heading">Neu ausgefiltert (mit Gründen)</div>
+    {{ table(blk.new_filter_fail, "cr-table--compact") }}
+  </div>
+  {% else %}
+  <div class="cr-sub"><div class="cr-sub-title">Seit {{ blk.label }}</div><div class="cr-empty">{{ blk.note }}</div></div>
+  {% endif %}
+  {% endfor %}
+  <div class="cr-sub">
+    <div class="cr-sub-title">Watchlist — Kandidaten in spe</div>
+    <div class="meta">HALTEN-Titel knapp unter der Einstiegsschwelle (Perzentil)</div>
+    {{ table(changes.watchlist_entry, "cr-table--compact") }}
+    <div class="cr-sub-title">Signalwechsel bei Kandidaten</div>
+    <div class="meta">Neue Golden-/Death-Cross-Signale seit dem Vorimport</div>
+    {{ table(changes.candidate_signal_changes, "cr-table--compact") }}
+  </div>
+</section>
+
+{# ── Sektoren ──────────────────────────────────────────────────────────── #}
+<section class="cr-page">
+  {{ section_head("4", "Sektoren", "Score, Veränderungen, Momentum, Breadth und Rotations-Quadrant") }}
+  {% if sectors.available %}
+  {{ table(sectors.table, "cr-table--compact") }}
+  <div class="cr-quadrants">
+    {% for q in sectors.quadrants %}
+    <div class="cr-quadrant {{ q.cls }}">
+      <div class="cr-quadrant-title">{{ q.name }} <span>{{ q.sub }}</span></div>
+      <div class="cr-quadrant-body">{{ q.sectors | join(" · ") if q.sectors else "–" }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="meta">Quadrant: Momentum 12M−1M (x) × Distanz zu SMA-200 (y). Returns und Distanzen als Sektor-Mittel in Prozent.{% if sectors.changed %} Quadrantenwechsel seit ~1M: {{ sectors.changed | join(", ") }}.{% endif %}{% if sectors.low_confidence %} Geringe Konfidenz (wenige Titel/Historie): {{ sectors.low_confidence }}.{% endif %}</div>
+  {% else %}{{ unavailable(sectors.note) }}{% endif %}
+</section>
+
+{# ── Portfolio ─────────────────────────────────────────────────────────── #}
+<section class="cr-page">
+  {{ section_head("5", "Portfolio „" ~ portfolio_name ~ "“", "Scores der Einzeltitel, Handlungsbedarf, Exposures und Konzentration") }}
+  {% if portfolio.available %}
+  {{ kpi_band(portfolio.kpis) }}
+  {% if portfolio.missing or portfolio.ambiguous %}
+  <div class="meta">{% if portfolio.missing %}Nicht im Universum: {{ portfolio.missing }}. {% endif %}{% if portfolio.ambiguous %}Mehrdeutig (Ticker-Kollision): {{ portfolio.ambiguous }}.{% endif %}</div>
+  {% endif %}
+  <div class="cr-two">
+    <div>
+      <div class="ov-heading">{{ zone_label }}en (Gewicht)</div>
+      <div class="cr-bars">
+        {% for z in portfolio.zones %}
+        <div class="cr-bar-row"><span class="cr-bar-label {{ z.cls }}">{{ z.zone }}</span><span class="cr-bar"><span class="cr-bar-fill {{ z.cls }}" style="width: {{ z.width }}%"></span></span><span class="cr-bar-val">{{ z.n }} · {{ z.weight }}</span></div>
+        {% endfor %}
+      </div>
+    </div>
+    <div>
+      <div class="ov-heading">Konzentration</div>
+      {{ kv(portfolio.concentration) }}
+    </div>
+  </div>
+  <div class="ov-heading">Positionen mit Handlungsbedarf</div>
+  {{ table(portfolio.flags_table, "cr-table--compact") }}
+  <div class="ov-heading">Zonenwechsel seit Vorimport</div>
+  {{ table(portfolio.zone_changes, "cr-table--compact") }}
+  <div class="ov-heading">Signalwechsel (Golden / Death Cross)</div>
+  {{ table(portfolio.signal_changes, "cr-table--compact") }}
+  <div class="ov-heading">Verkaufsgefährdet — knapp über Ausstiegsschwelle</div>
+  {{ table(portfolio.watchlist_exit, "cr-table--compact") }}
+  <div class="ov-heading">Alle Positionen</div>
+  {{ table(portfolio.positions, "cr-table--compact") }}
+  <div class="cr-two">
+    <div><div class="ov-heading">Sektor-Exposure vs. Benchmark</div>{{ table(portfolio.sector_exposure, "cr-table--compact") }}</div>
+    <div><div class="ov-heading">Regions-Exposure vs. Benchmark</div>{{ table(portfolio.region_exposure, "cr-table--compact") }}</div>
+  </div>
+  <div class="ov-heading">Faktor-Exposure (Ø Z-Score)</div>
+  {{ table(portfolio.factor_exposure, "cr-table--compact cr-table--narrow") }}
+  {% else %}{{ unavailable(portfolio.note) }}{% endif %}
+</section>
+
+{# ── Modellportfolio ───────────────────────────────────────────────────── #}
+<section class="cr-page">
+  {{ section_head("6", "Modellportfolio", "Zuletzt gespeicherter Lauf der Portfoliokonstruktion, Trade-Liste gegen den Bestand") }}
+  {% if model_portfolio.available %}
+  {{ kv(model_portfolio.meta_rows) }}
+  {% if not model_portfolio.settings_hash_matches %}<div class="cr-box is-alert"><div class="cr-box-title">Die Einstellungen haben sich seit dem Lauf geändert — Modellportfolio vor Entscheidungen erneuern.</div></div>{% endif %}
+  <div class="ov-heading">Trade-Liste</div>
+  {{ table(model_portfolio.trades, "cr-table--compact") }}
+  <div class="ov-heading">Zielportfolio</div>
+  {{ table(model_portfolio.portfolio, "cr-table--compact") }}
+  <div class="cr-two">
+    <div><div class="ov-heading">Sektor-Exposure vs. Benchmark</div>{{ table(model_portfolio.sector_exposure, "cr-table--compact") }}</div>
+    <div><div class="ov-heading">Modell vs. Bestand (Sektoren)</div>{{ table(model_portfolio.vs_active, "cr-table--compact") }}</div>
+  </div>
+  <div class="cr-two">
+    <div><div class="ov-heading">Regions-Exposure</div>{{ table(model_portfolio.region_exposure, "cr-table--compact") }}</div>
+    <div><div class="ov-heading">Faktor-Exposure (Ø Z)</div>{{ table(model_portfolio.factor_exposure, "cr-table--compact") }}</div>
+  </div>
+  <div class="ov-heading">Aktive Overrides{% if model_portfolio.n_overrides_due != "0" %} — {{ model_portfolio.n_overrides_due }} laufen bald aus{% endif %}</div>
+  {{ table(model_portfolio.overrides, "cr-table--compact") }}
+  {% if model_portfolio.run_diagnostics %}
+  <div class="ov-heading">Diagnosen des Laufs (Fehler/Warnungen)</div>
+  <ul class="cr-diag">{% for d in model_portfolio.run_diagnostics %}<li class="{{ d.cls }}"><b>{{ d.severity }}</b> {{ d.code }}{% if d.uid %} · {{ d.uid }}{% endif %} — {{ d.message }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% else %}{{ unavailable(model_portfolio.note) }}{% endif %}
+</section>
+
+{# ── Optional: Factor Timing ───────────────────────────────────────────── #}
+{% if sections.factor_timing %}
+<section class="cr-page">
+  {{ section_head("7", "Factor Timing", "Makro-Regime, taktische Tilts und Eingaben") }}
+  {{ kpi_band([
+    {"label": "Regime", "value": factor_timing.regime, "sub": "seit " ~ factor_timing.regime_since},
+    {"label": "Letzte Entscheidung", "value": factor_timing.regime_date, "sub": ""},
+    {"label": "Modus", "value": factor_timing.mode, "sub": factor_timing.mode_note},
+    {"label": "Value-Spread", "value": factor_timing.value_spread, "sub": "P/E Top-Value-Quintil ÷ Universum"},
+  ]) }}
+  <div class="cr-two">
+    <div><div class="ov-heading">Strategisch vs. taktisch</div>{{ table(factor_timing.weights, "cr-table--compact") }}</div>
+    <div><div class="ov-heading">Eingaben</div>{{ kv(factor_timing.inputs) }}</div>
+  </div>
+  <div class="cr-two">
+    <div><div class="ov-heading">Faktor-Momentum aus Universum (Top − Bottom Quintil, 6M)</div>{{ kv(factor_timing.momentum) }}</div>
+    <div><div class="ov-heading">Regime-Verlauf</div><div class="cr-timeline">{{ factor_timing.timeline | join(" · ") }}</div></div>
+  </div>
+</section>
+{% endif %}
+
+{# ── Optional: Risiko ──────────────────────────────────────────────────── #}
+{% if sections.risk %}
+<section class="cr-page">
+  {{ section_head("8", "Risiko &amp; Benchmark", "Tracking Error, Risikobeiträge, Szenarien und Faktor-Schocks · Benchmark " ~ risk.benchmark ~ " (EUR-Sicht)") }}
+  {{ kpi_band(risk.kpis) }}
+  <div class="ov-heading">Top-Risikotreiber (cTE)</div>
+  {{ table(risk.ranking, "cr-table--compact") }}
+  <div class="cr-two">
+    <div><div class="ov-heading">Sektor-Beiträge</div>{{ table(risk.sector_cte, "cr-table--compact") }}</div>
+    <div><div class="ov-heading">Faktor-Schocks</div>{{ table(risk.shocks, "cr-table--compact") }}</div>
+  </div>
+  <div class="ov-heading">Szenario-Replay</div>
+  {{ table(risk.scenarios, "cr-table--compact") }}
+  {% if risk.unresolved or risk.missing_cache %}<div class="meta">Ohne Kursdaten: {{ risk.unresolved }} {{ risk.missing_cache }}</div>{% endif %}
+</section>
+{% endif %}
+
+{# ── Optional: Agenten ─────────────────────────────────────────────────── #}
+{% if sections.agents %}
+<section class="cr-page">
+  {{ section_head("9", "Agenten-Ratings", "LLM-Tiefenanalysen (TradingAgents) im Abgleich mit der Quant-Zone") }}
+  <div class="meta">{{ agents.counts_line }} · {{ agents.n_stale }} älter als 90 Tage · {{ agents.n_conflicts }} Konflikte{% if agents.note %} · {{ agents.note }}{% endif %}</div>
+  <div class="ov-heading">Portfolio-Positionen</div>
+  {{ table(agents.portfolio, "cr-table--compact") }}
+  <div class="ov-heading">Konflikte Agent ↔ Quant</div>
+  {{ table(agents.conflicts, "cr-table--compact") }}
+  <div class="ov-heading">Jüngste Analysen</div>
+  {{ table(agents.recent, "cr-table--compact") }}
+</section>
+{% endif %}
+
+{# ── Datenqualität ─────────────────────────────────────────────────────── #}
+{% if sections.data_quality %}
+<section class="cr-page">
+  {{ section_head("10", "Datenqualität &amp; Diagnose", "Keine stillen Fallbacks — Hinweise des Scoring-Laufs und dieses Berichts") }}
+  {{ kv(data_quality.rows) }}
+  <div class="ov-heading">Diagnosen des Scoring-Laufs ({{ data_quality.counts }})</div>
+  {% if data_quality.diagnostics %}
+  <ul class="cr-diag">{% for d in data_quality.diagnostics %}<li class="{{ d.cls }}"><b>{{ d.severity }}</b> {{ d.code }}{% if d.uid %} · {{ d.uid }}{% endif %} — {{ d.message }}</li>{% endfor %}</ul>
+  {% if data_quality.n_diagnostics > data_quality.diagnostics | length %}<div class="cr-note">{{ data_quality.diagnostics | length }} von {{ data_quality.n_diagnostics }} gezeigt. Vollständige Liste im Excel-Anhang.</div>{% endif %}
+  {% else %}<div class="cr-empty">Keine Fehler oder Warnungen.</div>{% endif %}
+  <div class="ov-heading">Hinweise dieses Berichts</div>
+  {% if data_quality.report_diagnostics %}
+  <ul class="cr-diag">{% for d in data_quality.report_diagnostics %}<li class="{{ d.cls }}"><b>{{ d.severity }}</b> {{ d.code }}{% if d.uid %} · {{ d.uid }}{% endif %} — {{ d.message }}</li>{% endfor %}</ul>
+  {% else %}<div class="cr-empty">Keine Hinweise.</div>{% endif %}
+</section>
+{% endif %}
+
+{# ── Parameter ─────────────────────────────────────────────────────────── #}
+{% if sections.parameters %}
+<section class="cr-page">
+  {{ section_head("11", "Anhang — Modellparameter", "Einstellungen zum Zeitpunkt des Berichts · Konstruktionsprofil " ~ parameters.pc_profile_name) }}
+  <div class="meta">Settings-Hash <code>{{ parameters.settings_hash }}</code> · Neutralisierungs-Hash <code>{{ parameters.neut_scheme_hash }}</code></div>
+  <div class="cr-params">
+    {% for g in parameters.groups %}
+    <div class="cr-param-group">
+      <div class="ov-heading">{{ g.title }}</div>
+      {{ kv(g.rows) }}
+    </div>
+    {% endfor %}
+  </div>
+  {% if parameters.profile_differences %}
+  <div class="ov-heading">Abweichungen Konstruktionsprofil vs. globale Einstellungen</div>
+  <table class="cr-table cr-table--compact cr-table--narrow">
+    <thead><tr><th>Parameter</th><th class="al-r">Global</th><th class="al-r">Profil</th></tr></thead>
+    <tbody>{% for label, g, p in parameters.profile_differences %}<tr><td>{{ label }}</td><td class="al-r">{{ g }}</td><td class="al-r">{{ p }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+
+</body>
+</html>
