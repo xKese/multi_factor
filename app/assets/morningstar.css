@@ -177,6 +177,32 @@ hr { border-color: var(--ms-border); opacity: 1; }
   margin-bottom: var(--ms-sp-5);
 }
 
+/* ---------- Bericht (Komitee-Bericht) ---------- */
+.ms-form-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ms-text-muted);
+  margin-bottom: 4px;
+}
+.ms-finding-list { list-style: none; margin: 0; padding: 0; }
+.ms-finding-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ms-border);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ms-finding-row:last-child { border-bottom: none; }
+.ms-finding-icon { flex: 0 0 14px; font-size: 11px; color: var(--ms-text-muted); padding-top: 2px; }
+.ms-finding-icon.is-up { color: var(--ms-up); }
+.ms-finding-icon.is-down { color: var(--ms-down); }
+.ms-finding-icon.is-warn { color: var(--ms-warn); }
+.ms-table--basic td.is-up { color: var(--ms-up); font-weight: 500; }
+
 /* ---------- Kopfzeile ---------- */
 
 .ms-header {

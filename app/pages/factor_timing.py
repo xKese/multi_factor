@@ -33,23 +33,11 @@ log = logging.getLogger(__name__)
 
 
 # Fallback, falls Settings keine factor_weights enthalten (kann nicht passieren,
-# da Settings einen Default-Factory hat, aber defensiv).
-_STRATEGIC_FALLBACK: dict[str, float] = {
-    "Value": 0.2375,
-    "Quality": 0.2375,
-    "Growth": 0.2375,
-    "Momentum": 0.2375,
-    "Low Volatility": 0.05,
-}
+# da Settings einen Default-Factory hat, aber defensiv). Quelle: Core-Modul.
+_STRATEGIC_FALLBACK = ft_core.STRATEGIC_FALLBACK
 
-# Mapping Settings-Key → Anzeige-Key im Factor-Timing-System.
-_SETTINGS_TO_STRATEGIC: dict[str, str] = {
-    "value": "Value",
-    "quality": "Quality",
-    "growth": "Growth",
-    "momentum": "Momentum",
-    "lowvol": "Low Volatility",
-}
+# Mapping Settings-Key → Anzeige-Key im Factor-Timing-System (Core-Modul).
+_SETTINGS_TO_STRATEGIC = ft_core.SETTINGS_TO_STRATEGIC
 
 
 # ── Input-Defaults und Persistenz-Mapping ──────────────────────────────────
@@ -118,30 +106,10 @@ _FACTOR_TO_MOM_INPUT: dict[str, str] = {
 
 
 def _strategic_weights() -> dict[str, float]:
-    """Liest die strategische Faktor-Allokation aus den App-Einstellungen.
-
-    Mappt die Settings-Keys (``value``, ``quality``, ``growth``, ``momentum``,
-    ``lowvol``) auf die im Factor-Timing-System verwendeten Anzeige-Namen
-    (``Value``, …, ``Low Volatility``). Normalisiert auf Summe 1, damit ein
-    inkonsistenter Settings-State (Summe ≠ 1) hier nicht zu falschen
-    Prozentwerten in Diagramm und Tabelle führt. Fallback auf
-    ``_STRATEGIC_FALLBACK``, wenn keine Settings vorhanden sind.
-    """
+    """Strategische Faktor-Allokation aus den App-Einstellungen (Mapping,
+    Normalisierung und Fallback in ``ft_core.strategic_weights_from_settings``)."""
     settings = getattr(STATE, "settings", None)
-    fw = getattr(settings, "factor_weights", None) if settings is not None else None
-    if not isinstance(fw, dict) or not fw:
-        return dict(_STRATEGIC_FALLBACK)
-
-    out: dict[str, float] = {}
-    for src_key, display in _SETTINGS_TO_STRATEGIC.items():
-        try:
-            out[display] = float(fw.get(src_key, _STRATEGIC_FALLBACK[display]))
-        except (TypeError, ValueError):
-            out[display] = _STRATEGIC_FALLBACK[display]
-    total = sum(out.values())
-    if total > 0:
-        out = {k: v / total for k, v in out.items()}
-    return out
+    return ft_core.strategic_weights_from_settings(settings)
 
 
 def _resolve_input_values() -> dict[str, float]:

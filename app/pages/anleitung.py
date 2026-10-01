@@ -106,6 +106,16 @@ bleibt als „Scoring v1 (Vergleich)" aufklappbar):
   Zuordnung gilt der Standard. Universumsfilter bleiben global.
 - **Faktor-Timing** wirkt seit v2 nur noch als Monitoring und fließt
   nicht in das Composite ein.
+- **Bericht** (Seite */bericht*): exportierbarer Investment-Komitee-Bericht
+  für die interne Besprechung — Key Findings, Universum, Veränderungen
+  gegen Vorimport und ~1 Monat (Mover, Zonen-Matrix, neue/ausgeschiedene
+  Kandidaten, Ranking-Stabilität, Watchlist, Signalwechsel), Sektoren mit
+  Rotations-Quadrant, Portfolio mit Scores der Einzeltitel, Flags,
+  Sofortmaßnahmen und Exposures, Modellportfolio mit Trade-Liste und
+  Overrides, optional Factor Timing, Risiko & Benchmark und Agenten,
+  dazu Datenqualität und Parameter-Anhang. Download als **PDF** (ohne
+  WeasyPrint als HTML) und **Excel-Anhang** mit allen Tabellen; Portfolio,
+  Vergleichs-Snapshots und Abschnitte sind im Tab wählbar.
 
 ## Scoring-Logik v1 (Vergleichsmodus)
 

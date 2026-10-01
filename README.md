@@ -420,6 +420,36 @@ python -m app.tools.risk_report report --variante buyhold
   Default-Szenarien erreichen Bestandsinstallationen daher nur über ein
   erneutes Speichern der Einstellungen.
 
+## Bericht (Investment-Komitee-Bericht, PDF + Excel)
+
+Tab **Bericht** (`/bericht`) fasst den kompletten Modellstand für die
+interne Besprechung in ein exportierbares Dokument: Key Findings
+(regelbasiert, deutsch), Universum (Zonen/Klassen, Top-Kandidaten,
+Kandidaten je Sektor), **Veränderungen** gegen den Vorimport und den
+Snapshot ~1 Monat zuvor (Mover, Zonen-Matrix, neue/ausgeschiedene
+Kandidaten, neue Filter-Fails, Ranking-Stabilität per Spearman-ρ,
+Watchlist nahe Einstiegsschwelle, Signalwechsel), Sektoren (Score, Δ,
+Returns, Breadth, Rotations-Quadrant), das aktive Portfolio mit Scores und
+Faktor-Z der Einzeltitel, Flags, Sofortmaßnahmen, Exposures vs. Benchmark
+und Konzentration, das zuletzt gespeicherte Modellportfolio mit
+rekonstruierter Trade-Liste und aktiven Overrides, optional Factor Timing,
+Risiko & Benchmark (Opt-in, braucht den Kurscache) und Agenten-Ratings,
+dazu Datenqualität/Diagnosen und einen Parameter-Anhang (Settings-Hash).
+
+- **PDF** über dieselbe WeasyPrint-Pipeline wie das Factsheet
+  (`app/factsheet_template/committee.html.j2`); fehlt WeasyPrint, wird
+  derselbe Bericht als eigenständige HTML-Datei exportiert.
+- **Excel-Anhang** (`openpyxl`) mit allen Tabellen inkl. komplettem
+  Universum, Delta-Tabellen, Portfolio-Positionen, Trade-Liste, Diagnosen
+  und Parametern — Werte bleiben numerisch (Zellformate statt Strings).
+- Vergleichs-Snapshots kommen aus dem PIT-Archiv (`koyfin_universe_history`):
+  Vorimport = jüngster Snapshot vor dem Datenstand, ~1 Monat = Snapshot mit
+  minimalem Abstand zu Stand − 30 Tage (Toleranz ± 15 Tage); beide sind im
+  Tab überschreibbar.
+- Builder Dash-frei in `app/core/committee_report.py`
+  (`build_committee_report(STATE, ReportOptions(...))`), Renderer in
+  `committee_report_pdf.py` / `committee_report_xlsx.py`.
+
 ## Backtest-Engine (Alpha Vantage, US-Universum) und Paper-Portfolio
 
 `app/backtest/` simuliert, wie sich ein Portfolio entwickelt hätte, das dem

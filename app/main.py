@@ -77,6 +77,7 @@ def create_app() -> dash.Dash:
     from app.pages import (  # noqa: F401
         agenten_analyse,
         anleitung,
+        bericht,
         dashboard,
         daten_import,
         einstellungen,

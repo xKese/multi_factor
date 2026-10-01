@@ -61,6 +61,50 @@ CREDIT_STRESS_BP = 500.0
 PCR_FEAR = 1.2
 PCR_GREED = 0.7
 
+# Mapping Settings-Key (``Settings.factor_weights``) → Anzeige-Name des
+# Factor-Timing-Systems. Gemeinsame Quelle für die Dash-Seite und den
+# Komitee-Bericht.
+SETTINGS_TO_STRATEGIC: dict[str, str] = {
+    "value": "Value",
+    "quality": "Quality",
+    "growth": "Growth",
+    "momentum": "Momentum",
+    "lowvol": "Low Volatility",
+}
+
+# Fallback der strategischen Allokation, wenn keine Settings vorliegen
+# (defensiv — ``Settings.factor_weights`` hat eine Default-Factory).
+STRATEGIC_FALLBACK: dict[str, float] = {
+    "Value": 0.2375,
+    "Quality": 0.2375,
+    "Growth": 0.2375,
+    "Momentum": 0.2375,
+    "Low Volatility": 0.05,
+}
+
+
+def strategic_weights_from_settings(settings) -> dict[str, float]:
+    """Strategische Faktor-Allokation aus ``settings.factor_weights``.
+
+    Mappt die Settings-Keys auf die Anzeige-Namen (``Value`` …
+    ``Low Volatility``) und normalisiert auf Summe 1, damit ein
+    inkonsistenter Settings-State nicht zu falschen Prozentwerten führt.
+    Fallback auf :data:`STRATEGIC_FALLBACK` ohne verwertbare Settings."""
+    fw = getattr(settings, "factor_weights", None) if settings is not None else None
+    if not isinstance(fw, dict) or not fw:
+        return dict(STRATEGIC_FALLBACK)
+    out: dict[str, float] = {}
+    for src_key, display in SETTINGS_TO_STRATEGIC.items():
+        try:
+            out[display] = float(fw.get(src_key, STRATEGIC_FALLBACK[display]))
+        except (TypeError, ValueError):
+            out[display] = STRATEGIC_FALLBACK[display]
+    total = sum(out.values())
+    if total > 0:
+        out = {k: v / total for k, v in out.items()}
+    return out
+
+
 # Faktor → Score-Spalte in STATE.scored (für das Universums-Momentum).
 _FACTOR_SCORE_COLUMNS: dict[str, str] = {
     "Value": "value_score",
