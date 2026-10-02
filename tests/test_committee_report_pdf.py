@@ -60,10 +60,13 @@ def test_fallback_html_is_standalone(report):  # noqa: F811
 
 
 def test_real_weasyprint_render(report):  # noqa: F811
-    pytest.importorskip("weasyprint")
+    """Echter Render über den WeasyPrint-Worker (wie in der App). Kein
+    direkter ``import weasyprint`` im Testprozess — der wirft ohne
+    pango/cairo auf dem Linker-Pfad einen ``OSError``, während der Worker
+    die Nix-Bibliothekspfade selbst setzt (``factsheet_pdf._start_worker``)."""
     try:
         pdf = pdfmod.render_committee_pdf(report)
-    except pdfmod.FactsheetRenderError as exc:  # fehlende Systembibliotheken
+    except pdfmod.FactsheetRenderError as exc:  # Worker/Libs nicht verfügbar
         pytest.skip(f"WeasyPrint nicht lauffähig: {exc}")
     assert pdf.startswith(b"%PDF-")
     try:
