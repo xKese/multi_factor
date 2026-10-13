@@ -86,10 +86,12 @@ def layout(ticker: str = "", **_) -> html.Div:
     if not STATE.scored.empty:
         # Value ist die uid (nicht der Ticker): bei Ticker-Kollisionen
         # (z. B. zwei "SAN") bleiben beide Einträge einzeln ansteuerbar.
+        # Bewusst ohne Zeilenlimit: das Universum umfasst inzwischen mehr
+        # als 2000 Titel, und die Dropdown-Suche läuft clientseitig über
+        # alle Optionen.
         options = [
             {"label": f"{t} – {n}", "value": u}
             for t, n, u in STATE.scored[["ticker", "name", "uid"]]
-            .head(2000)
             .itertuples(index=False)
         ]
 
