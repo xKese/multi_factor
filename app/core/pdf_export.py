@@ -30,6 +30,7 @@ from app.core.factsheet_pdf import (
     _jinja_env,
     _run_weasyprint,
 )
+from app.core.agents_client import primary_quant
 from app.ui.agent_report import (
     delta_quant,
     first_sentences,
@@ -128,13 +129,25 @@ _num1 = partial(fmt_de_number, decimals=1)
 # werden gerendert; fehlende Zeilen entfallen ersatzlos (Handoff-Regel).
 _Metric = tuple[str, str, Callable[[Any], str], bool]
 
+_num2 = partial(fmt_de_number, decimals=2)
+
+# v1-Faktor-Scores (0–100) und v2-Faktor-Z (neutralisiert, Vorzeichen =
+# besser/schlechter) — je Report-Kontext ist nur eine der beiden Gruppen
+# belegt, die andere entfällt beim Rendern.
+_FACTOR_Z_V2: tuple[_Metric, ...] = (
+    ("Z Value", "fc.composite_v2.factors.value.z", _num2, True),
+    ("Z Qualität", "fc.composite_v2.factors.quality.z", _num2, True),
+    ("Z Momentum", "fc.composite_v2.factors.momentum.z", _num2, True),
+    ("Z Investment", "fc.composite_v2.factors.investment.z", _num2, True),
+)
+
 _FACTOR_SCORES: tuple[_Metric, ...] = (
     ("Score Value", "fc.factor_scores.value", _num1, False),
     ("Score Qualität", "fc.factor_scores.quality", _num1, False),
     ("Score Growth", "fc.factor_scores.growth", _num1, False),
     ("Score Momentum", "fc.factor_scores.momentum", _num1, False),
     ("Score Low Vol", "fc.factor_scores.lowvol", _num1, False),
-)
+) + _FACTOR_Z_V2
 
 SECTION_METRICS: dict[str, tuple[_Metric, ...]] = {
     "market_report": (
@@ -152,15 +165,19 @@ SECTION_METRICS: dict[str, tuple[_Metric, ...]] = {
         ("Altman-Z", "fc.altman_z", _num1, False),
         ("Score Qualität", "fc.factor_scores.quality", _num1, False),
         ("Score Value", "fc.factor_scores.value", _num1, False),
+        ("Z Qualität", "fc.composite_v2.factors.quality.z", _num2, True),
+        ("Z Value", "fc.composite_v2.factors.value.z", _num2, True),
     ),
     "bull_history": (
         ("Score Growth", "fc.factor_scores.growth", _num1, False),
         ("Score Momentum", "fc.factor_scores.momentum", _num1, False),
+        ("Z Momentum", "fc.composite_v2.factors.momentum.z", _num2, True),
         ("Momentum 12-1", "fc.signals.mom_12_1", fmt_signed_percent, True),
     ),
     "bear_history": (
         ("Score Value", "fc.factor_scores.value", _num1, False),
         ("Score Low Vol", "fc.factor_scores.lowvol", _num1, False),
+        ("Z Investment", "fc.composite_v2.factors.investment.z", _num2, True),
         ("Abstand 52W-Hoch", "fc.signals.dist_52w_high",
          fmt_signed_percent, True),
     ),
@@ -250,28 +267,43 @@ def _dates(analysis: dict) -> tuple[str, str, str]:
 
 
 def _quant_block(fc: dict | None, row: dict | None = None) -> dict | None:
-    """Score + Klassenzeile fürs PDF — ``None`` ohne Quant-Kontext."""
-    score = (fc or {}).get("total_score")
+    """Score + Klassenzeile fürs PDF — ``None`` ohne Quant-Kontext.
+
+    Primär-Score der Scoring-Version des Kontexts (v2: Composite, v1:
+    Gesamt-Score). Trägt der Report nur den v1-Kontext, wird der aktuelle
+    Composite-v2-Stand aus der Universumszeile als Zusatzzeile ergänzt.
+    """
+    score, cls, version = primary_quant(fc)
     if score is None:
         return None
-    cls = str((fc or {}).get("classification") or "")
+    cls = cls or ""
     code, _, label = cls.partition(" - ")
     class_line = (
         f"{code.strip()} · {label.strip().upper()}" if label else cls
     ) or None
-    # Aktueller Composite-v2-Stand aus dem Universum (Reports selbst tragen
-    # nur den v1-Kontext des Analysezeitpunkts).
     v2_line = None
-    comp = (row or {}).get("composite_score")
-    if comp is not None and not (isinstance(comp, float) and pd.isna(comp)):
-        parts = [f"Composite v2 {fmt_de_number(comp, 1)}"]
-        cls_v2 = str((row or {}).get("classification_v2") or "").strip()
-        zone = str((row or {}).get("zone_v2") or "").strip()
-        if cls_v2:
-            parts.append(cls_v2)
+    if version == "v2":
+        comp = (fc or {}).get("composite_v2") or {}
+        parts = ["Composite v2"]
+        zone = str(comp.get("zone") or "").strip()
         if zone:
-            parts.append(zone)
+            parts.append(f"Zone {zone}")
+        if (cov := comp.get("data_coverage")) is not None:
+            parts.append(f"Abdeckung {fmt_de_number(float(cov) * 100, 0)} %")
         v2_line = " · ".join(parts)
+    else:
+        comp_now = (row or {}).get("composite_score")
+        if comp_now is not None and not (
+            isinstance(comp_now, float) and pd.isna(comp_now)
+        ):
+            parts = [f"Composite v2 {fmt_de_number(comp_now, 1)}"]
+            cls_v2 = str((row or {}).get("classification_v2") or "").strip()
+            zone = str((row or {}).get("zone_v2") or "").strip()
+            if cls_v2:
+                parts.append(cls_v2)
+            if zone:
+                parts.append(zone)
+            v2_line = "aktuell: " + " · ".join(parts)
     return {
         "score": fmt_de_number(score, 1),
         "class_line": class_line,

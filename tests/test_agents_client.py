@@ -48,9 +48,70 @@ def _scored_row() -> dict:
     }
 
 
+def _v2_settings() -> Settings:
+    s = Settings()
+    s.scoring_version = "v2"
+    return s
+
+
+def _scored_row_v2(financial: bool = False) -> dict:
+    """Universumszeile nach ``compute_scores_v2`` (Nicht-Fin oder Financial)."""
+    row = _scored_row()
+    row.update(
+        {
+            "composite_score": 83.4,
+            "composite_pct": 0.834,
+            "composite_z": 1.0123456,
+            "composite_raw": 0.7,
+            "classification_v2": "B+",
+            "zone_v2": "KANDIDAT",
+            "data_coverage_v2": 0.95,
+            "is_financial": financial,
+            "is_real_estate": False,
+            "z_value": 0.4, "cov_value": 1.0,
+            "z_quality": 1.2, "cov_quality": 0.75,
+            "z_momentum": 0.9, "cov_momentum": 1.0,
+            "z_investment": float("nan"), "cov_investment": 0.0,
+            "filter_pass": True,
+            "filter_reasons": [],
+            "trend_warning": False,
+        }
+    )
+    if financial:
+        row.update(
+            {
+                "pb": 1.1, "z_pb": 0.3, "neut_level_pb": "industry_group",
+                "pe": 9.5, "z_pe": 0.5,
+                "roe": 0.12, "z_roe": 1.1,
+                "accruals": -0.02, "z_accruals": 0.4,
+                "mom_12_1_adj": 0.13, "z_mom_12_1_adj": 0.9,
+                "share_issuance": 0.01, "z_share_issuance": -0.2,
+            }
+        )
+    else:
+        row.update(
+            {
+                "ev_ebitda": 8.1, "z_ev_ebitda": -0.4, "neut_level_ev_ebitda": "industry_group",
+                "fcf_yield_v2": 0.065, "fcf_yield_source": "ev", "z_fcf_yield": 1.2,
+                "ev_ebit": float("nan"), "z_ev_ebit": float("nan"),
+                "gp_ta": 0.35, "z_gp_ta": 1.4,
+                "roic": 0.18, "z_roic": 1.0,
+                "accruals": -0.02, "z_accruals": 0.4,
+                "debt_ebit": 2.5, "z_debt_ebit": -0.3,  # Leverage-Fallback
+                "debt_equity": 0.8,
+                "mom_12_1_adj": 0.13, "z_mom_12_1_adj": 0.9,
+                "eps_revisions_3m": 0.02, "z_eps_revisions_3m": 0.5,
+                "asset_growth": 0.11, "z_asset_growth": float("nan"),
+                "share_issuance": float("nan"), "z_share_issuance": float("nan"),
+            }
+        )
+    return row
+
+
 def test_build_factor_context_shape_and_nan_omission():
     fc = agents_client.build_factor_context(_scored_row())
     assert fc["source"] == "multi_factor"
+    assert fc["scoring_version"] == "v1"
     assert fc["as_of"] == "2026-07-20"
     assert fc["total_score"] == 78.2
     assert fc["source_ticker"] == "MBG"
@@ -67,6 +128,131 @@ def test_build_factor_context_shape_and_nan_omission():
         for v in json.loads(json.dumps(fc)).values()
         if isinstance(v, float)
     )
+
+
+def test_build_factor_context_v1_settings_keep_legacy_payload():
+    """Bei scoring_version=v1 bleibt der Payload v1 — auch wenn die Zeile
+    bereits v2-Spalten trägt (kein composite_v2-Block, keine v2-Streufelder)."""
+    s = Settings()
+    s.scoring_version = "v1"
+    fc = agents_client.build_factor_context(_scored_row_v2(), s)
+    assert fc["scoring_version"] == "v1"
+    assert fc["total_score"] == 78.2
+    assert fc["recommendation"] == "BUY"
+    assert "composite_v2" not in fc
+    assert not {"composite_score", "classification_v2", "zone_v2"} & set(fc)
+
+
+def test_build_factor_context_v2_replaces_v1_scores():
+    """Composite v2 aktiv: die Agenten bekommen den vollständigen v2-Input,
+    die alten v1-Score-Felder entfallen; neutrale Daten bleiben."""
+    import json
+
+    fc = agents_client.build_factor_context(_scored_row_v2(), _v2_settings())
+    assert fc["scoring_version"] == "v2"
+    # v1-Score-Felder sind weg …
+    assert not {"total_score", "factor_scores", "recommendation",
+                "classification", "filter_ok"} & set(fc)
+    # … neutrale Daten bleiben.
+    assert fc["piotroski"] == 7.0 and fc["altman_z"] == 4.2
+    assert fc["signals"]["sma_signal"] == "GOLDEN CROSS"
+    assert fc["identity"]["name"] == "Mercedes-Benz Group AG"
+    assert fc["source_ticker"] == "MBG"
+
+    comp = fc["composite_v2"]
+    assert comp["score"] == 83.4
+    assert comp["pct"] == 0.834
+    assert comp["z"] == 1.0123  # auf 4 Stellen gerundet
+    assert comp["classification"] == "B+"
+    assert comp["zone"] == "KANDIDAT"
+    assert comp["zone_thresholds"] == {"entry_pct": 0.80, "exit_pct": 0.667}
+    assert comp["data_coverage"] == 0.95
+    assert comp["segment"] == "nonfinancial"
+    assert comp["filter"] == {"pass": True, "reasons": []}
+    assert comp["trend_warning"] is False
+
+    # Faktoren: Z, Abdeckung, strategisches Gewicht; NaN-Z entfällt.
+    assert comp["factors"]["quality"] == {
+        "z": 1.2, "coverage": 0.75, "weight_strategic": 0.30
+    }
+    assert "z" not in comp["factors"]["investment"]
+    assert comp["factors"]["investment"]["coverage"] == 0.0
+
+    # Indikatoren je Segment (Nicht-Fin): Leverage über debt_ebit aufgelöst,
+    # fcf_yield aus der kombinierten Serie inkl. Quelle, ev_ebit (NaN) fehlt.
+    ind = comp["indicators"]
+    assert ind["ev_ebitda"] == {
+        "factor": "value", "direction": -1, "z": -0.4, "value": 8.1,
+        "neut_level": "industry_group",
+    }
+    assert ind["fcf_yield"]["value"] == 0.065 and ind["fcf_yield"]["source"] == "ev"
+    assert ind["debt_ebit"]["factor"] == "quality" and ind["debt_ebit"]["direction"] == -1
+    assert "debt_equity" not in ind and "net_debt_ebitda" not in ind
+    assert "ev_ebit" not in ind
+    assert ind["asset_growth"] == {"factor": "investment", "direction": -1, "value": 0.11}
+    assert "share_issuance" not in ind
+    assert "pb" not in ind and "roe" not in ind
+
+    # Vertrag mit dem Service: JSON-serialisierbar, kein NaN, unter 8 KB.
+    text = json.dumps(fc, ensure_ascii=False)
+    assert "NaN" not in text
+    assert len(text) < 8192
+
+
+def test_build_factor_context_v2_financial_segment():
+    fc = agents_client.build_factor_context(
+        _scored_row_v2(financial=True), _v2_settings()
+    )
+    comp = fc["composite_v2"]
+    assert comp["segment"] == "financial"
+    ind = comp["indicators"]
+    assert set(ind) == {"pb", "pe", "roe", "accruals", "mom_12_1_adj", "share_issuance"}
+    assert ind["pb"]["neut_level"] == "industry_group"
+    assert ind["roe"] == {"factor": "quality", "direction": 1, "z": 1.1, "value": 0.12}
+
+
+def test_build_factor_context_v2_without_composite_falls_back_to_v1():
+    """Zeile ohne gültigen Composite (z. B. NaN) → v1-Payload, damit die
+    Agenten überhaupt einen Prior erhalten."""
+    row = _scored_row_v2()
+    row["composite_score"] = float("nan")
+    fc = agents_client.build_factor_context(row, _v2_settings())
+    assert fc["scoring_version"] == "v1"
+    assert fc["total_score"] == 78.2
+    assert "composite_v2" not in fc
+
+
+def test_primary_quant_and_quant_direction():
+    v2 = {"composite_v2": {"score": 83.4, "classification": "B+", "zone": "HALTEN"}}
+    assert agents_client.primary_quant(v2) == (83.4, "B+", "v2")
+    assert agents_client.quant_direction(v2) == "hold"
+    assert agents_client.quant_direction(
+        {"composite_v2": {"score": 10.0, "zone": "FILTER"}}
+    ) is None
+    assert agents_client.quant_direction(
+        {"composite_v2": {"score": 90.0, "zone": "KANDIDAT"}}
+    ) == "buy"
+    assert agents_client.quant_direction(
+        {"composite_v2": {"score": 20.0, "zone": "VERKAUFEN"}}
+    ) == "sell"
+
+    v1 = {"total_score": 78.2, "classification": "B+ · Sehr Gut", "recommendation": "BUY"}
+    assert agents_client.primary_quant(v1) == (78.2, "B+ · Sehr Gut", "v1")
+    assert agents_client.quant_direction(v1) == "buy"
+    assert agents_client.primary_quant(None) == (None, None, "v1")
+    assert agents_client.quant_direction({}) is None
+
+
+def test_persist_result_stores_primary_score_of_context_version(monkeypatch):
+    saved = {}
+    monkeypatch.setattr(persistence, "save_agent_analysis", lambda rec: saved.update(rec))
+    fc = {"scoring_version": "v2", "composite_v2": {"score": 83.4, "classification": "B+"}}
+    agents_client._persist_result(
+        "MBG", "MBG.F", _payload(), fc, True, "run-1", "Overweight", {}
+    )
+    assert saved["total_score"] == 83.4
+    assert saved["classification"] == "B+"
+    assert saved["factor_context"] is fc
 
 
 class _FakeSSEResponse:

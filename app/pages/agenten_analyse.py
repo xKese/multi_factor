@@ -380,7 +380,9 @@ def _start(n_clicks, selected, query):
         # Symbol) ist keine Zeile eindeutig zuzuordnen — lieber ohne
         # Quant-Kontext starten als mit dem der falschen Firma.
         if len(rows) == 1:
-            factor_context = agents_client.build_factor_context(rows.iloc[0])
+            factor_context = agents_client.build_factor_context(
+                rows.iloc[0], STATE.settings
+            )
             in_universe = True
 
     ok, msg = agents_client.start_analysis(
