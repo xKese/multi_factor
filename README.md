@@ -249,7 +249,15 @@ Die App kann pro Titel eine tiefgehende LLM-Agenten-Analyse
 Sentiment-, News- und Fundamental-Analysten, Bull/Bear-Debatte, Risiko-Runde
 und ein finales Rating (Buy/Overweight/Hold/Underweight/Sell). Der
 Quant-Score dieser App wird den Agenten dabei als **Vorab-Rating**
-mitgegeben (Prior, den die Agenten bestätigen oder widerlegen).
+mitgegeben (Prior, den die Agenten bestätigen oder widerlegen). Bei aktivem
+Composite v2 (Standard) ist das der vollständige v2-Input (`factor_context.
+composite_v2`): Composite-Score/Perzentil/Z, Klasse, Zone mit Schwellen,
+Faktor-Z mit Abdeckung und Gewicht, Indikator-Z mit Rohwert, Richtung und
+Neutralisierungsebene, Segment, Universumsfilter und Trend-Warnung — die
+v1-Score-Felder entfallen dann. Bei `scoring_version = v1` wird wie bisher der
+v1-Payload gesendet. Piotroski, Altman-Z, SMA-Signale und Identität gehen in
+beiden Fällen mit. Der Service muss den Block kennen (Whitelist +
+Prompt-Block im TradingAgents-Repo), sonst verwirft er ihn.
 
 - **Einzelanalyse** → Abschnitt „Agenten-Tiefenanalyse“: Analyse für den
   gewählten Titel starten; Ergebnis wird in der Datenbank gespeichert und

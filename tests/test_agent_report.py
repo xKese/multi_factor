@@ -102,6 +102,36 @@ def test_result_view_renders_hero_and_cards():
     assert "Marktanalyse" in view and "Vollständig lesen" in view
 
 
+def test_result_view_with_composite_v2_context():
+    analysis = {
+        "rating": "Underweight",
+        "provider": "anthropic",
+        "created_at": "2026-07-21 14:32:00",
+        "factor_context": {
+            "scoring_version": "v2",
+            "composite_v2": {"score": 83.4, "classification": "B+", "zone": "KANDIDAT"},
+        },
+        "reports": {"final_trade_decision": "**Rating**: Underweight."},
+    }
+    view = str(ar.result_view(analysis, current_score=85.0))
+    assert "Composite v2" in view
+    assert "83,4" in view
+    assert "B+" in view
+    # Zone KANDIDAT (buy) vs. Underweight (sell) → Widerspruch.
+    assert ar.delta_quant("Underweight", analysis["factor_context"]) == (
+        "widerspricht", "down"
+    )
+    assert "Score zum Analysezeitpunkt" in view
+
+
+def test_delta_quant_from_zone_and_recommendation():
+    assert ar.delta_quant("Buy", {"composite_v2": {"zone": "KANDIDAT"}}) == ("bestätigt", "up")
+    assert ar.delta_quant("Buy", {"composite_v2": {"zone": "HALTEN"}}) == ("vorsichtiger", "warn")
+    assert ar.delta_quant("Buy", {"composite_v2": {"zone": "FILTER"}}) is None
+    assert ar.delta_quant("Sell", {"recommendation": "BUY"}) == ("widerspricht", "down")
+    assert ar.delta_quant("Buy", None) is None
+
+
 def test_modal_sections_filters_and_orders():
     reports = {
         "news_report": "News-Inhalt.",

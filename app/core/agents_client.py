@@ -20,6 +20,7 @@ import threading
 import time
 from datetime import date, datetime
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -164,8 +165,169 @@ def _txt(row, key):
     return val if isinstance(val, str) and val.strip() else None
 
 
-def build_factor_context(row: pd.Series | dict) -> dict:
+def _bool(row, key) -> bool | None:
+    val = row.get(key)
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    if isinstance(val, (bool, np.bool_)):
+        return bool(val)
+    if isinstance(val, (int, float, np.integer, np.floating)):
+        return bool(val)
+    if isinstance(val, str):
+        return val.strip().lower() in ("1", "true", "ja", "yes", "wahr")
+    return None
+
+
+def _round(val: float, digits: int = 4) -> float:
+    return float(round(val, digits))
+
+
+# Rohwert-Spalte je v2-Indikator, falls sie vom Indikatornamen abweicht
+# (``fcf_yield`` nutzt die kombinierte Serie aus ``derive_v2_indicators``).
+_V2_RAW_COLUMN = {"fcf_yield": "fcf_yield_v2"}
+# Leverage-Platzhalter (``__leverage__``) → tatsächlich berechnete Spalte, in
+# der Auflösungsreihenfolge von ``scoring_v2._resolve_leverage_indicator``.
+_V2_LEVERAGE_CANDIDATES = ("net_debt_ebitda", "debt_ebit", "debt_equity")
+
+# Zone (v2) → Handlungsrichtung, Pendant zur v1-``recommendation``.
+ZONE_DIRECTION = {
+    "KANDIDAT": "buy",
+    "HALTEN": "hold",
+    "VERKAUFEN": "sell",
+}
+
+
+def _v2_segment(row) -> str:
+    if _bool(row, "is_financial"):
+        return "financial"
+    if _bool(row, "is_real_estate"):
+        return "real_estate"
+    return "nonfinancial"
+
+
+def _v2_indicator_map(row, segment: str) -> dict[str, list[tuple[str, float]]]:
+    """Indikatorlisten je Faktor für das Segment der Zeile (Spec 2.1–2.3).
+
+    Spiegelt ``scoring_v2._factor_indicator_map`` auf Zeilenebene: der
+    Leverage-Platzhalter wird über die vorhandene ``z_``-Spalte aufgelöst,
+    ``accruals`` entfällt bei Real Estate.
+    """
+    from .scoring_v2 import FINANCIAL_FACTORS, NONFIN_FACTORS
+
+    if segment == "financial":
+        return {f: list(entries) for f, entries in FINANCIAL_FACTORS.items()}
+    leverage = next(
+        (c for c in _V2_LEVERAGE_CANDIDATES if _num(row, f"z_{c}") is not None),
+        None,
+    )
+    out: dict[str, list[tuple[str, float]]] = {}
+    for factor, entries in NONFIN_FACTORS.items():
+        resolved = []
+        for name, direction in entries:
+            if name == "__leverage__":
+                if leverage:
+                    resolved.append((leverage, direction))
+            elif segment == "real_estate" and name == "accruals":
+                continue
+            else:
+                resolved.append((name, direction))
+        out[factor] = resolved
+    return out
+
+
+def build_composite_v2_context(row, settings) -> dict | None:
+    """``composite_v2``-Block des Faktor-Kontexts aus einer v2-Zeile.
+
+    Enthält alle Eingaben des Composite v2 (Spec 2, 3, 4, 5.2): Composite-
+    Score/Perzentil/Z, Klasse und Zone, Faktor-Z mit Abdeckung und Gewicht,
+    Indikator-Z mit Rohwert, Richtung und Neutralisierungsebene, Segment,
+    Universumsfilter und Trend-Warnung. ``None``, wenn die Zeile keinen
+    gültigen Composite trägt.
+    """
+    from .scoring_v2 import V2_FACTOR_NAMES
+
+    score = _num(row, "composite_score")
+    if score is None:
+        return None
+
+    block: dict = {"score": score}
+    for key, name in (
+        ("composite_pct", "pct"),
+        ("composite_z", "z"),
+        ("composite_raw", "raw"),
+        ("data_coverage_v2", "data_coverage"),
+    ):
+        if (val := _num(row, key)) is not None:
+            block[name] = _round(val)
+    for key, name in (("classification_v2", "classification"), ("zone_v2", "zone")):
+        if (val := _txt(row, key)) is not None:
+            block[name] = val
+    if settings is not None:
+        block["zone_thresholds"] = {
+            "entry_pct": float(settings.pc_entry_pct),
+            "exit_pct": float(settings.pc_exit_pct),
+        }
+
+    segment = _v2_segment(row)
+    block["segment"] = segment
+
+    weights = settings.v2_factor_weights() if settings is not None else {}
+    factors: dict = {}
+    for factor in V2_FACTOR_NAMES:
+        entry: dict = {}
+        if (z := _num(row, f"z_{factor}")) is not None:
+            entry["z"] = _round(z)
+        if (cov := _num(row, f"cov_{factor}")) is not None:
+            entry["coverage"] = _round(cov)
+        if factor in weights:
+            entry["weight_strategic"] = _round(float(weights[factor]))
+        if entry:
+            factors[factor] = entry
+    if factors:
+        block["factors"] = factors
+
+    indicators: dict = {}
+    for factor, entries in _v2_indicator_map(row, segment).items():
+        for name, direction in entries:
+            z = _num(row, f"z_{name}")
+            raw = _num(row, _V2_RAW_COLUMN.get(name, name))
+            if z is None and raw is None:
+                continue
+            ind: dict = {"factor": factor, "direction": int(direction)}
+            if z is not None:
+                ind["z"] = _round(z)
+            if raw is not None:
+                ind["value"] = _round(raw)
+            if (level := _txt(row, f"neut_level_{name}")) is not None:
+                ind["neut_level"] = level
+            if name == "fcf_yield" and (src := _txt(row, "fcf_yield_source")):
+                ind["source"] = src
+            indicators[name] = ind
+    if indicators:
+        block["indicators"] = indicators
+
+    filt: dict = {}
+    if (passed := _bool(row, "filter_pass")) is not None:
+        filt["pass"] = passed
+    reasons = row.get("filter_reasons")
+    if isinstance(reasons, (list, tuple, np.ndarray)):
+        filt["reasons"] = [str(r) for r in reasons if str(r)]
+    if filt:
+        block["filter"] = filt
+
+    if (warn := _bool(row, "trend_warning")) is not None:
+        block["trend_warning"] = warn
+    return block
+
+
+def build_factor_context(row: pd.Series | dict, settings=None) -> dict:
     """Baut den ``factor_context``-Payload aus einer ``STATE.scored``-Zeile.
+
+    Folgt der aktiven Scoring-Version (``settings.scoring_version``): bei v2
+    trägt der Payload statt der v1-Score-Felder den vollständigen
+    ``composite_v2``-Block (:func:`build_composite_v2_context`); ohne
+    Settings oder bei v1 bleibt der bisherige v1-Payload. Neutrale Daten
+    (Piotroski, Altman-Z, SMA-Signale, Identität) werden immer mitgegeben.
 
     NaN-/None-Felder werden weggelassen (Vertragskonvention mit dem
     TradingAgents-Service); das Ergebnis ist direkt JSON-serialisierbar.
@@ -181,27 +343,37 @@ def build_factor_context(row: pd.Series | dict) -> dict:
     elif isinstance(export_date, str) and export_date:
         fc["as_of"] = export_date
 
-    for key in ("total_score", "piotroski", "altman_z", "composite_score"):
+    composite = None
+    if settings is not None and getattr(settings, "scoring_version", "v1") == "v2":
+        composite = build_composite_v2_context(row, settings)
+
+    if composite is not None:
+        fc["scoring_version"] = "v2"
+        fc["composite_v2"] = composite
+    else:
+        fc["scoring_version"] = "v1"
+        if (val := _num(row, "total_score")) is not None:
+            fc["total_score"] = val
+        for key in ("classification", "filter_ok", "recommendation"):
+            if (val := _txt(row, key)) is not None:
+                fc[key] = val
+        scores = {
+            name: val
+            for name, col in (
+                ("value", "value_score"),
+                ("quality", "quality_score"),
+                ("growth", "growth_score"),
+                ("momentum", "momentum_score"),
+                ("lowvol", "lowvol_score"),
+            )
+            if (val := _num(row, col)) is not None
+        }
+        if scores:
+            fc["factor_scores"] = scores
+
+    for key in ("piotroski", "altman_z"):
         if (val := _num(row, key)) is not None:
             fc[key] = val
-    for key in ("classification", "filter_ok", "recommendation",
-                "classification_v2", "zone_v2"):
-        if (val := _txt(row, key)) is not None:
-            fc[key] = val
-
-    scores = {
-        name: val
-        for name, col in (
-            ("value", "value_score"),
-            ("quality", "quality_score"),
-            ("growth", "growth_score"),
-            ("momentum", "momentum_score"),
-            ("lowvol", "lowvol_score"),
-        )
-        if (val := _num(row, col)) is not None
-    }
-    if scores:
-        fc["factor_scores"] = scores
 
     signals: dict = {}
     for key in ("sma_signal", "trend_phase"):
@@ -227,6 +399,50 @@ def build_factor_context(row: pd.Series | dict) -> dict:
         fc["source_ticker"] = ticker
 
     return fc
+
+
+def primary_quant(factor_context: dict | None) -> tuple[float | None, str | None, str]:
+    """``(score, klassifikation, version)`` des Primär-Scorings eines Kontexts.
+
+    v2-Kontexte (``composite_v2``) liefern Composite-Score und Klasse v2,
+    v1-Kontexte ``total_score``/``classification``. Version ``"v1"`` auch
+    für leere Kontexte, damit Aufrufer nicht auf ``None`` prüfen müssen.
+    """
+    fc = factor_context or {}
+    comp = fc.get("composite_v2")
+    if isinstance(comp, dict) and comp.get("score") is not None:
+        try:
+            score = float(comp["score"])
+        except (TypeError, ValueError):
+            score = None
+        cls = comp.get("classification")
+        return score, (str(cls) if cls else None), "v2"
+    score = fc.get("total_score")
+    try:
+        score = float(score) if score is not None else None
+    except (TypeError, ValueError):
+        score = None
+    cls = fc.get("classification")
+    return score, (str(cls) if cls else None), "v1"
+
+
+def quant_direction(factor_context: dict | None) -> str | None:
+    """Handlungsrichtung (``buy``/``hold``/``sell``) des Quant-Kontexts.
+
+    v2: aus der Zone (FILTER → keine Richtung); v1: aus ``recommendation``.
+    """
+    fc = factor_context or {}
+    comp = fc.get("composite_v2")
+    if isinstance(comp, dict):
+        return ZONE_DIRECTION.get(str(comp.get("zone") or "").upper())
+    rec = str(fc.get("recommendation") or "").upper()
+    if rec in ("BUY", "STRONG BUY"):
+        return "buy"
+    if rec == "SELL":
+        return "sell"
+    if rec == "HOLD":
+        return "hold"
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -409,6 +625,8 @@ def _persist_result(
     reports: dict | None,
 ) -> None:
     reports = reports or {}
+    # Primär-Score der Scoring-Version des Kontexts (v2: Composite, v1: total).
+    primary_score, primary_class, _ = primary_quant(factor_context)
     record = {
         "ticker": ticker,
         "run_id": run_id or f"local_{int(time.time())}",
@@ -420,8 +638,8 @@ def _persist_result(
         "reports": reports,
         "factor_context": factor_context,
         "provider": payload.get("llm_provider"),
-        "total_score": (factor_context or {}).get("total_score"),
-        "classification": (factor_context or {}).get("classification"),
+        "total_score": primary_score,
+        "classification": primary_class,
     }
     try:
         persistence.save_agent_analysis(record)

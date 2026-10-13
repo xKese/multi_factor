@@ -1307,16 +1307,18 @@ def _current_quant(ticker: str):
     return float(score), class_of_score(score)["code"]
 
 
-def _current_v1_total(ticker: str) -> float | None:
-    """Aktueller v1-``total_score`` — Vergleichsbasis für persistierte
-    Agent-Reports, deren ``factor_context`` immer den v1-Score trägt."""
+def _current_score_for(ticker: str, factor_context: dict | None) -> float | None:
+    """Aktueller Score der Scoring-Version, die der persistierte Agent-Report
+    trägt (v2-Kontext → ``composite_score``, v1-Kontext → ``total_score``) —
+    Vergleichsbasis „Score zum Analysezeitpunkt · aktuell"."""
     if STATE.scored.empty:
         return None
     r = row_by_uid(STATE.scored, ticker)
     if r is None:
         return None
-    score = r.get("total_score")
-    return float(score) if pd.notna(score) else None
+    _, _, version = agents_client.primary_quant(factor_context)
+    score = r.get("composite_score" if version == "v2" else "total_score")
+    return float(score) if score is not None and pd.notna(score) else None
 
 
 def _agent_start_state(ticker: str, service_ok: bool, error: str | None) -> html.Div:
@@ -1469,7 +1471,7 @@ def _agent_section_view(ticker: str) -> tuple[html.Div, bool]:
                 )
             )
 
-        current = _current_v1_total(ticker)
+        current = _current_score_for(ticker, analysis.get("factor_context"))
         return (
             html.Div(
                 [
@@ -1500,7 +1502,7 @@ def _start_agent_run(ticker: str, agents_ticker: str) -> tuple[bool, str]:
     if not STATE.scored.empty:
         row = row_by_uid(STATE.scored, ticker)
         if row is not None:
-            factor_context = agents_client.build_factor_context(row)
+            factor_context = agents_client.build_factor_context(row, STATE.settings)
             in_universe = True
     return agents_client.start_analysis(
         ticker,

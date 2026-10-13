@@ -106,6 +106,62 @@ def test_section_metrics_only_existing():
     assert ctx2["sidebar"]["delta"] is None
 
 
+FACTOR_CONTEXT_V2 = {
+    "scoring_version": "v2",
+    "piotroski": 8.0,
+    "altman_z": 3.1,
+    "composite_v2": {
+        "score": 83.4,
+        "pct": 0.834,
+        "classification": "B+",
+        "zone": "KANDIDAT",
+        "data_coverage": 0.95,
+        "factors": {
+            "value": {"z": 0.4, "coverage": 1.0},
+            "quality": {"z": 1.2, "coverage": 0.75},
+            "momentum": {"z": -0.35, "coverage": 1.0},
+            "investment": {"coverage": 0.0},
+        },
+    },
+    "signals": {"mom_12_1": 0.2412},
+    "identity": {"name": "SAP SE"},
+}
+
+
+def test_section_context_with_composite_v2():
+    ctx = build_section_context(
+        _analysis(factor_context=FACTOR_CONTEXT_V2), "fundamentals_report", None
+    )
+    quant = ctx["sidebar"]["quant"]
+    assert quant["score"] == "83,4"
+    assert quant["class_line"] == "B+"
+    assert quant["v2_line"].startswith("Composite v2 · Zone KANDIDAT")
+    assert "95 %" in quant["v2_line"]
+    # Zone KANDIDAT ↔ Overweight → Prior bestätigt.
+    assert ctx["sidebar"]["delta"]["text"] == "Prior bestätigt"
+    labels = {m["label"]: m for m in ctx["sidebar"]["metrics"]}
+    # v1-Scores fehlen im v2-Kontext und entfallen; Faktor-Z erscheinen.
+    assert "Score Qualität" not in labels
+    assert labels["Z Qualität"]["value"] == "1,20"
+    assert labels["Z Qualität"]["tone"] == "pos"
+    assert labels["Piotroski"]["value"] == "8 / 9"
+
+    ctx_full = build_full_context(_analysis(factor_context=FACTOR_CONTEXT_V2), None)
+    final = next(s for s in ctx_full["sections"] if s["key"] == "final_trade_decision")
+    z_labels = [m["label"] for m in final["metrics"]]
+    assert z_labels == ["Z Value", "Z Qualität", "Z Momentum"]
+
+
+def test_quant_block_v1_context_adds_current_v2_line():
+    from app.core.pdf_export import _quant_block
+
+    row = {"composite_score": 71.2, "classification_v2": "B", "zone_v2": "HALTEN"}
+    block = _quant_block(FACTOR_CONTEXT, row)
+    assert block["score"] == "78,4"
+    assert block["v2_line"] == "aktuell: Composite v2 71,2 · B · HALTEN"
+    assert _quant_block(FACTOR_CONTEXT, None)["v2_line"] is None
+
+
 def test_section_unknown_key_raises():
     import pytest
 

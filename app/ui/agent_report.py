@@ -23,6 +23,7 @@ from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from app.core import persistence
+from app.core.agents_client import primary_quant, quant_direction
 
 
 def _display_tz() -> ZoneInfo:
@@ -198,17 +199,6 @@ def first_sentences(text: str | None, n: int = 2, max_chars: int = 260) -> str:
     return teaser
 
 
-def _quant_direction(recommendation: str | None) -> str | None:
-    rec = (recommendation or "").upper()
-    if rec in ("BUY", "STRONG BUY"):
-        return "buy"
-    if rec == "SELL":
-        return "sell"
-    if rec == "HOLD":
-        return "hold"
-    return None
-
-
 def _agent_direction(rating: str | None) -> str | None:
     tone = rating_tone(rating)
     if tone == "up":
@@ -225,9 +215,10 @@ def delta_quant(rating: str | None, factor_context: dict | None) -> tuple[str, s
 
     „bestätigt“ (up) bei gleicher Richtung, „vorsichtiger“ (warn) wenn genau
     eine Seite Hold ist, „widerspricht“ (down) bei Gegenrichtung. ``None``
-    ohne Quant-Kontext (Ad-hoc).
+    ohne Quant-Kontext (Ad-hoc) oder ohne Richtung (v2-Zone FILTER).
+    Quant-Richtung: v2 aus der Zone, v1 aus der ``recommendation``.
     """
-    quant = _quant_direction((factor_context or {}).get("recommendation"))
+    quant = quant_direction(factor_context)
     agents = _agent_direction(rating)
     if quant is None or agents is None:
         return None
@@ -441,9 +432,10 @@ def _verdict_chip(rating: str | None, factor_context: dict | None) -> html.Div |
 def _v2_quant_row(analysis: dict) -> html.Div | None:
     """Aktueller Composite-v2-Stand des Titels (live aus ``STATE.scored``).
 
-    Persistierte Agent-Reports tragen nur den v1-Faktor-Kontext des
-    Analysezeitpunkts; der v2-Stand wird daher aus dem aktuellen Universum
-    gezogen und entsprechend gekennzeichnet.
+    Der persistierte Faktor-Kontext hält den Stand zum Analysezeitpunkt
+    (ältere Reports nur v1, neuere den ``composite_v2``-Block); der
+    aktuelle v2-Stand wird daher aus dem Universum gezogen und entsprechend
+    gekennzeichnet.
     """
     from app.core.state import STATE
     from app.ui.score_context import is_v2
@@ -494,18 +486,22 @@ def result_view(analysis: dict, current_score=None) -> html.Div:
     )
     quote = first_sentences(summary_src, n=3, max_chars=420)
 
-    # Rechtes Panel: Quant vs. Agenten
-    total = fc.get("total_score", analysis.get("total_score"))
+    # Rechtes Panel: Quant vs. Agenten — Primär-Score der Scoring-Version
+    # des Kontexts (v2: Composite, v1: Gesamt-Score); Fallback DB-Spalten.
+    total, classification, quant_version = primary_quant(fc)
+    if total is None:
+        total = analysis.get("total_score")
     classification = str(
-        fc.get("classification") or analysis.get("classification") or ""
+        classification or analysis.get("classification") or ""
     ).strip()
+    quant_caption = "Composite v2" if quant_version == "v2" else "Quant-Score"
     side_children: list = [
         html.Div("Quant vs. Agenten", className="ms-agent-aside-label"),
         html.Div(
             [
                 html.Div(
                     [
-                        html.Div("Quant-Score", className="ms-agent-side-cap"),
+                        html.Div(quant_caption, className="ms-agent-side-cap"),
                         html.Div(
                             fmt_de_number(total) if total is not None else "–",
                             className="ms-agent-side-num",

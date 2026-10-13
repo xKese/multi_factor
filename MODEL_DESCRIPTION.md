@@ -502,7 +502,9 @@ historische Szenarien, Faktorschocks, Datenqualität) →
 - **UID-Logik** (`app/core/uid.py`): kollisionssichere interne Schlüssel — eindeutiger
   Ticker → `uid = ticker`; bei Kollision `TICKER~namens-slug` (z. B. `SAN~sanofi`).
 - **TradingAgents-Integration** (`app/core/agents_client.py`): LLM-Tiefenanalyse per
-  SSE; `build_factor_context` übergibt den Quant-Score als Prior an die Agenten;
+  SSE; `build_factor_context` übergibt den Quant-Score der aktiven Scoring-Version
+  als Prior an die Agenten (v2: vollständiger `composite_v2`-Block mit Composite,
+  Zone, Faktor-Z, Indikator-Z/Rohwerten, Filter; v1: bisheriger Payload);
   Ergebnisse in `agent_analyses` archiviert, PDF-Export möglich. Defaults:
   Sprache Deutsch, Temperatur 0,0.
 - **PDF-Factsheets** (`app/core/factsheet_pdf.py` + `app/factsheet_template/`):

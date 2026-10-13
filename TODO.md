@@ -39,7 +39,10 @@ Perzentil-Hilfe/Anleitung, Factsheet-PDF-v2-Sektion, README,
 Peer-Vergleich (Einzelanalyse + Factsheet-Comparables im v2-Faktorraum,
 `compute_peers(version=…)`), Risiko-Markdown-Report (Composite/Zone statt
 Score/Empfehlung), Agenten-Startbereich (Primär-Score) und
-`factor_context` mit v2-Feldern.
+`factor_context` mit vollständigem `composite_v2`-Block (Composite, Zone,
+Faktor-Z, Indikator-Z/Rohwerte, Filter; v1-Felder entfallen bei v2 — die
+Service-Whitelist/Prompt-Formatierung im TradingAgents-Repo muss den Block
+kennen).
 
 Offen:
 - **Zonen-Übergangs-Historie**: kleine Zeitreihe „Zone je Titel über
