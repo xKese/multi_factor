@@ -253,8 +253,12 @@ mitgegeben (Prior, den die Agenten bestätigen oder widerlegen). Bei aktivem
 Composite v2 (Standard) ist das der vollständige v2-Input (`factor_context.
 composite_v2`): Composite-Score/Perzentil/Z, Klasse, Zone mit Schwellen,
 Faktor-Z mit Abdeckung und Gewicht, Indikator-Z mit Rohwert, Richtung und
-Neutralisierungsebene, Segment, Universumsfilter und Trend-Warnung — die
-v1-Score-Felder entfallen dann. Bei `scoring_version = v1` wird wie bisher der
+Neutralisierungsebene, Segment, Universumsfilter und Trend-Warnung sowie
+eine aus den Settings erzeugte Kurzbeschreibung der Systematik (Gewichte,
+Neutralisierung, Winsorisierung, Mindestabdeckung, Klassen-/Zonen-Schwellen,
+Filterregeln), damit die Agenten die Werte einordnen können — die
+v1-Score-Felder entfallen dann vollständig, auch wenn der Composite für einen
+Titel nicht berechenbar ist. Bei `scoring_version = v1` wird wie bisher der
 v1-Payload gesendet. Piotroski, Altman-Z, SMA-Signale und Identität gehen in
 beiden Fällen mit. Der Service muss den Block kennen (Whitelist +
 Prompt-Block im TradingAgents-Repo), sonst verwirft er ihn.

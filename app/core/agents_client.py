@@ -235,22 +235,183 @@ def _v2_indicator_map(row, segment: str) -> dict[str, list[tuple[str, float]]]:
     return out
 
 
-def build_composite_v2_context(row, settings) -> dict | None:
+_NEUT_SCHEME_TEXT = {
+    "industry_group_then_region": (
+        "z-score within the global GICS industry group, then re-standardised "
+        "within the region"
+    ),
+    "sector_then_region": (
+        "z-score within the global GICS sector, then re-standardised within "
+        "the region"
+    ),
+    "region_only": "z-score within the region only (keeps the industry tilt)",
+    "region_sector": (
+        "z-score within region x sector (fallback sector, then global)"
+    ),
+    "global": "z-score across the whole universe",
+}
+
+_DIRECTION_TEXT = {1: "higher is better", -1: "lower is better"}
+
+
+def _pct(value: float, digits: int = 0) -> str:
+    return f"{float(value) * 100:.{digits}f}%"
+
+
+def build_v2_methodology(
+    settings, segment: str, indicator_map: dict[str, list[tuple[str, float]]]
+) -> list[str]:
+    """Kurzbeschreibung der Composite-v2-Systematik für die Agenten.
+
+    Englische Sätze (Prompt-Sprache des Service), parametrisiert aus den
+    Settings (Gewichte, Neutralisierung, Winsorisierung, Mindestabdeckung,
+    Klassen-/Zonen-Schwellen, Universumsfilter) und dem Segment der Zeile
+    (Spec 2, 3, 4, 5.2; MODEL_DESCRIPTION 11.3–11.5, 12.1).
+    """
+    g = lambda name, default: getattr(settings, name, default)  # noqa: E731
+    weights = settings.v2_factor_weights() if settings is not None else {}
+    lines: list[str] = []
+
+    weight_txt = ", ".join(
+        f"{f.capitalize()} {float(w):.2f}" for f, w in weights.items()
+    )
+    lines.append(
+        "Composite v2 is a relative, z-score based 4-factor ranking of the "
+        "multi_factor stock universe (Koyfin export as of the as_of date). "
+        f"Strategic factor weights: {weight_txt}. Growth and low volatility "
+        "are not factors; Piotroski and Altman-Z act only as universe filters."
+    )
+
+    seg_label = {
+        "financial": "financials",
+        "real_estate": "real estate",
+        "nonfinancial": "non-financials",
+    }.get(segment, segment)
+    factor_bits = []
+    for factor, entries in indicator_map.items():
+        if not entries:
+            continue
+        inds = ", ".join(
+            f"{name} ({_DIRECTION_TEXT.get(int(d), 'n/a')})" for name, d in entries
+        )
+        factor_bits.append(f"{factor.capitalize()}: {inds}")
+    if factor_bits:
+        lines.append(
+            f"Indicator set for this stock's segment ({seg_label}), equally "
+            "weighted within each factor: " + "; ".join(factor_bits) + "."
+        )
+
+    lower, upper = g("v2_winsor_lower", 0.03), g("v2_winsor_upper", 0.97)
+    cap = g("v2_zscore_cap", 3.0)
+    scheme_map = settings.neut_scheme_map() if settings is not None else {}
+    used = {name for entries in indicator_map.values() for name, _ in entries}
+    by_scheme: dict[str, list[str]] = {}
+    for name in sorted(used):
+        by_scheme.setdefault(scheme_map.get(name, "n/a"), []).append(name)
+    scheme_txt = "; ".join(
+        f"{', '.join(names)}: {_NEUT_SCHEME_TEXT.get(scheme, scheme)}"
+        for scheme, names in by_scheme.items()
+    )
+    lines.append(
+        "Each indicator is winsorised at the "
+        f"{_pct(lower)}/{_pct(upper)} quantiles inside its peer group, "
+        "standardised to a z-score ((x - mean) / std) and capped at "
+        f"+/-{float(cap):g}; the sign is flipped for lower-is-better "
+        "indicators, so every z reads 'positive = better than peers'. Peer "
+        "groups (neutralisation) per indicator: "
+        + (scheme_txt or "see neut_level per indicator")
+        + f". Groups with fewer than {int(g('v2_min_group_size_l1', 20))} "
+        "valid values fall back to the sector, then to the whole universe; "
+        f"groups with fewer than {int(g('v2_min_group_valid', 5))} valid "
+        "values get z = 0. The neut_level per indicator names the level "
+        "actually used. Missing data stays missing (no imputation)."
+    )
+
+    min_valid = (
+        g("v2_min_valid_financial", {})
+        if segment == "financial"
+        else g("v2_min_valid_nonfin", {})
+    )
+    min_txt = ", ".join(
+        f"{f.capitalize()} {int(v)}" for f, v in (min_valid or {}).items()
+    )
+    lines.append(
+        "Factor z = mean of the stock's valid indicator z-scores; a factor is "
+        "missing when fewer indicators are valid than required ("
+        + (min_txt or "see settings")
+        + "). Factor coverage = share of valid indicators."
+    )
+
+    lines.append(
+        "Composite raw = weight-averaged factor z over the factors available "
+        f"for the stock; missing when the available weights sum to less than "
+        f"{float(g('v2_min_factor_weight', 0.70)):.2f} or neither Value nor "
+        "Quality is available. The raw composite is re-standardised across "
+        "the whole universe (winsorised at "
+        f"{_pct(g('v2_composite_winsor_lower', 0.01))}/"
+        f"{_pct(g('v2_composite_winsor_upper', 0.99))}, capped at "
+        f"+/-{float(cap):g}) into composite z. Composite pct is the "
+        "percentile rank of composite z across the universe and the "
+        "composite score is pct x 100: a score of 83 means the stock ranks "
+        "above 83% of the universe. It is a cross-sectional ranking, not an "
+        "absolute return or fair-value estimate. Data coverage is the "
+        "factor-weighted mean of the factor coverages."
+    )
+
+    lines.append(
+        "Classification (display only, from composite pct): A >= 90%, "
+        "B+ >= 80%, B >= 66.7%, C >= 50%, D >= 33%, F below."
+    )
+
+    entry, exit_ = g("pc_entry_pct", 0.80), g("pc_exit_pct", 0.667)
+    lines.append(
+        "Zone (portfolio rule): FILTER = fails at least one universe filter "
+        "(not investable); otherwise KANDIDAT = composite pct >= "
+        f"{_pct(entry, 1)} (buy candidate), HALTEN = between "
+        f"{_pct(exit_, 1)} and {_pct(entry, 1)} (hold buffer: a held stock "
+        f"stays), VERKAUFEN = below {_pct(exit_, 1)} (sell)."
+    )
+
+    lines.append(
+        "Universe filters (hard exclusions, all violations listed in "
+        f"filter.reasons): market cap >= {float(g('filter_min_market_cap', 1000)):g} "
+        f"M EUR; Piotroski >= {float(g('filter_min_piotroski', 5)):g}/9 "
+        "(financials proportionally); Altman-Z >= "
+        f"{float(g('filter_min_altman', 1.8)):g} (skipped for financials and "
+        f"real estate); 3-month average daily turnover >= "
+        f"{float(g('filter_min_adv', 2.0)):g} M EUR when available; data "
+        f"coverage >= {float(g('filter_min_coverage', 0.6)):g} and composite "
+        f"computable; listed for >= {int(g('filter_min_listing_days', 365))} "
+        "days when the IPO date is known; non-financials with debt/equity > "
+        f"{float(g('filter_max_de', 3.0)):g} AND interest coverage < "
+        f"{float(g('filter_min_icr', 2.0)):g}; manual exclusion overrides. "
+        "Missing market cap, Piotroski or Altman-Z data also fails the filter."
+    )
+
+    lines.append(
+        "The trend warning (death cross: price below SMA-50 below SMA-200) "
+        "and the technical signals are informational and do not change the "
+        "composite or the zone."
+    )
+    return lines
+
+
+def build_composite_v2_context(row, settings) -> dict:
     """``composite_v2``-Block des Faktor-Kontexts aus einer v2-Zeile.
 
     Enthält alle Eingaben des Composite v2 (Spec 2, 3, 4, 5.2): Composite-
     Score/Perzentil/Z, Klasse und Zone, Faktor-Z mit Abdeckung und Gewicht,
     Indikator-Z mit Rohwert, Richtung und Neutralisierungsebene, Segment,
-    Universumsfilter und Trend-Warnung. ``None``, wenn die Zeile keinen
-    gültigen Composite trägt.
+    Universumsfilter, Trend-Warnung und eine Kurzbeschreibung der
+    Systematik (:func:`build_v2_methodology`). Fehlt der Composite (z. B.
+    unzureichende Faktorabdeckung), bleibt ``score`` weg — der Block trägt
+    dann die vorhandenen Faktor-/Indikatordaten und den Filtergrund.
     """
     from .scoring_v2 import V2_FACTOR_NAMES
 
-    score = _num(row, "composite_score")
-    if score is None:
-        return None
-
-    block: dict = {"score": score}
+    block: dict = {}
+    if (score := _num(row, "composite_score")) is not None:
+        block["score"] = score
     for key, name in (
         ("composite_pct", "pct"),
         ("composite_z", "z"),
@@ -286,8 +447,9 @@ def build_composite_v2_context(row, settings) -> dict | None:
     if factors:
         block["factors"] = factors
 
+    indicator_map = _v2_indicator_map(row, segment)
     indicators: dict = {}
-    for factor, entries in _v2_indicator_map(row, segment).items():
+    for factor, entries in indicator_map.items():
         for name, direction in entries:
             z = _num(row, f"z_{name}")
             raw = _num(row, _V2_RAW_COLUMN.get(name, name))
@@ -317,6 +479,7 @@ def build_composite_v2_context(row, settings) -> dict | None:
 
     if (warn := _bool(row, "trend_warning")) is not None:
         block["trend_warning"] = warn
+    block["methodology"] = build_v2_methodology(settings, segment, indicator_map)
     return block
 
 
@@ -324,9 +487,9 @@ def build_factor_context(row: pd.Series | dict, settings=None) -> dict:
     """Baut den ``factor_context``-Payload aus einer ``STATE.scored``-Zeile.
 
     Folgt der aktiven Scoring-Version (``settings.scoring_version``): bei v2
-    trägt der Payload statt der v1-Score-Felder den vollständigen
-    ``composite_v2``-Block (:func:`build_composite_v2_context`); ohne
-    Settings oder bei v1 bleibt der bisherige v1-Payload. Neutrale Daten
+    trägt der Payload statt der v1-Score-Felder ausschließlich den
+    ``composite_v2``-Block (:func:`build_composite_v2_context`, inkl.
+    Methodik); ohne Settings oder bei v1 bleibt der bisherige v1-Payload. Neutrale Daten
     (Piotroski, Altman-Z, SMA-Signale, Identität) werden immer mitgegeben.
 
     NaN-/None-Felder werden weggelassen (Vertragskonvention mit dem
@@ -343,13 +506,12 @@ def build_factor_context(row: pd.Series | dict, settings=None) -> dict:
     elif isinstance(export_date, str) and export_date:
         fc["as_of"] = export_date
 
-    composite = None
+    # Bei aktivem Composite v2 nie v1-Score-Werte senden — auch ohne
+    # berechenbaren Composite trägt der v2-Block Faktoren, Indikatoren und
+    # den Filtergrund (die Agenten sollen das aktuelle Modell sehen).
     if settings is not None and getattr(settings, "scoring_version", "v1") == "v2":
-        composite = build_composite_v2_context(row, settings)
-
-    if composite is not None:
         fc["scoring_version"] = "v2"
-        fc["composite_v2"] = composite
+        fc["composite_v2"] = build_composite_v2_context(row, settings)
     else:
         fc["scoring_version"] = "v1"
         if (val := _num(row, "total_score")) is not None:
@@ -410,9 +572,10 @@ def primary_quant(factor_context: dict | None) -> tuple[float | None, str | None
     """
     fc = factor_context or {}
     comp = fc.get("composite_v2")
-    if isinstance(comp, dict) and comp.get("score") is not None:
+    if isinstance(comp, dict) or fc.get("scoring_version") == "v2":
+        comp = comp if isinstance(comp, dict) else {}
         try:
-            score = float(comp["score"])
+            score = float(comp["score"]) if comp.get("score") is not None else None
         except (TypeError, ValueError):
             score = None
         cls = comp.get("classification")
@@ -592,6 +755,13 @@ def start_analysis(
     payload, err = build_run_payload(agents_ticker, factor_context, settings)
     if err:
         return False, err
+    log.info(
+        "Agenten-Lauf %s (%s): factor_context scoring_version=%s, keys=%s",
+        ticker,
+        agents_ticker,
+        (factor_context or {}).get("scoring_version", "-"),
+        sorted(factor_context) if factor_context else "-",
+    )
 
     _set_job(
         ticker,
