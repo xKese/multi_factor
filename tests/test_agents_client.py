@@ -151,8 +151,9 @@ def test_build_factor_context_v2_replaces_v1_scores():
     fc = agents_client.build_factor_context(_scored_row_v2(), _v2_settings())
     assert fc["scoring_version"] == "v2"
     # v1-Score-Felder sind weg …
-    assert not {"total_score", "factor_scores", "recommendation",
-                "classification", "filter_ok"} & set(fc)
+    v1_keys = {"total_score", "factor_scores", "recommendation",
+               "classification", "filter_ok"}
+    assert not v1_keys & set(fc)
     # … neutrale Daten bleiben.
     assert fc["piotroski"] == 7.0 and fc["altman_z"] == 4.2
     assert fc["signals"]["sma_signal"] == "GOLDEN CROSS"
@@ -211,15 +212,48 @@ def test_build_factor_context_v2_financial_segment():
     assert ind["roe"] == {"factor": "quality", "direction": 1, "z": 1.1, "value": 0.12}
 
 
-def test_build_factor_context_v2_without_composite_falls_back_to_v1():
-    """Zeile ohne gültigen Composite (z. B. NaN) → v1-Payload, damit die
-    Agenten überhaupt einen Prior erhalten."""
+def test_build_factor_context_v2_without_composite_stays_v2():
+    """Zeile ohne berechenbaren Composite (NaN): bei v2 trotzdem kein
+    v1-Payload — der Block trägt Faktoren, Indikatoren und Filtergrund."""
     row = _scored_row_v2()
     row["composite_score"] = float("nan")
+    row["filter_pass"] = False
+    row["filter_reasons"] = ["coverage"]
     fc = agents_client.build_factor_context(row, _v2_settings())
-    assert fc["scoring_version"] == "v1"
-    assert fc["total_score"] == 78.2
-    assert "composite_v2" not in fc
+    assert fc["scoring_version"] == "v2"
+    assert "total_score" not in fc and "recommendation" not in fc
+    comp = fc["composite_v2"]
+    assert "score" not in comp
+    assert comp["factors"]["quality"]["z"] == 1.2
+    assert comp["filter"] == {"pass": False, "reasons": ["coverage"]}
+    assert agents_client.primary_quant(fc) == (None, "B+", "v2")
+
+
+def test_build_factor_context_v2_includes_methodology():
+    fc = agents_client.build_factor_context(_scored_row_v2(), _v2_settings())
+    meth = fc["composite_v2"]["methodology"]
+    assert isinstance(meth, list) and all(isinstance(m, str) for m in meth)
+    text = " ".join(meth)
+    # Gewichte, Segment-Indikatoren, Neutralisierung, Schwellen, Filter.
+    assert "Value 0.30, Quality 0.30, Momentum 0.25, Investment 0.15" in text
+    assert "non-financials" in text
+    assert "ev_ebitda (lower is better)" in text
+    assert "debt_ebit (lower is better)" in text
+    assert "global GICS industry group" in text
+    assert "winsorised at the 3%/97% quantiles" in text
+    assert "A >= 90%, B+ >= 80%, B >= 66.7%, C >= 50%, D >= 33%" in text
+    assert "KANDIDAT = composite pct >= 80.0%" in text
+    assert "VERKAUFEN = below 66.7%" in text
+    assert "market cap >= 1000 M EUR" in text
+    assert "Piotroski >= 5/9" in text
+    # Financials: eigener Indikatorsatz und Mindestabdeckung je 1.
+    fc_fin = agents_client.build_factor_context(
+        _scored_row_v2(financial=True), _v2_settings()
+    )
+    text_fin = " ".join(fc_fin["composite_v2"]["methodology"])
+    assert "(financials)" in text_fin
+    assert "Value: pb (lower is better), pe (lower is better)" in text_fin
+    assert "Value 1, Quality 1, Momentum 1, Investment 1" in text_fin
 
 
 def test_primary_quant_and_quant_direction():

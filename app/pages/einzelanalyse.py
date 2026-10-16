@@ -1323,13 +1323,16 @@ def _current_score_for(ticker: str, factor_context: dict | None) -> float | None
 
 def _agent_start_state(ticker: str, service_ok: bool, error: str | None) -> html.Div:
     """Zustand 1 — Start: zweispaltige Karte mit Ablauf-Panel."""
+    from app.ui.score_context import primary_cols
+
     score, cls_code = _current_quant(ticker)
     if score is not None:
+        label = primary_cols(STATE.scored)["score_label"]
         quant_txt = (
-            f"Der Quant-Score dieser Seite ({fmt_de(score, 1)}"
+            f"Der {label} dieser Seite ({fmt_de(score, 1)}"
             + (f" · {cls_code}" if cls_code else "")
-            + ") wird den Agenten als Vorab-Rating mitgegeben — sie bestätigen "
-            "oder widerlegen ihn. "
+            + ") wird den Agenten samt Faktor-/Indikatordaten und Methodik "
+            "als Vorab-Rating mitgegeben — sie bestätigen oder widerlegen ihn. "
         )
     else:
         quant_txt = "Für diesen Titel liegt kein Quant-Score vor (Ad-hoc-Analyse). "
