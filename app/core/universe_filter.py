@@ -15,11 +15,7 @@ import pandas as pd
 
 from .config import Settings
 from .diagnostics import SEV_INFO, Diagnostic
-from .piotroski import (
-    PIOTROSKI_MAX_CRITERIA,
-    is_financial_sector,
-    is_real_estate_sector,
-)
+from .piotroski import PIOTROSKI_MAX_CRITERIA, is_financial_sector
 
 
 def _optional_available(df: pd.DataFrame, column: str) -> bool:
@@ -38,7 +34,13 @@ def apply_universe_filters(
     overrides: pd.DataFrame | None = None,
     snapshot_date: date | None = None,
 ) -> tuple[pd.DataFrame, list[Diagnostic]]:
-    """Wendet die 8 Filter aus Spec 4 an.
+    """Wendet die 7 Filter aus Spec 4 an.
+
+    Der Altman Z-Score ist bewusst **kein** Filterkriterium mehr: Die
+    Z-Score-Gewichte sind auf klassische Industriebilanzen kalibriert und
+    liefern u. a. für Technologie-, Software- und Dienstleistungsunternehmen
+    (kaum Working Capital/Sachanlagen, hohe Marktkapitalisierung) keine
+    belastbare Insolvenzaussage. Er bleibt als Anzeigespalte erhalten.
 
     Ergänzt ``filter_pass`` (bool) und ``filter_reasons`` (list[str]) und
     liefert die Diagnoseliste. Erwartet die v2-Spalten
@@ -59,12 +61,6 @@ def apply_universe_filters(
         if "is_financial" in out.columns
         else is_financial_sector(out)
     )
-    is_re = (
-        out["is_real_estate"].astype(bool)
-        if "is_real_estate" in out.columns
-        else is_real_estate_sector(out) & ~is_fin
-    )
-
     # 1. Marktkapitalisierung (Mio EUR); fehlende Daten → nicht eligible.
     mcap = _num(out, "market_cap")
     flag(mcap < settings.filter_min_market_cap, "market_cap")
@@ -78,13 +74,7 @@ def apply_universe_filters(
     flag(pio.notna() & (pio < min_pio), "piotroski")
     flag(pio.isna(), "piotroski_na")
 
-    # 3. Altman Z ≥ 1,8; übersprungen für Financials und Real Estate.
-    altman = _num(out, "altman_z")
-    skip_altman = is_fin | is_re
-    flag(~skip_altman & altman.notna() & (altman < settings.filter_min_altman), "altman")
-    flag(~skip_altman & altman.isna(), "altman_na")
-
-    # 4. Liquidität: adv_3m ≥ 2,0 Mio EUR — nur wenn Spalte vorhanden.
+    # 3. Liquidität: adv_3m ≥ 2,0 Mio EUR — nur wenn Spalte vorhanden.
     if _optional_available(out, "adv_3m"):
         adv = _num(out, "adv_3m")
         flag(adv.notna() & (adv < settings.filter_min_adv), "liquidity")
@@ -107,7 +97,7 @@ def apply_universe_filters(
             )
         )
 
-    # 5. Datenabdeckung: data_coverage_v2 ≥ 0,6 und composite_z nicht NaN.
+    # 4. Datenabdeckung: data_coverage_v2 ≥ 0,6 und composite_z nicht NaN.
     coverage = _num(out, "data_coverage_v2")
     composite = _num(out, "composite_z")
     flag(
@@ -115,7 +105,7 @@ def apply_universe_filters(
         "coverage",
     )
 
-    # 6. IPO: Erstnotiz mindestens 365 Tage vor snapshot_date — nur wenn
+    # 5. IPO: Erstnotiz mindestens 365 Tage vor snapshot_date — nur wenn
     # Spalte vorhanden.
     if _optional_available(out, "ipo_date"):
         ipo = pd.to_datetime(out["ipo_date"], errors="coerce")
@@ -140,7 +130,7 @@ def apply_universe_filters(
             )
         )
 
-    # 7. Extremverschuldung Nicht-Financials: D/E > 3,0 UND ICR < 2,0.
+    # 6. Extremverschuldung Nicht-Financials: D/E > 3,0 UND ICR < 2,0.
     # Fehlende Werte → Filter greift nicht.
     de = _num(out, "debt_equity")
     icr = _num(out, "int_coverage")
@@ -153,7 +143,7 @@ def apply_universe_filters(
         "extreme_leverage",
     )
 
-    # 8. Override-Ausschluss: aktiver Override mit direction = "exclude".
+    # 7. Override-Ausschluss: aktiver Override mit direction = "exclude".
     if overrides is not None and not overrides.empty:
         active = overrides[
             (overrides.get("status") == "active")

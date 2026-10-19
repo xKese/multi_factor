@@ -49,7 +49,7 @@ Vollständige Methodik in `MODEL_DESCRIPTION.md` (§11/§12) — Kurzfassung:
   Perzentil), Klasse A ≥ 90 · B+ ≥ 80 · B ≥ 66,7 · C ≥ 50 · D ≥ 33 · F,
   sowie die **Zone** KANDIDAT / HALTEN / VERKAUFEN / FILTER — sie ersetzt
   die v1-Empfehlung.
-- **Universumsfilter** (Piotroski, Altman Z, Market Cap, Abdeckung,
+- **Universumsfilter** (Piotroski, Market Cap, Abdeckung,
   optional Liquidität/IPO/Extremverschuldung) mit protokollierten
   `filter_reasons`; **keine stillen Fallbacks** — jede Ausnahme erzeugt
   eine Diagnose (Fehler/Warnung/Info), sichtbar beim Daten-Import, im
@@ -92,10 +92,11 @@ Vollständige Methodik in `MODEL_DESCRIPTION.md` (§11/§12) — Kurzfassung:
   Forward-Indikatoren (EPS- und optional Umsatz-Schätzungen)
 - **Momentum** auf Basis des 12-1-Momentums (12M-Return ohne letzten Monat)
 - **Gesamt-Score 0 – 100** → Klassifikation A / B+ / B / C / D / F
-- **Filter**: Piotroski ≥ 5 · Altman Z ≥ 1,8 (übersprungen für Financials
-  und Real Estate) · Market Cap ≥ 1 Mrd. Piotroski erfordert mindestens
-  6 von 9 bewertbare Kriterien (Financials: 4 von 6), sonst keine
-  Filter-Aussage
+- **Filter**: Piotroski ≥ 5 · Market Cap ≥ 1 Mrd. Piotroski erfordert
+  mindestens 6 von 9 bewertbare Kriterien (Financials: 4 von 6), sonst
+  keine Filter-Aussage. Der Altman Z-Score ist **kein** Filterkriterium
+  (für Technologie-, Software- und Dienstleistungsunternehmen nicht
+  anwendbar) und wird nur informativ angezeigt
 - **Empfehlung**: STRONG BUY / BUY / HOLD / SELL mit editierbaren Schwellen
   (BUY ab 70, SELL erst unter 45 — das breite HOLD-Band verhindert
   Empfehlungs-Flackern an einer einzelnen Schwelle); zusätzlich
@@ -191,8 +192,9 @@ sie deshalb gesondert:
   „Verschuldung gesunken", „Current Ratio gestiegen", „Bruttomarge
   gestiegen"); mindestens 4 bewertbare Kriterien nötig. Die Filter-Schwelle
   wird proportional umgerechnet (min. 5 von 9 ≙ 3,33 von 6).
-- **Altman Z**: Filterkriterium übersprungen für Financials **und Real
-  Estate** — der Z-Score ist auf Industrieunternehmen kalibriert.
+- **Altman Z**: kein Filterkriterium (global) — der Z-Score ist auf
+  Industrieunternehmen kalibriert und für Financials, Real Estate wie auch
+  Technologie-/Dienstleistungsunternehmen nicht anwendbar; reine Anzeige.
 
 **Bekannte Grenze:** Bankspezifische Kennzahlen (CET1-Quote, Cost-Income-
 Ratio, Zinsmarge, NPL-Quote, P/TBV) sowie REIT-Kennzahlen (P/FFO,
@@ -259,8 +261,8 @@ Neutralisierung, Winsorisierung, Mindestabdeckung, Klassen-/Zonen-Schwellen,
 Filterregeln), damit die Agenten die Werte einordnen können — die
 v1-Score-Felder entfallen dann vollständig, auch wenn der Composite für einen
 Titel nicht berechenbar ist. Bei `scoring_version = v1` wird wie bisher der
-v1-Payload gesendet. Piotroski, Altman-Z, SMA-Signale und Identität gehen in
-beiden Fällen mit. Der Service muss den Block kennen (Whitelist +
+v1-Payload gesendet. Piotroski, Altman-Z (nur informativ), SMA-Signale und
+Identität gehen in beiden Fällen mit. Der Service muss den Block kennen (Whitelist +
 Prompt-Block im TradingAgents-Repo), sonst verwirft er ihn.
 
 - **Einzelanalyse** → Abschnitt „Agenten-Tiefenanalyse“: Analyse für den

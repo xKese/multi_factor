@@ -279,7 +279,8 @@ def build_v2_methodology(
         "Composite v2 is a relative, z-score based 4-factor ranking of the "
         "multi_factor stock universe (Koyfin export as of the as_of date). "
         f"Strategic factor weights: {weight_txt}. Growth and low volatility "
-        "are not factors; Piotroski and Altman-Z act only as universe filters."
+        "are not factors; Piotroski acts only as a universe filter and "
+        "Altman-Z is informational only (not a filter)."
     )
 
     seg_label = {
@@ -376,16 +377,16 @@ def build_v2_methodology(
         "Universe filters (hard exclusions, all violations listed in "
         f"filter.reasons): market cap >= {float(g('filter_min_market_cap', 1000)):g} "
         f"M EUR; Piotroski >= {float(g('filter_min_piotroski', 5)):g}/9 "
-        "(financials proportionally); Altman-Z >= "
-        f"{float(g('filter_min_altman', 1.8)):g} (skipped for financials and "
-        f"real estate); 3-month average daily turnover >= "
+        "(financials proportionally); 3-month average daily turnover >= "
         f"{float(g('filter_min_adv', 2.0)):g} M EUR when available; data "
         f"coverage >= {float(g('filter_min_coverage', 0.6)):g} and composite "
         f"computable; listed for >= {int(g('filter_min_listing_days', 365))} "
         "days when the IPO date is known; non-financials with debt/equity > "
         f"{float(g('filter_max_de', 3.0)):g} AND interest coverage < "
         f"{float(g('filter_min_icr', 2.0)):g}; manual exclusion overrides. "
-        "Missing market cap, Piotroski or Altman-Z data also fails the filter."
+        "Missing market cap or Piotroski data also fails the filter. Altman-Z "
+        "is reported for information only and is deliberately not a filter "
+        "(not applicable to technology, software and service companies)."
     )
 
     lines.append(

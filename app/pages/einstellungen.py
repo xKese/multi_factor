@@ -60,7 +60,6 @@ V2_SETTINGS_FIELDS: list[tuple[str, str, float, bool]] = [
 PC_SETTINGS_FIELDS: list[tuple[str, str, float, bool]] = [
     ("filter_min_market_cap", "Filter: Min. Market Cap (Mio EUR)", 100, False),
     ("filter_min_piotroski", "Filter: Min. Piotroski (von 9)", 0.5, False),
-    ("filter_min_altman", "Filter: Min. Altman Z", 0.1, False),
     ("filter_min_adv", "Filter: Min. ADV 3M (Mio EUR)", 0.5, False),
     ("filter_min_coverage", "Filter: Min. Datenabdeckung v2", 0.05, False),
     ("filter_min_listing_days", "Filter: Min. Tage seit IPO", 5, True),
@@ -917,21 +916,6 @@ def layout(**_) -> html.Div:
                     ),
                     dbc.Row(
                         [
-                            dbc.Col(html.Label("Min. Altman Z-Score"), md=6),
-                            dbc.Col(
-                                dbc.Input(
-                                    id="min-altman",
-                                    type="number",
-                                    value=s.min_altman_z,
-                                    step=0.1,
-                                ),
-                                md=4,
-                            ),
-                        ],
-                        className="mb-2",
-                    ),
-                    dbc.Row(
-                        [
                             dbc.Col(html.Label("Min. Market Cap (Mio.)"), md=6),
                             dbc.Col(
                                 dbc.Input(
@@ -1127,7 +1111,6 @@ def _factor_sum(values: list) -> tuple[list, str]:
     Output({"type": "factor-weight", "index": ALL}, "value"),
     Output({"type": "ind-weight", "index": ALL}, "value"),
     Output("min-piotroski", "value"),
-    Output("min-altman", "value"),
     Output("min-mcap", "value"),
     Output("min-industry", "value"),
     Output("buy-threshold", "value"),
@@ -1156,7 +1139,6 @@ def _reset(_n, factor_ids, ind_ids):
         factor_vals,
         ind_vals,
         defaults.min_piotroski,
-        defaults.min_altman_z,
         defaults.min_market_cap,
         defaults.min_stocks_per_industry,
         defaults.buy_threshold,
@@ -1174,7 +1156,6 @@ def _reset(_n, factor_ids, ind_ids):
     State({"type": "factor-weight", "index": "momentum"}, "value"),
     State({"type": "factor-weight", "index": "lowvol"}, "value"),
     State("min-piotroski", "value"),
-    State("min-altman", "value"),
     State("min-mcap", "value"),
     State("min-industry", "value"),
     State("buy-threshold", "value"),
@@ -1185,7 +1166,7 @@ def _reset(_n, factor_ids, ind_ids):
     prevent_initial_call=True,
 )
 def _save(
-    n_clicks, v, q, g, m, lv, piotr, altman, mcap, minind,
+    n_clicks, v, q, g, m, lv, piotr, mcap, minind,
     buy_thr, sell_thr, mode, ind_vals, ind_ids,
 ):
     if not n_clicks:
@@ -1200,7 +1181,6 @@ def _save(
         "lowvol": float(lv or 0),
     }
     s.min_piotroski = float(piotr or 0)
-    s.min_altman_z = float(altman or 0)
     s.min_market_cap = float(mcap or 0)
     s.min_stocks_per_industry = int(minind or 1)
     # Leeres Feld → Default; SELL-Schwelle darf die BUY-Schwelle nicht

@@ -27,7 +27,7 @@ erweitert. Es handelt sich um ein **Aktien-Screening- und Scoring-System**:
   Volatility) auf Basis von Perzentil-Rankings innerhalb der GICS-Industrie
   (Abschnitt 3). Beide Versionen werden bei jedem Import berechnet und im
   PIT-Archiv gespeichert; `scoring_version` steuert nur die primäre Anzeige.
-- **Output v1:** Klassifikation (A–F), Qualitätsfilter (Piotroski, Altman Z,
+- **Output v1:** Klassifikation (A–F), Qualitätsfilter (Piotroski,
   Market Cap) und Empfehlung (STRONG BUY / BUY / HOLD / SELL) je Aktie.
 - **Output v2:** `composite_z`/`composite_score`, Klasse v2, Zone
   (KANDIDAT/HALTEN/VERKAUFEN/FILTER), Zielportfolio mit Trade-Liste.
@@ -249,9 +249,6 @@ total_score = Σ(faktor_score_f · W_f · vorhanden_f) / Σ(W_f · vorhanden_f)
   (`FINANCIAL_IRRELEVANT_INDICATORS`):
   `ev_ebitda, pfcf, gross_margin, op_margin, int_coverage, current_ratio, ocf_ni,
   debt_equity, altman_z`.
-- **Altman-Z-Filterkriterium** wird für Financials **und** Real Estate übersprungen
-  (Z-Score für Banken nicht definiert, für REITs auf sachfremde Bilanzstruktur
-  kalibriert).
 - **Piotroski:** Financials werden auf 6 statt 9 Kriterien gescort (siehe Abschnitt 4);
   die Filterschwelle wird proportional skaliert.
 
@@ -268,13 +265,18 @@ total_score = Σ(faktor_score_f · W_f · vorhanden_f) / Σ(W_f · vorhanden_f)
 
 ### 3.10 Qualitätsfilter (`_filter_row`)
 
-Alle drei Kriterien müssen erfüllt sein → `JA`, sonst `NEIN`; fehlen benötigte
+Beide Kriterien müssen erfüllt sein → `JA`, sonst `NEIN`; fehlen benötigte
 Daten → `-` (keine Aussage):
 
 1. **Piotroski ≥ 5** (von 9) — für Financials proportional auf die 6er-Skala
    umgerechnet: 5 · 6/9 ≈ 3,33.
-2. **Altman Z ≥ 1,8** — übersprungen für Financials und Real Estate.
-3. **Market Cap ≥ 1.000** (Mio., Einheit des Exports).
+2. **Market Cap ≥ 1.000** (Mio., Einheit des Exports).
+
+Der **Altman Z-Score ist kein Filterkriterium** (global, für alle Sektoren):
+Die Z-Score-Gewichte sind auf klassische Industriebilanzen kalibriert und
+liefern für Technologie-, Software- und Dienstleistungsunternehmen (ebenso
+Financials und Real Estate) keine belastbare Insolvenzaussage. Er bleibt
+als Quality-Indikator (Abschnitt 3) und Anzeigespalte erhalten.
 
 ### 3.11 Empfehlung (`_recommendation`) und Overlay
 
@@ -686,7 +688,8 @@ vollständig — auch im Abdeckungs-Nenner.
 1,0 ± 0,001, sonst Import-Fehler): Value 0,30 · Quality 0,30 ·
 Momentum 0,25 · Investment 0,15. Low Volatility ist kein Faktor mehr
 (wirkt nur in der Gewichtung, 12.3); Growth entfällt ersatzlos; Piotroski
-und Altman wandern vollständig in die Filter (12.1).
+wandert vollständig in die Filter (12.1); Altman Z ist weder Faktor noch
+Filter, sondern reine Anzeige.
 
 ### 11.4 Standardisierung und Aggregation
 
@@ -855,12 +858,19 @@ Alle verletzten Bedingungen werden in `filter_reasons` protokolliert
 |---|---|---|---|
 | 1 | Market Cap | ≥ 1.000 Mio EUR (`filter_min_market_cap`) | nicht eligible (`market_cap_na`) |
 | 2 | Piotroski | ≥ 5 von 9; Financials proportional ≥ 3,33 von 6 (`filter_min_piotroski`) | nicht eligible (`piotroski_na`) |
-| 3 | Altman Z | ≥ 1,8 (`filter_min_altman`); Skip für Financials und Real Estate | nicht eligible außer bei Skip |
-| 4 | Liquidität | `adv_3m ≥ 2,0` Mio EUR (`filter_min_adv`); nur wenn Spalte vorhanden | Spalte fehlt → übersprungen (Info) |
-| 5 | Abdeckung | `data_coverage_v2 ≥ 0,6` (`filter_min_coverage`) und `composite_z` nicht NaN | — |
-| 6 | IPO | `ipo_date` ≥ 365 Tage vor Snapshot (`filter_min_listing_days`); nur wenn Spalte vorhanden | Spalte fehlt → übersprungen |
-| 7 | Extremverschuldung | Nicht-Fin: `debt_equity > 3,0` UND `int_coverage < 2,0` (`filter_max_de`/`filter_min_icr`) | fehlende Werte → greift nicht |
-| 8 | Override | aktiver Override `direction = "exclude"` | — |
+| 3 | Liquidität | `adv_3m ≥ 2,0` Mio EUR (`filter_min_adv`); nur wenn Spalte vorhanden | Spalte fehlt → übersprungen (Info) |
+| 4 | Abdeckung | `data_coverage_v2 ≥ 0,6` (`filter_min_coverage`) und `composite_z` nicht NaN | — |
+| 5 | IPO | `ipo_date` ≥ 365 Tage vor Snapshot (`filter_min_listing_days`); nur wenn Spalte vorhanden | Spalte fehlt → übersprungen |
+| 6 | Extremverschuldung | Nicht-Fin: `debt_equity > 3,0` UND `int_coverage < 2,0` (`filter_max_de`/`filter_min_icr`) | fehlende Werte → greift nicht |
+| 7 | Override | aktiver Override `direction = "exclude"` | — |
+
+**Kein Altman-Z-Filter:** Der Altman Z-Score ist bewusst kein Universums-
+filter mehr (früheres Setting `filter_min_altman` entfällt; gespeicherte
+Werte werden beim Laden ignoriert). Die Z-Score-Gewichte sind auf
+klassische Industriebilanzen kalibriert und für Technologie-, Software- und
+Dienstleistungsunternehmen — ebenso Financials und Real Estate — nicht
+anwendbar. Die Spalte `altman_z` bleibt informativ in Tabellen, Factsheets
+und im Agenten-Payload erhalten.
 
 ### 12.1a Konstruktionsprofile (Versionen der `pc_*`-Parameter)
 

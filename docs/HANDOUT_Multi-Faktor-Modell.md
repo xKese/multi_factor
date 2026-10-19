@@ -11,7 +11,7 @@ Das Modell ist in der Python/Dash-Anwendung `multi_factor` umgesetzt und ersetzt
 | Baustein | Was er leistet | Ergebnis |
 | --- | --- | --- |
 | Daten-Import | Koyfin-CSV (57 Spalten) einlesen, validieren, GICS-Industriegruppe zuordnen | bereinigtes Universum |
-| Universumsfilter | Piotroski, Altman Z, Market Cap, Abdeckung, optional Liquidität/IPO/Verschuldung | investierbares Universum + Filtergründe |
+| Universumsfilter | Piotroski, Market Cap, Abdeckung, optional Liquidität/IPO/Verschuldung | investierbares Universum + Filtergründe |
 | Scoring v2 (primär) | Z-Score-Composite aus 4 Faktoren, sequenziell neutralisiert | `composite_z`, Score 0–100, Klasse A–F, Zone |
 | Scoring v1 (Vergleich) | Perzentil-Score aus 5 Faktoren innerhalb der GICS-Industrie | Gesamt-Score 0–100, Empfehlung |
 | Modellportfolio | regelbasierte Konstruktion von 35 Titeln mit Bandbreiten und TE-Kontrolle | Zielportfolio, Trade-Liste |
@@ -31,14 +31,14 @@ Der Prozess läuft in sechs Stufen, jede Stufe ist deterministisch (gleiche Eing
 2. **Kennzahlen ableiten und bereinigen**: abgeleitete Größen wie Bruttogewinn/Total Assets, Accruals, Asset Growth, Aktienemission und risikoadjustiertes 12-1-Momentum; unplausible Werte (negative Multiples, Ausreißer außerhalb definierter Bänder) werden auf NaN gesetzt, nie imputiert.
 3. **Standardisieren**: je Indikator Winsorisierung und Z-Score innerhalb der GICS-Industriegruppe (Ebene 1) und anschließend innerhalb der Region (Ebene 2). So wird ein Bankentitel nur mit Banken verglichen und ein europäischer Titel nicht durch US-Bewertungsniveaus verzerrt.
 4. **Aggregieren**: Faktor-Z-Score als Mittel der gültigen Indikator-Z-Scores, Composite als gewichtete Summe der vier Faktoren (Value 0,30 / Quality 0,30 / Momentum 0,25 / Investment 0,15), erneut standardisiert und in ein Perzentil 0–100 übersetzt.
-5. **Filtern und zonieren**: harte Ausschlüsse (Market Cap, Piotroski, Altman Z, Datenabdeckung, optional Liquidität, IPO-Alter, Extremverschuldung, Overrides) und Einteilung in die Zonen KANDIDAT (Perzentil ≥ 80), HALTEN (66,7 bis 80), VERKAUFEN (< 66,7) und FILTER.
+5. **Filtern und zonieren**: harte Ausschlüsse (Market Cap, Piotroski, Datenabdeckung, optional Liquidität, IPO-Alter, Extremverschuldung, Overrides) und Einteilung in die Zonen KANDIDAT (Perzentil ≥ 80), HALTEN (66,7 bis 80), VERKAUFEN (< 66,7) und FILTER.
 6. **Portfolio konstruieren**: Auswahl von 35 Titeln aus der KANDIDAT-Zone unter Sektor- und Regionsbandbreiten, Gewichtung nach Score und Volatilität, Ex-ante-Tracking-Error-Kontrolle, Trade-Liste mit Turnover-Budget.
 
 *(Abbildung im Online-Dokument: Modellprozess, sechs Stufen vom Import zum Zielportfolio; die Stufen entsprechen der Liste oben.)*
 
 Jede Stufe ist deterministisch; Ausnahmen erzeugen Diagnosen statt stiller Fallbacks, und nur die letzte Stufe erzeugt Handlungen.
 
-Zwei Scoring-Versionen laufen parallel: **v2 (Composite, primär)** ist das beschriebene Z-Score-Verfahren mit vier Faktoren. **v1 (Vergleichsmodus)** ist das ursprüngliche Excel-Verfahren mit fünf Faktoren (Value, Quality, Growth, Momentum, Low Volatility) auf Basis von Perzentil-Rängen innerhalb der GICS-Industrie. Beide werden bei jedem Import berechnet und im Punkt-in-Zeit-Archiv gespeichert; die Einstellung `scoring_version` steuert nur die primäre Anzeige. Growth und Low Volatility sind in v2 keine Faktoren mehr: Growth entfällt ersatzlos (schwache Evidenz), Low Volatility wirkt nur noch über die Gewichtung im Portfolio, Piotroski und Altman Z sind reine Filter.
+Zwei Scoring-Versionen laufen parallel: **v2 (Composite, primär)** ist das beschriebene Z-Score-Verfahren mit vier Faktoren. **v1 (Vergleichsmodus)** ist das ursprüngliche Excel-Verfahren mit fünf Faktoren (Value, Quality, Growth, Momentum, Low Volatility) auf Basis von Perzentil-Rängen innerhalb der GICS-Industrie. Beide werden bei jedem Import berechnet und im Punkt-in-Zeit-Archiv gespeichert; die Einstellung `scoring_version` steuert nur die primäre Anzeige. Growth und Low Volatility sind in v2 keine Faktoren mehr: Growth entfällt ersatzlos (schwache Evidenz), Low Volatility wirkt nur noch über die Gewichtung im Portfolio, Piotroski ist ein reiner Filter. Altman Z ist weder Faktor noch Filter, sondern eine reine Informationskennzahl (für Technologie-, Software- und Dienstleistungsunternehmen nicht anwendbar).
 
 ## 3. Die vier Faktoren und ihre Indikatoren
 
@@ -58,7 +58,7 @@ Jeder Faktor besteht aus wenigen, gleichgewichteten Indikatoren. Die Richtung gi
 | Investment (0,15) | Asset Growth | `total_assets / total_assets_prev − 1` | −1 | Sektor → Region | aggressive Bilanzexpansion geht niedrigen Renditen voraus |
 | Investment | Nettoaktienemission | `shares_out / shares_out_prev − 1` | −1 | Sektor → Region | Verwässerung signalisiert Überbewertung, Rückkäufe das Gegenteil |
 
-**Financials** (GICS-Sektor enthält „financ“) werden auf einem eigenen, reduzierten Satz gescort, weil EV, EBITDA, Cashflow und Verschuldungskennzahlen bei Banken und Versicherern nicht sinnvoll definiert sind: Value = P/B (−1) und P/E (−1), Quality = ROE (+1, nur bei nicht-negativem Eigenkapital) und Accruals (−1), Momentum wie oben, Investment = Nettoaktienemission (−1). Die ausgeschlossenen Indikatoren fehlen auch im Abdeckungsnenner, so dass Financials keine schlechtere Datenabdeckung ausweisen. **Real Estate** wird wie Nicht-Financials behandelt, aber ohne Accruals; der Altman-Z-Filter entfällt für beide Gruppen.
+**Financials** (GICS-Sektor enthält „financ“) werden auf einem eigenen, reduzierten Satz gescort, weil EV, EBITDA, Cashflow und Verschuldungskennzahlen bei Banken und Versicherern nicht sinnvoll definiert sind: Value = P/B (−1) und P/E (−1), Quality = ROE (+1, nur bei nicht-negativem Eigenkapital) und Accruals (−1), Momentum wie oben, Investment = Nettoaktienemission (−1). Die ausgeschlossenen Indikatoren fehlen auch im Abdeckungsnenner, so dass Financials keine schlechtere Datenabdeckung ausweisen. **Real Estate** wird wie Nicht-Financials behandelt, aber ohne Accruals.
 
 **Bereinigung vor der Standardisierung** (nur auf internen Kopien, Werte werden auf NaN gesetzt und nie imputiert): negative Multiples bei P/E, P/B, P/FCF, EV/EBITDA, EV/EBIT; FCF-Yield außerhalb −0,5 bis 0,5; Nettoverschuldung/EBITDA unter −20 oder über 50; Debt/EBIT über 50; Asset Growth und Aktienemission außerhalb −0,9 bis 3,0; Accruals außerhalb −1 bis 1; Gross Profit/Assets außerhalb −1 bis 3; ROIC außerhalb −1 bis 2; EPS-Revisionen außerhalb −1 bis 1; negatives Debt/Equity. Das risikoadjustierte Momentum verlangt eine Volatilität von mindestens 0,05, sonst wird das unadjustierte 12-1-Momentum verwendet.
 
@@ -190,12 +190,13 @@ Das Modellportfolio ist ein regelbasiertes Zielportfolio von 35 Titeln (Band 25 
 | --- | --- | --- | --- |
 | 1 | Market Cap | ≥ 1.000 Mio EUR | nicht eligible |
 | 2 | Piotroski | ≥ 5 von 9, Financials ≥ 3,33 von 6 | nicht eligible |
-| 3 | Altman Z | ≥ 1,8, übersprungen für Financials und Real Estate | nicht eligible außer bei Skip |
-| 4 | Liquidität | Tagesumsatz 3M ≥ 2,0 Mio EUR, nur wenn Spalte vorhanden | Filter übersprungen |
-| 5 | Abdeckung | `data_coverage_v2` ≥ 0,6 und Composite nicht NaN | nicht eligible |
-| 6 | IPO-Alter | Erstnotiz ≥ 365 Tage vor Snapshot, nur wenn Spalte vorhanden | Filter übersprungen |
-| 7 | Extremverschuldung | Nicht-Fin: Debt/Equity > 3,0 und Zinsdeckung < 2,0 | greift nicht |
-| 8 | Override | aktiver Override mit Richtung `exclude` | — |
+| 3 | Liquidität | Tagesumsatz 3M ≥ 2,0 Mio EUR, nur wenn Spalte vorhanden | Filter übersprungen |
+| 4 | Abdeckung | `data_coverage_v2` ≥ 0,6 und Composite nicht NaN | nicht eligible |
+| 5 | IPO-Alter | Erstnotiz ≥ 365 Tage vor Snapshot, nur wenn Spalte vorhanden | Filter übersprungen |
+| 6 | Extremverschuldung | Nicht-Fin: Debt/Equity > 3,0 und Zinsdeckung < 2,0 | greift nicht |
+| 7 | Override | aktiver Override mit Richtung `exclude` | — |
+
+Der Altman Z-Score ist bewusst kein Filterkriterium: Seine Gewichte sind auf klassische Industriebilanzen kalibriert und liefern für Technologie-, Software- und Dienstleistungsunternehmen (ebenso Financials und Real Estate) keine belastbare Aussage. Er wird nur informativ ausgewiesen.
 
 **Schritt 2: Selektion** (`select_portfolio`). Gehaltene Titel in KANDIDAT oder HALTEN sowie Include-Overrides bleiben im Portfolio, alle anderen gehaltenen Titel werden verkauft. Dann werden Kandidaten aus der KANDIDAT-Zone in absteigender Reihenfolge von `composite_z` aufgenommen, bis die Zielanzahl 35 erreicht ist. Ein Kandidat wird nur aufgenommen, wenn mit den vorläufigen Gewichten das Sektor- und das Regionsband (±10 Prozentpunkte gegen die Benchmark) und das Maximum von 8 Titeln je Sektor eingehalten bleiben. Geprüft wird nur der Sektor und die Region des Kandidaten; andere Gruppen können durch eine Aufnahme nur verwässert werden. Das Modell **verkauft nie wegen einer Bandbreite**; eine Verletzung aus der Pufferzone wird nur als Warnung ausgewiesen. Unter 25 Titeln greift die Notfüllzone (Perzentil 70 bis 80) mit Warnung; bleibt das Portfolio trotzdem unter 25, erzeugt der Lauf eine Fehler-Diagnose, gibt das Zielportfolio aber aus.
 
@@ -287,7 +288,7 @@ Offene Punkte, die im Komitee regelmäßig zu prüfen sind: Fallback-Anteile je 
 | Richtung | +1 hoher Wert gut, −1 niedriger Wert gut; wirkt nur auf Ebene 1 |
 | Datenabdeckung | Anteil gültiger Indikatoren je Faktor (`cov_f`) bzw. faktorgewichtet je Titel (`data_coverage_v2`); Mindestwert 0,6 für Eligibilität |
 | Piotroski F-Score | 9 Bilanzkriterien (Financials 6), Filter ab 5 bzw. 3,33 Punkten |
-| Altman Z | Insolvenzindikator, Filter ab 1,8, nicht für Financials und Real Estate |
+| Altman Z | Insolvenzindikator, nur informativ (kein Filter, da u. a. für Technologieunternehmen nicht anwendbar) |
 | Pufferzone | Band 66,7 bis 80, in dem gehaltene Titel bleiben, aber nicht gekauft werden |
 | Notfüllzone | Band 70 bis 80, aus dem nur bei weniger als 25 Titeln nachgefüllt wird |
 | Sektor-/Regionsband | ±10 Prozentpunkte um das Benchmark-Gewicht, max. 8 Titel je Sektor |

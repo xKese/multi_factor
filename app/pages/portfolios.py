@@ -574,7 +574,7 @@ def _flags_section(view: pd.DataFrame) -> list:
 
     foot = html.Div(
         "SELL — Modell-Empfehlung Verkaufen · FILTER-FAIL — Qualitätsfilter "
-        "(Piotroski/Altman/Market Cap) nicht bestanden · DEATH CROSS — Kurs < "
+        "(Piotroski/Market Cap) nicht bestanden · DEATH CROSS — Kurs < "
         "SMA-50 und < SMA-200 · UNTER SMA-200 — Kurs unter der 200-Tage-Linie · "
         "ERMÜDET — Trend-Phase kippt (Kurs kreuzt SMA-50 gegen den Trend oder "
         "1M-Return dreht) · SIGNAL NEU — Signalwechsel seit dem letzten Import. "

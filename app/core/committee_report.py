@@ -148,7 +148,6 @@ SETTINGS_LABELS: dict[str, str] = {
     "v2_neut_scheme_default": "Neutralisierungsschema (Standard)",
     "filter_min_market_cap": "Mindest-Marktkapitalisierung (Mio.)",
     "filter_min_piotroski": "Mindest-Piotroski",
-    "filter_min_altman": "Mindest-Altman-Z",
     "filter_min_adv": "Mindest-Tagesumsatz (Mio.)",
     "filter_min_coverage": "Mindest-Datenabdeckung",
     "filter_min_listing_days": "Mindest-Listing (Tage)",
@@ -183,7 +182,6 @@ SETTINGS_LABELS: dict[str, str] = {
     "sell_threshold": "SELL-Schwelle (v1)",
     "percentile_mode": "Perzentil-Modus (v1)",
     "min_piotroski": "Mindest-Piotroski (v1)",
-    "min_altman_z": "Mindest-Altman-Z (v1)",
     "min_market_cap": "Mindest-Marktkapitalisierung (v1)",
     "risk_benchmark_symbol": "Benchmark (Risiko)",
     "risk_report_dir": "Report-Verzeichnis",
@@ -1766,9 +1764,9 @@ def compute_parameter_appendix(settings: Settings, pc_profile: dict | None) -> d
             {"key": f"neut_{k}", "label": f"Schema {k}", "value": v, "percent": False}
             for k, v in (settings.neut_scheme_map().items() if hasattr(settings, "neut_scheme_map") else [])
         ]},
-        {"title": "Universumsfilter", "rows": _group(["filter_min_market_cap", "filter_min_piotroski", "filter_min_altman", "filter_min_adv", "filter_min_coverage", "filter_min_listing_days", "filter_max_de", "filter_min_icr"])},
+        {"title": "Universumsfilter", "rows": _group(["filter_min_market_cap", "filter_min_piotroski", "filter_min_adv", "filter_min_coverage", "filter_min_listing_days", "filter_max_de", "filter_min_icr"])},
         {"title": "Portfoliokonstruktion", "rows": _group(list(PC_PROFILE_FIELDS))},
-        {"title": "Scoring v1 (Vergleichsmodus)", "rows": _group(["buy_threshold", "sell_threshold", "percentile_mode", "min_piotroski", "min_altman_z", "min_market_cap"]) + [
+        {"title": "Scoring v1 (Vergleichsmodus)", "rows": _group(["buy_threshold", "sell_threshold", "percentile_mode", "min_piotroski", "min_market_cap"]) + [
             {"key": f"v1_{k}", "label": f"Gewicht {k} (v1)", "value": v, "percent": True}
             for k, v in (getattr(settings, "factor_weights", {}) or {}).items()
         ]},
