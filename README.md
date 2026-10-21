@@ -384,6 +384,12 @@ python -m app.tools.analyst status | themes | trends
 # Cron-Beispiel (werktags 22:30): 30 22 * * 1-5 cd /srv/app && python -m app.tools.analyst run
 ```
 
+Auf **Replit** werden beide Keys als Secrets hinterlegt (Tools → Secrets),
+exakt unter den Namen `OLLAMA_API_KEY` und `ALPHAVANTAGE_API_KEY`; Replit
+reicht sie als Umgebungsvariablen an `python main.py` durch, die App liest
+sie beim Lauf (Neustart der App nach dem Anlegen). Unter Docker gehen sie
+über `environment` in den Compose-Dateien hinein.
+
 Exit-Codes `0` (done/partial, Warnungen auf stderr), `1` (fehlende Keys/
 Universum, Lauf-Fehler), `2` (Argumentfehler). Alternativ läuft der
 **In-App-Scheduler** (Daemon-Thread, Einstellungen → „KI-Analyst“ →

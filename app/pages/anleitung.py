@@ -251,7 +251,9 @@ Vorschläge als Entscheidungsunterstützung — er handelt nicht und verändert
 keine Scores oder Zonen.
 
 - **Voraussetzung:** Umgebungsvariablen `OLLAMA_API_KEY` (Ollama Cloud) und
-  `ALPHAVANTAGE_API_KEY`. Fehlt ein Key, zeigt die Seite einen Hinweis.
+  `ALPHAVANTAGE_API_KEY` — auf Replit als Secrets unter genau diesen Namen
+  anlegen und die App neu starten. Fehlt ein Key, zeigt die Seite einen
+  Hinweis; die Keys werden nie in der Datenbank gespeichert.
 - **Umfang** (Einstellungen → KI-Analyst): Portfolio + Modellportfolio +
   Kandidaten (Standard), gesamtes Universum oder eigene Liste; max. Titel und
   max. LLM-Aufrufe je Lauf begrenzen die Kosten.
