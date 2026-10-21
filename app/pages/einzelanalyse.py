@@ -1293,7 +1293,7 @@ def _analyst_card(uid: str) -> html.Div | None:
     try:
         from app.core.analyst import store as analyst_store
         from app.ui.agent_report import fmt_local_dt
-        from app.ui.analyst import pricing_chip, role_badge, suggestion_badge, synthesis_blocks
+        from app.ui.analyst import fmt_num, pricing_chip, role_badge, suggestion_badge, synthesis_blocks
 
         sugg = analyst_store.list_suggestions(limit=1, uid=uid)
         syn = analyst_store.load_latest_synthesis(uid)
@@ -1305,7 +1305,7 @@ def _analyst_card(uid: str) -> html.Div | None:
             s0 = sugg[0]
             blocks.append(
                 html.Div(
-                    [suggestion_badge(s0), html.Span(f" Konfidenz {float(s0.get('confidence') or 0):.2f}".replace(".", ","), className="ms-tt-muted small"),
+                    [suggestion_badge(s0), html.Span(f" Konfidenz {fmt_num(s0.get('confidence'), 2)}", className="ms-tt-muted small"),
                      html.Span(f" · {fmt_local_dt(s0.get('created_at'))} · Status {s0.get('status')}", className="ms-tt-muted small")],
                     className="mb-1",
                 )

@@ -33,7 +33,7 @@ PRICING_PARTIAL = "teilweise_eingepreist"
 PRICING_PRICED = "bereits_eingepreist"
 PRICING_VALUES = (PRICING_EARLY, PRICING_PARTIAL, PRICING_PRICED)
 _PRICING_FROM_LLM = {
-    "frueh": PRICING_EARLY, "früh": PRICING_EARLY,
+    "frueh": PRICING_EARLY, "fruh": PRICING_EARLY,
     "teilweise": PRICING_PARTIAL, "teilweise_eingepreist": PRICING_PARTIAL,
     "bereits": PRICING_PRICED, "bereits_eingepreist": PRICING_PRICED,
 }
@@ -325,7 +325,21 @@ def tag_pricing(row) -> str:
 
 
 def normalize_llm_pricing(value) -> str | None:
-    return _PRICING_FROM_LLM.get(str(value or "").strip().lower())
+    """LLM-Urteil „eingepreist“ tolerant auf die drei Tags abbilden."""
+    from .normalize import canon
+
+    key = canon(value)
+    if not key:
+        return None
+    if key in _PRICING_FROM_LLM:
+        return _PRICING_FROM_LLM[key]
+    if key.startswith("frueh") or key.startswith("early") or "nicht_eingepreist" in key or "noch_nicht" in key:
+        return PRICING_EARLY
+    if key.startswith("teil") or "partial" in key or "partly" in key:
+        return PRICING_PARTIAL
+    if key.startswith("bereits") or key.startswith("voll") or "fully" in key or "already" in key or key == "eingepreist":
+        return PRICING_PRICED
+    return None
 
 
 def suggested_action(row, pricing: str, held: bool) -> str:
@@ -397,9 +411,9 @@ def validate_beneficiaries(
                     uid,
                 )
             )
-        role = str(b.get("rolle") or "direkt").strip().lower()
-        if role not in ROLES:
-            role = "direkt"
+        from .normalize import norm_enum
+
+        role = norm_enum(b.get("rolle"), ROLES, {"supplier": "zulieferer", "direct": "direkt", "second_order": "zweite_ordnung", "indirekt": "zweite_ordnung"}) or "direkt"
         reasoning = b.get("begruendungskette") or []
         if isinstance(reasoning, str):
             reasoning = [reasoning]

@@ -177,3 +177,17 @@ def test_validate_beneficiaries():
     assert ts.validate_beneficiaries({"profiteure": "x"}, cands, _scored(), set(), 5) == ([], [])
     links_capped, _ = ts.validate_beneficiaries(trend, cands, _scored(), set(), max_n=1)
     assert len(links_capped) == 1
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("frueh", ts.PRICING_EARLY), ("Früh", ts.PRICING_EARLY), ("früh erkennbar", ts.PRICING_EARLY),
+        ("noch nicht eingepreist", ts.PRICING_EARLY), ("teilweise", ts.PRICING_PARTIAL),
+        ("Teilweise eingepreist", ts.PRICING_PARTIAL), ("bereits", ts.PRICING_PRICED),
+        ("bereits eingepreist", ts.PRICING_PRICED), ("vollständig eingepreist", ts.PRICING_PRICED),
+        ("", None), (None, None), ("unbekannt", None),
+    ],
+)
+def test_normalize_llm_pricing_variants(value, expected):
+    assert ts.normalize_llm_pricing(value) == expected
