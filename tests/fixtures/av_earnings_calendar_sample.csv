@@ -1,0 +1,4 @@
+symbol,name,reportDate,fiscalDateEnding,estimate,currency
+TEST,Test Corp,2026-10-28,2026-09-30,1.70,USD
+OTHER,Other Inc,2026-11-05,2026-09-30,,USD
+BAD,Broken Row,,2026-09-30,0.5,USD

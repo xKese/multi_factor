@@ -444,6 +444,105 @@ def _agents_card() -> dbc.Card:
     )
 
 
+def _analyst_card() -> dbc.Card:
+    """Karte „KI-Analyst": Keys-Status, Modell, Scope, Budget, Trend-Scan."""
+    import os
+
+    from app.core.analyst import ollama_client
+
+    s = STATE.settings
+    ollama_ok = bool(os.getenv("OLLAMA_API_KEY", "").strip())
+    av_ok = bool(os.getenv("ALPHAVANTAGE_API_KEY", "").strip())
+    models = ollama_client.list_models() if ollama_ok else []
+    model_options = [{"label": m, "value": m} for m in models]
+    if s.analyst_model and s.analyst_model not in models:
+        model_options.append({"label": f"{s.analyst_model} (gespeichert)", "value": s.analyst_model})
+
+    def _key(label: str, ok: bool) -> html.Span:
+        return html.Span(
+            [html.Span(f"{label}: ", className="fw-bold"),
+             html.Span("gesetzt", className="text-success") if ok else html.Span("nicht gesetzt", className="text-danger")],
+            className="me-3",
+        )
+
+    def _row(label: str, control) -> dbc.Row:
+        return dbc.Row([dbc.Col(html.Label(label), md=5), dbc.Col(control, md=7)], className="mb-2")
+
+    def _num(id_: str, value, step=1, min_=0, max_=None) -> dbc.Input:
+        return dbc.Input(id=id_, type="number", value=value, min=min_, max=max_, step=step)
+
+    def _check(id_: str, value: bool, label: str) -> dbc.Checkbox:
+        return dbc.Checkbox(id=id_, value=bool(value), label=label)
+
+    return dbc.Card(
+        [
+            dbc.CardHeader("KI-Analyst (Ollama Cloud + Alpha Vantage)"),
+            dbc.CardBody(
+                [
+                    html.Div(
+                        [_key("OLLAMA_API_KEY", ollama_ok), _key("ALPHAVANTAGE_API_KEY", av_ok),
+                         html.Span("(Keys nur als Umgebungsvariablen — werden nie gespeichert)", className="ms-tt-muted small")],
+                        className="mb-3",
+                    ),
+                    _row("Modell (Ollama Cloud)",
+                         dbc.Select(id="analyst-model", options=model_options, value=s.analyst_model or None, placeholder="z. B. gpt-oss:120b")
+                         if model_options else
+                         dbc.Input(id="analyst-model", type="text", value=s.analyst_model, placeholder="z. B. gpt-oss:120b (Modellliste nicht abrufbar)")),
+                    _row("Beobachtungsumfang",
+                         dbc.Select(id="analyst-scope", value=s.analyst_scope,
+                                    options=[{"label": "Portfolio + Modellportfolio + Kandidaten", "value": "portfolio"},
+                                             {"label": "Gesamtes Universum", "value": "universe"},
+                                             {"label": "Eigene Liste", "value": "custom"}])),
+                    _row("Eigene Liste (uids/Ticker, Komma oder Zeile)",
+                         dbc.Textarea(id="analyst-custom-tickers", value=", ".join(s.analyst_custom_tickers), rows=2, placeholder="SAP, MBG~mercedes")),
+                    dbc.Row(
+                        [dbc.Col(_check("analyst-enabled", s.analyst_enabled, "In-App-Scheduler aktiv (läuft im Intervall)"), md=12)],
+                        className="mb-2",
+                    ),
+                    _row("Intervall (Minuten)", _num("analyst-interval", s.analyst_interval_minutes, 1, 1)),
+                    _row("Max. Titel je Lauf", _num("analyst-max-companies", s.analyst_max_companies_per_run, 1, 1)),
+                    _row("Max. LLM-Calls je Lauf", _num("analyst-max-llm", s.analyst_max_llm_calls_per_run, 1, 1)),
+                    _row("News-Fenster (Tage) / Limit / Mindestrelevanz",
+                         dbc.Row([dbc.Col(_num("analyst-news-days", s.analyst_news_window_days, 1, 1)),
+                                  dbc.Col(_num("analyst-news-limit", s.analyst_news_limit, 1, 1)),
+                                  dbc.Col(_num("analyst-news-relevance", s.analyst_news_min_relevance, 0.05, 0, 1))], className="g-1")),
+                    _row("Transkript: Map-Reduce ab Zeichen", _num("analyst-transcript-chars", s.analyst_transcript_max_chars, 1000, 5000)),
+                    _row("LLM-Timeout (Sekunden)", _num("analyst-timeout", s.analyst_llm_timeout_seconds, 10, 30)),
+                    dbc.Row(
+                        [
+                            dbc.Col(_check("analyst-inc-transcripts", s.analyst_include_transcripts, "Earnings-Call-Transkripte"), md=6),
+                            dbc.Col(_check("analyst-inc-news", s.analyst_include_news, "News je Titel"), md=6),
+                            dbc.Col(_check("analyst-inc-insider", s.analyst_include_insider, "Insider-Transaktionen"), md=6),
+                            dbc.Col(_check("analyst-inc-price", s.analyst_include_price_reaction, "Kursreaktion (1 Kursabruf je Bericht)"), md=6),
+                            dbc.Col(_check("analyst-themes", s.analyst_themes_enabled, "Themen-Clustering (Run-Ebene)"), md=6),
+                            dbc.Col(_check("analyst-trends", s.analyst_trends_enabled, "Trend-Scan & Profiteure (Run-Ebene)"), md=6),
+                        ],
+                        className="mb-2",
+                    ),
+                    _row("Trend-Topics (Alpha Vantage, Komma)",
+                         dbc.Textarea(id="analyst-trend-topics", value=", ".join(s.analyst_trend_topics), rows=2)),
+                    _row("Trend-Scan: News je Topic / max. Trends / max. Profiteure",
+                         dbc.Row([dbc.Col(_num("analyst-trend-news", s.analyst_trend_news_limit, 1, 1, 1000)),
+                                  dbc.Col(_num("analyst-trend-max", s.analyst_trend_max_trends, 1, 1, 20)),
+                                  dbc.Col(_num("analyst-trend-benef", s.analyst_trend_max_beneficiaries, 1, 1, 30))], className="g-1")),
+                    _row("Trend-Scan: max. Kandidaten / Top je Industriegruppe",
+                         dbc.Row([dbc.Col(_num("analyst-trend-cands", s.analyst_trend_max_candidates, 10, 10)),
+                                  dbc.Col(_num("analyst-trend-topn", s.analyst_trend_top_per_group, 1, 1))], className="g-1")),
+                    _row("Report-Verzeichnis", dbc.Input(id="analyst-report-dir", type="text", value=s.analyst_report_dir)),
+                    html.Div(
+                        "Der Analyst liefert Entscheidungsunterstützung (kein Auto-Trade). CLI: "
+                        "python -m app.tools.analyst run [--dry-run]",
+                        className="ms-tt-muted small mb-2",
+                    ),
+                    dbc.Button("KI-Analyst-Einstellungen speichern", id="save-analyst-settings", color="dark", size="sm"),
+                    html.Div(id="analyst-settings-status", className="mt-2 small"),
+                ]
+            ),
+        ],
+        className="mb-3",
+    )
+
+
 def _numeric_row(id_obj: dict, label: str, value, step, is_int: bool) -> dbc.Row:
     return dbc.Row(
         [
@@ -1060,6 +1159,7 @@ def layout(**_) -> html.Div:
             html.Div(id="v2-settings-status", className="mb-3"),
             _pc_assignment_card(),
             _agents_card(),
+            _analyst_card(),
             _snapshot_card(),
             html.Div(
                 [
@@ -1688,6 +1788,101 @@ def _save_agents(n_clicks, provider, quick, deep, depth, language, temperature,
         duration=4000,
         className="mb-0 py-2",
     )
+
+
+@callback(
+    Output("analyst-settings-status", "children"),
+    Input("save-analyst-settings", "n_clicks"),
+    State("analyst-model", "value"),
+    State("analyst-scope", "value"),
+    State("analyst-custom-tickers", "value"),
+    State("analyst-enabled", "value"),
+    State("analyst-interval", "value"),
+    State("analyst-max-companies", "value"),
+    State("analyst-max-llm", "value"),
+    State("analyst-news-days", "value"),
+    State("analyst-news-limit", "value"),
+    State("analyst-news-relevance", "value"),
+    State("analyst-transcript-chars", "value"),
+    State("analyst-timeout", "value"),
+    State("analyst-inc-transcripts", "value"),
+    State("analyst-inc-news", "value"),
+    State("analyst-inc-insider", "value"),
+    State("analyst-inc-price", "value"),
+    State("analyst-themes", "value"),
+    State("analyst-trends", "value"),
+    State("analyst-trend-topics", "value"),
+    State("analyst-trend-news", "value"),
+    State("analyst-trend-max", "value"),
+    State("analyst-trend-benef", "value"),
+    State("analyst-trend-cands", "value"),
+    State("analyst-trend-topn", "value"),
+    State("analyst-report-dir", "value"),
+    prevent_initial_call=True,
+)
+def _save_analyst(n_clicks, model, scope, custom, enabled, interval, max_companies, max_llm,
+                  news_days, news_limit, news_rel, transcript_chars, timeout, inc_tr, inc_news,
+                  inc_ins, inc_price, themes, trends, trend_topics, trend_news, trend_max,
+                  trend_benef, trend_cands, trend_topn, report_dir):
+    if not n_clicks:
+        raise PreventUpdate
+    s = STATE.settings
+    s.analyst_model = (model or "").strip() or "gpt-oss:120b"
+    s.analyst_scope = scope if scope in ("portfolio", "universe", "custom") else "portfolio"
+    s.analyst_custom_tickers = _split_list(custom)
+    s.analyst_enabled = bool(enabled)
+    s.analyst_interval_minutes = _clamp_int(interval, 1, 10080, 360)
+    s.analyst_max_companies_per_run = _clamp_int(max_companies, 1, 5000, 25)
+    s.analyst_max_llm_calls_per_run = _clamp_int(max_llm, 1, 10000, 80)
+    s.analyst_news_window_days = _clamp_int(news_days, 1, 90, 7)
+    s.analyst_news_limit = _clamp_int(news_limit, 1, 1000, 20)
+    try:
+        s.analyst_news_min_relevance = max(0.0, min(1.0, float(news_rel)))
+    except (TypeError, ValueError):
+        s.analyst_news_min_relevance = 0.3
+    s.analyst_transcript_max_chars = _clamp_int(transcript_chars, 5000, 500000, 60000)
+    s.analyst_llm_timeout_seconds = _clamp_int(timeout, 30, 3600, 300)
+    s.analyst_include_transcripts = bool(inc_tr)
+    s.analyst_include_news = bool(inc_news)
+    s.analyst_include_insider = bool(inc_ins)
+    s.analyst_include_price_reaction = bool(inc_price)
+    s.analyst_themes_enabled = bool(themes)
+    s.analyst_trends_enabled = bool(trends)
+    s.analyst_trend_topics = _split_list(trend_topics)
+    s.analyst_trend_news_limit = _clamp_int(trend_news, 1, 1000, 50)
+    s.analyst_trend_max_trends = _clamp_int(trend_max, 1, 20, 6)
+    s.analyst_trend_max_beneficiaries = _clamp_int(trend_benef, 1, 30, 8)
+    s.analyst_trend_max_candidates = _clamp_int(trend_cands, 10, 5000, 150)
+    s.analyst_trend_top_per_group = _clamp_int(trend_topn, 1, 100, 4)
+    s.analyst_report_dir = (report_dir or "").strip() or "reports"
+    try:
+        save_settings(s)
+    except Exception as exc:  # noqa: BLE001 — DB down: Einstellungen nur im Speicher
+        return html.Span(
+            f"Gespeichert (nur für diese Sitzung — DB nicht erreichbar: {exc})",
+            className="text-warning",
+        )
+    try:
+        from app.core.analyst import scheduler
+
+        scheduler.start()
+        scheduler.notify_settings_changed()
+    except Exception:  # noqa: BLE001 — Scheduler ist optional
+        pass
+    return dbc.Alert("KI-Analyst-Einstellungen gespeichert.", color="success", duration=4000, className="mb-0 py-2")
+
+
+def _split_list(raw) -> list[str]:
+    if not raw:
+        return []
+    return [t.strip() for t in str(raw).replace("\n", ",").split(",") if t.strip()]
+
+
+def _clamp_int(value, lo: int, hi: int, default: int) -> int:
+    try:
+        return max(lo, min(hi, int(float(value))))
+    except (TypeError, ValueError):
+        return default
 
 
 register_page(__name__, path="/einstellungen", name="Einstellungen", layout=layout)

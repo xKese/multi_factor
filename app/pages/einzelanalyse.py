@@ -324,6 +324,7 @@ def _hero_block(r: pd.Series, ranks: dict) -> html.Div:
                             [
                                 f"{cls['code']} – {cls['label']} ",
                                 zone_badge(r.get("zone_v2")),
+                                *_analyst_hero_badges(str(r.get("uid") or r.get("ticker"))),
                             ]
                             if v2
                             else f"{cls['code']} – {cls['label']}"
@@ -1241,6 +1242,7 @@ def _render(ticker: str | None):
     return html.Div(
         [
             _hero_block(r, ranks),
+            _analyst_card(str(r.get("uid") or ticker)),
             *scoring_blocks,
             html.Div(
                 [_price_block(r), _returns_block(r)],
@@ -1264,6 +1266,78 @@ def _render(ticker: str | None):
             html.Div(id="ea-comparables"),
         ]
     )
+
+
+# ── KI-Analyst (Vorschlag, Zusammenhänge, Trend-Profiteur) ─────────────────
+def _analyst_hero_badges(uid: str) -> list:
+    """Vorschlags- und Trend-Pills neben dem Zonen-Chip (fail-open)."""
+    try:
+        from app.core.analyst import store as analyst_store
+        from app.ui.analyst import suggestion_badge, trend_badge
+
+        out: list = []
+        sugg = analyst_store.list_suggestions(limit=1, uid=uid, status="open")
+        if sugg:
+            out += [" ", suggestion_badge(sugg[0])]
+        for link in analyst_store.load_trend_links_for(uid, limit=2):
+            out += [" ", trend_badge(link)]
+        return out
+    except Exception:  # noqa: BLE001 — Badges sind rein additiv
+        return []
+
+
+def _analyst_card(uid: str) -> html.Div | None:
+    """Karte „KI-Analyst": letzter Vorschlag, Faktor-Zusammenspiel,
+    quellenübergreifende Zusammenhänge, nicht eingepreiste Themen,
+    verbundene Unternehmen, Trend-Profiteur, letzter Call/News-Digest."""
+    try:
+        from app.core.analyst import store as analyst_store
+        from app.ui.agent_report import fmt_local_dt
+        from app.ui.analyst import pricing_chip, role_badge, suggestion_badge, synthesis_blocks
+
+        sugg = analyst_store.list_suggestions(limit=1, uid=uid)
+        syn = analyst_store.load_latest_synthesis(uid)
+        trends = analyst_store.load_trend_links_for(uid, limit=3)
+        if not sugg and not syn and not trends:
+            return None
+        blocks: list = [html.H3("KI-Analyst", className="ms-card-h")]
+        if sugg:
+            s0 = sugg[0]
+            blocks.append(
+                html.Div(
+                    [suggestion_badge(s0), html.Span(f" Konfidenz {float(s0.get('confidence') or 0):.2f}".replace(".", ","), className="ms-tt-muted small"),
+                     html.Span(f" · {fmt_local_dt(s0.get('created_at'))} · Status {s0.get('status')}", className="ms-tt-muted small")],
+                    className="mb-1",
+                )
+            )
+            blocks.append(html.P(str(s0.get("rationale") or ""), className="small"))
+        tr = analyst_store.load_insight(uid, "transcript_summary")
+        if tr and tr.get("content"):
+            c = tr["content"]
+            g = c.get("guidance") or {}
+            blocks.append(html.Div(
+                [html.Strong(f"Earnings-Call {tr.get('period') or ''}: "), c.get("zusammenfassung") or "",
+                 html.Div(f"Guidance {g.get('aenderung')} · Ton {c.get('ton')}/5 · Vertrauen {c.get('vertrauen_management')}/5", className="ms-tt-muted small")],
+                className="small mb-2",
+            ))
+        nd = analyst_store.load_insight(uid, "news_digest")
+        if nd and nd.get("content"):
+            blocks.append(html.Div([html.Strong("News-Digest: "), nd["content"].get("zusammenfassung") or ""], className="small mb-2"))
+        if trends:
+            blocks.append(html.Strong("Trend-Profiteur"))
+            blocks.append(html.Ul(
+                [html.Li([html.Span(str(t.get("trend_title") or "Trend")), " ", role_badge(t.get("role")), " ", pricing_chip(t.get("pricing_quant")),
+                          html.Span(f" (LLM: {t.get('pricing_llm') or '–'}) → {t.get('action')}", className="ms-tt-muted small"),
+                          html.Div(" → ".join(str(x) for x in (t.get("reasoning") or [])), className="small ms-tt-muted")])
+                 for t in trends],
+                className="small",
+            ))
+        if syn and syn.get("content"):
+            blocks += synthesis_blocks(syn["content"], analyst_store.load_company_links_for(uid))
+        blocks.append(dcc.Link("Zur Seite KI-Analyst ›", href="/ki-analyst", className="small"))
+        return html.Div(blocks, className="ms-card mb-3", style={"gap": "8px"})
+    except Exception:  # noqa: BLE001 — Karte ist rein additiv
+        return None
 
 
 # ── Agenten-Tiefenanalyse (Design-Handoff Turn 2, Screen 2a) ───────────────

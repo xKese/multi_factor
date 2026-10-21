@@ -1267,8 +1267,101 @@ Reproduzierbarkeit, Vorbehaltsblock zuerst, Paper-Update.
 
 ---
 
+## 16. KI-Analyst (qualitatives Overlay, `app/core/analyst/`)
+
+Der KI-Analyst ist ein **Overlay über dem Composite v2**: Er verändert
+weder Scores noch Zonen noch das Modellportfolio, sondern liefert je Titel
+Vorschläge und Erklärungen, die das Komitee gegen die Quellen prüft.
+
+### 16.1 Datenquellen und Ereignisse
+
+Alpha Vantage (`app/core/av_fundamentals.py`): `EARNINGS`
+(Quartals-EPS, Schätzung, Überraschung), `EARNINGS_CALL_TRANSCRIPT`
+(Segmente je Kalenderquartal `YYYYQn`), `EARNINGS_CALENDAR` (CSV, ein
+Call je Lauf), `NEWS_SENTIMENT` (je Ticker mit Relevanzfilter; je Topic
+für den Trend-Scan), `INSIDER_TRANSACTIONS`. Ereignisse
+(`analyst_events`, Schlüssel `uid|kind|period`): `earnings`,
+`earnings_upcoming` (≤ 21 Tage), `transcript`, `insider` (aggregiert je
+Lauf), `news`, `zone` (Zonenwechsel), `score` (|ΔComposite| ≥ 10).
+Erstlauf-Fenster: Earnings 120 Tage, Insider 90 Tage, News
+`analyst_news_window_days`.
+
+### 16.2 Regeltabelle Faktor-Zusammenspiel (`factor_interplay.py`)
+
+Deterministische Regeln auf der gescorten Zeile (Schwellen `Z_HIGH = 0,75`,
+`Z_LOW = −0,75`, NaN = nicht erfüllt), jede mit Prüffrage ans Material:
+
+| Code | Bedingung |
+|---|---|
+| `value_trap` | z_value ≥ 0,75 ∧ z_momentum ≤ −0,75 |
+| `momentum_without_fundamentals` | z_momentum ≥ 0,75 ∧ (z_quality ≤ −0,75 ∨ Quality-Z seit letztem Lauf um ≥ 0,5 gefallen) |
+| `capex_expansion_on_weak_investment` | z_investment ≤ −0,75 ∧ z_asset_growth ≤ −0,75 |
+| `revisions_vs_guidance_divergence` | z_eps_revisions_3m ≤ −0,75 |
+| `accruals_vs_cashflow_commentary` | z_accruals ≤ −0,75 |
+| `dilution_with_buyback_talk` | z_share_issuance ≤ −0,75 |
+| `leverage_vs_guidance_confidence` | Leverage-Z (net_debt_ebitda → debt_ebit → debt_equity) ≤ −0,75 |
+| `quality_value_mismatch` | z_quality ≥ 0,75 ∧ z_value ≤ −0,75 |
+| `trend_break_despite_revisions` | z_eps_revisions_3m ≥ 0,75 ∧ Death Cross |
+
+Vom LLM nicht adressierte Hinweise werden mit `evidenz_urteil =
+keine_evidenz` ergänzt (Diagnose `interplay_unaddressed`).
+
+### 16.3 LLM-Stufe (Ollama Cloud, `prompts.py`, `tasks.py`)
+
+Modell konfigurierbar (`analyst_model`), Temperatur 0, Ausgaben als
+JSON-Schema (`format`), genau ein Retry bei ungültigem JSON. Je Titel mit
+neuem Material: Transkript-Zusammenfassung (Map-Reduce ab
+`analyst_transcript_max_chars`), News-Digest, Synthese über alle Quellen
+(Quant-Prior `build_factor_context`, Markt-Reaktion `ret_since_report`,
+`ret_1m/3m`, `mom_12_1`, Revisionen, Sentiment-Trend; Regelhinweise;
+Earnings-Überraschung; Berichtstermin; Transkript; News; Insider;
+Ereignisse; vorherige Synthese). Schema-Kern: `faktor_zusammenspiel[]`,
+`quellen_zusammenhaenge[]` (≥ 2 Quellen je Eintrag, sonst verworfen),
+`nicht_eingepreiste_themen[]`, `verbundene_unternehmen[]` (Abbildung auf
+uids: exakter Ticker → Namens-Slug → eindeutiger Prefix), `vorschlag`
+(Typ-Regeln: EINSTIEG_PRÜFEN nur ohne Bestand, HALTEN/REDUZIEREN nur mit
+Bestand, sonst ÜBERPRÜFEN). Ein Transkript-Quartal wird über alle Läufe
+nur einmal ausgewertet (`analyst_insights`, Status `ok`).
+
+### 16.4 Run-Ebene
+
+Themen-Clustering (1 Call, ab 2 Beitragsfirmen) → `analyst_themes`,
+firmenübergreifende Verknüpfungen → `analyst_company_links`. Trend-Scan
+(`trend_scan.py`): Topic-News → Industriegruppen-Profil → Kandidatentabelle
+(nur `filter_pass`, Top-`analyst_trend_top_per_group` je Industriegruppe,
+Bestands-/Themen-Titel erzwungen, Deckel `analyst_trend_max_candidates`;
+zweistufig, wenn mehr Titel als der Deckel zulässt). Quant-Tag je
+Profiteur: *bereits eingepreist* bei z_momentum ≥ 0,75 ∧ z_eps_rev ≥ 0,5
+oder mom_12_1 ≥ 0,30; *früh* bei z_momentum ≤ 0,25 ∧ z_eps_rev ≤ 0,25;
+sonst *teilweise*. Aktion: Bestand → „Position prüfen“; Zone FILTER →
+„Nur Information“; KANDIDAT/HALTEN ∧ früh → „Kandidat prüfen“; sonst
+„Watchlist“. Tabellen `analyst_trends`, `analyst_trend_links`.
+
+### 16.5 Budget, Scheduler, Persistenz
+
+`RunBudget`: max. Titel je Lauf (Priorisierung Bestand → Modellportfolio →
+Kandidat → Universum, dann `last_checked_at` aufsteigend, dann Score),
+max. LLM-Calls mit 3 Calls Reserve für die Run-Ebene, AV-Rate-Limit
+(`risk_av_requests_per_minute`) — bei Limit Status `partial`. Trockenlauf
+(`--dry-run`) sammelt Ereignisse, Hinweise und Trend-Scan-Eingaben ohne
+LLM-Calls und bewegt keine Cursor. Scheduler: Daemon-Thread
+(`scheduler.py`), Intervall `analyst_interval_minutes`,
+`KI_ANALYST_SCHEDULER=0` unterdrückt den Start. Tabellen: `analyst_runs`,
+`analyst_events`, `analyst_insights`, `analyst_suggestions`,
+`analyst_themes`, `analyst_company_links`, `analyst_trends`,
+`analyst_trend_links`, `analyst_watch_state`.
+
 ## 15. Änderungsprotokoll
 
+- **2026-10-21 — KI-Analyst (Ollama Cloud + Alpha Vantage).** Neues
+  Paket `app/core/analyst/` (Abschnitt 16): kontinuierlicher Analyst-Agent
+  mit Ereignis-Erkennung (Earnings, Transkripte, Insider, News, Kalender,
+  Zone/Score), regelbasierter Faktor-Zusammenspiel-Tabelle, LLM-Synthese
+  über alle Quellen (Zusammenhänge, nicht eingepreiste Themen, verbundene
+  Unternehmen, Vorschlag), Themen-Clustering und Trend-Scan mit
+  Profiteuren und Quant-Tag „eingepreist“. Seite `/ki-analyst`, CLI
+  `python -m app.tools.analyst`, In-App-Scheduler, Settings `analyst_*`,
+  neue Tabellen `analyst_*`. Scores/Zonen/Modellportfolio unverändert.
 - **2026-09-17 — Sequenzielle Neutralisierung (Industriegruppe → Region).**
   Neutralisierungsschema je Indikator (`v2_neut_scheme_by_indicator`,
   `v2_neut_scheme_default`, Mindestgrößen `v2_min_group_size_l1 = 20`,

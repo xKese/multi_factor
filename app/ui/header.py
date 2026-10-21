@@ -23,14 +23,15 @@ MAIN_NAV_ORDER = {
     "Dashboard": 0,
     "Einzelanalyse": 1,
     "Agenten-Analyse": 2,
-    "Momentum-Monitor": 3,
-    "Sektor-Momentum": 4,
-    "M&S Portfolio": 5,
-    "Modellportfolio": 6,
-    "Factor Timing": 7,
-    "Risiko & Benchmark": 8,
-    "Bericht": 9,
-    "Daten-Import": 10,
+    "KI-Analyst": 3,
+    "Momentum-Monitor": 4,
+    "Sektor-Momentum": 5,
+    "M&S Portfolio": 6,
+    "Modellportfolio": 7,
+    "Factor Timing": 8,
+    "Risiko & Benchmark": 9,
+    "Bericht": 10,
+    "Daten-Import": 11,
 }
 
 # Dauerhaft aus der Tab-Reihe ausgelagert: selten benutzte Seiten, die über

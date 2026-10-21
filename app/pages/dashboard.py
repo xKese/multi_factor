@@ -764,6 +764,23 @@ def _top_table(
     except Exception:  # noqa: BLE001 — Spalte ist rein additiv
         pass
 
+    # KI-Analyst: neuester offener Vorschlag und Trend-Profiteur-Marker je uid
+    # (additiv, fail-open — leer ohne Läufe oder bei DB-Fehlern).
+    analyst_suggestions: dict[str, dict] = {}
+    analyst_trends: dict[str, dict] = {}
+    try:
+        from app.core.analyst import store as analyst_store
+
+        sdf = analyst_store.load_latest_suggestions()
+        if not sdf.empty:
+            analyst_suggestions = {str(row["uid"]): row.to_dict() for _, row in sdf.iterrows()}
+        tdf = analyst_store.load_latest_trend_links()
+        if not tdf.empty:
+            for _, row in tdf.iterrows():
+                analyst_trends.setdefault(str(row["uid"]), row.to_dict())
+    except Exception:  # noqa: BLE001 — Spalte ist rein additiv
+        pass
+
     rows = []
     for _, r in src.iterrows():
         uid = _uid_of(r)
@@ -852,6 +869,7 @@ def _top_table(
                             else "ms-tt-muted",
                         ),
                     ),
+                    html.Td(_analyst_cell(analyst_suggestions.get(uid), analyst_trends.get(uid))),
                 ]
             )
         )
@@ -871,6 +889,7 @@ def _top_table(
                             html.Th("12M", className="is-num"),
                             html.Th("Zone" if v2 else "Empfehlung"),
                             html.Th("Agenten"),
+                            html.Th("KI-Analyst"),
                         ]
                     )
                 ),
@@ -880,6 +899,38 @@ def _top_table(
         ),
         className="ms-toptable-wrap",
     )
+
+
+def _analyst_cell(suggestion: dict | None, trend: dict | None) -> list | html.Span:
+    """Zelle „KI-Analyst": Vorschlag (Farbklasse wie Empfehlung) plus
+    Trend-Marker ``▲ Trend`` mit Begründungskette als Tooltip."""
+    from app.ui.analyst import SUGGESTION_REC_CLASS, suggestion_label
+
+    parts: list = []
+    if suggestion:
+        typ = str(suggestion.get("suggestion_type") or "")
+        parts.append(
+            html.A(
+                suggestion_label(typ),
+                href="/ki-analyst",
+                className="ms-tt-rec is-" + SUGGESTION_REC_CLASS.get(typ, "fail"),
+                title=str(suggestion.get("rationale") or ""),
+                style={"textDecoration": "none"},
+            )
+        )
+    if trend:
+        chain = " → ".join(str(x) for x in (trend.get("reasoning") or []))
+        parts.append(
+            html.A(
+                "▲ Trend",
+                href="/ki-analyst",
+                className="ms-tt-rec is-" + ("buy" if trend.get("pricing_quant") == "früh" else "hold"),
+                title=f"{trend.get('trend_title')} · {trend.get('role')} · {trend.get('pricing_quant')}"
+                + (f" — {chain}" if chain else ""),
+                style={"textDecoration": "none", "marginLeft": "6px" if parts else "0"},
+            )
+        )
+    return parts if parts else html.Span("–", className="ms-tt-muted")
 
 
 def _section_head(

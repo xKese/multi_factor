@@ -1,0 +1,7 @@
+{
+  "models": [
+    {"name": "gpt-oss:120b", "model": "gpt-oss:120b", "size": 0},
+    {"name": "deepseek-v3.1:671b", "model": "deepseek-v3.1:671b", "size": 0},
+    {"name": "gpt-oss:120b", "model": "gpt-oss:120b", "size": 0}
+  ]
+}

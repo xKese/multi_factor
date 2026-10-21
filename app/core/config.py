@@ -293,6 +293,57 @@ class Settings:
     # bleiben unbeeinflusst.
     agents_prev_analysis: bool = True
 
+    # ── KI-Analyst (Ollama Cloud + Alpha Vantage) ───────────────────────
+    # Kontinuierlicher Analyst-Agent: beobachtet Titel des Universums,
+    # wertet Earnings-Calls, News und Insider-Daten aus und erzeugt
+    # Vorschläge als Entscheidungsunterstützung (kein Auto-Trade). Die
+    # API-Keys kommen ausschließlich aus der Umgebung (OLLAMA_API_KEY,
+    # ALPHAVANTAGE_API_KEY) und werden nie persistiert.
+    analyst_enabled: bool = False
+    analyst_interval_minutes: int = 360
+    analyst_model: str = "gpt-oss:120b"
+    # Beobachtungsumfang: "portfolio" (aktives Portfolio + Modellportfolio
+    # + Zone KANDIDAT), "universe" (alle Titel) oder "custom" (Liste).
+    analyst_scope: str = "portfolio"
+    analyst_custom_tickers: list[str] = field(default_factory=list)
+    analyst_max_companies_per_run: int = 25
+    analyst_max_llm_calls_per_run: int = 80
+    analyst_news_window_days: int = 7
+    analyst_news_limit: int = 20
+    analyst_news_min_relevance: float = 0.3
+    # Ab dieser Transkriptlänge (Zeichen) wird Map-Reduce gerechnet.
+    analyst_transcript_max_chars: int = 60000
+    analyst_include_transcripts: bool = True
+    analyst_include_news: bool = True
+    analyst_include_insider: bool = True
+    # Ein kompakter Kursabruf je Titel mit Earnings-Ereignis (Kursreaktion).
+    analyst_include_price_reaction: bool = True
+    # Run-Ebene: Themen-Clustering (1 LLM-Call) und Trend-Scan (1–2 Calls).
+    analyst_themes_enabled: bool = True
+    analyst_trends_enabled: bool = True
+    analyst_trend_topics: list[str] = field(
+        default_factory=lambda: [
+            "technology",
+            "energy_transportation",
+            "manufacturing",
+            "economy_macro",
+            "financial_markets",
+            "mergers_and_acquisitions",
+            "life_sciences",
+            "economy_fiscal",
+            "economy_monetary",
+            "retail_wholesale",
+            "real_estate",
+        ]
+    )
+    analyst_trend_news_limit: int = 50
+    analyst_trend_max_trends: int = 6
+    analyst_trend_max_candidates: int = 150
+    analyst_trend_top_per_group: int = 4
+    analyst_trend_max_beneficiaries: int = 8
+    analyst_llm_timeout_seconds: int = 300
+    analyst_report_dir: str = "reports"
+
     # ── Risiko & Benchmark ──────────────────────────────────────────────
     # Benchmark-Proxy: iShares MSCI ACWI ETF (US-Listing, USD). Bereits im
     # AV-Symbolformat — wird ohne Mapping direkt geladen.

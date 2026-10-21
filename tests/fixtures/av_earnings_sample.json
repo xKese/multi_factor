@@ -1,0 +1,32 @@
+{
+  "symbol": "TEST",
+  "annualEarnings": [
+    {"fiscalDateEnding": "2025-12-31", "reportedEPS": "6.10"}
+  ],
+  "quarterlyEarnings": [
+    {
+      "fiscalDateEnding": "2026-06-30",
+      "reportedDate": "2026-07-28",
+      "reportedEPS": "1.62",
+      "estimatedEPS": "1.55",
+      "surprise": "0.07",
+      "surprisePercentage": "4.5161"
+    },
+    {
+      "fiscalDateEnding": "2026-03-31",
+      "reportedDate": "2026-04-29",
+      "reportedEPS": "1.40",
+      "estimatedEPS": "1.45",
+      "surprise": "-0.05",
+      "surprisePercentage": "-3.4483"
+    },
+    {
+      "fiscalDateEnding": "2026-09-30",
+      "reportedDate": "None",
+      "reportedEPS": "None",
+      "estimatedEPS": "1.70",
+      "surprise": "None",
+      "surprisePercentage": "None"
+    }
+  ]
+}

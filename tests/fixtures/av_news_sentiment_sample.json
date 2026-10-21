@@ -1,0 +1,48 @@
+{
+  "items": "3",
+  "sentiment_score_definition": "x",
+  "relevance_score_definition": "y",
+  "feed": [
+    {
+      "title": "Test Corp raises guidance after strong quarter",
+      "url": "https://example.com/news/1",
+      "time_published": "20261020T143000",
+      "summary": "Test Corp lifted its full-year outlook citing demand for its new product line.",
+      "source": "Example Wire",
+      "overall_sentiment_score": "0.41",
+      "overall_sentiment_label": "Bullish",
+      "ticker_sentiment": [
+        {"ticker": "TEST", "relevance_score": "0.92", "ticker_sentiment_score": "0.55", "ticker_sentiment_label": "Bullish"},
+        {"ticker": "OTHER", "relevance_score": "0.12", "ticker_sentiment_score": "0.05", "ticker_sentiment_label": "Neutral"}
+      ],
+      "topics": [
+        {"topic": "Earnings", "relevance_score": "1.0"},
+        {"topic": "Technology", "relevance_score": "0.5"}
+      ]
+    },
+    {
+      "title": "Sector roundup: chips and software",
+      "url": "https://example.com/news/2",
+      "time_published": "20261018T090000",
+      "summary": "A broad look at the sector.",
+      "source": "Example Daily",
+      "overall_sentiment_score": "0.05",
+      "overall_sentiment_label": "Neutral",
+      "ticker_sentiment": [
+        {"ticker": "TEST", "relevance_score": "0.15", "ticker_sentiment_score": "0.0", "ticker_sentiment_label": "Neutral"}
+      ],
+      "topics": [{"topic": "Technology", "relevance_score": "0.9"}]
+    },
+    {
+      "title": "",
+      "url": "https://example.com/news/3",
+      "time_published": "bad",
+      "summary": "",
+      "source": "",
+      "overall_sentiment_score": "None",
+      "overall_sentiment_label": "",
+      "ticker_sentiment": [],
+      "topics": []
+    }
+  ]
+}

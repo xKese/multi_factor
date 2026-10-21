@@ -3,6 +3,10 @@ services:
     build: .
     ports:
       - "5000:5000"
+    environment:
+      # KI-Analyst / Risikomodul: Keys aus der Shell-Umgebung durchreichen.
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY:-}
     volumes:
       - appdata:/srv/app/data
     restart: unless-stopped

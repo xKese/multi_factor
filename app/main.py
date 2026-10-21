@@ -83,6 +83,7 @@ def create_app() -> dash.Dash:
         einstellungen,
         einzelanalyse,
         factor_timing,
+        ki_analyst,
         modellportfolio,
         perzentil_hilfe,
         portfolios,
@@ -90,6 +91,12 @@ def create_app() -> dash.Dash:
         sektor_momentum,
         sma_signale,
     )
+
+    # KI-Analyst: In-App-Scheduler (Daemon-Thread; KI_ANALYST_SCHEDULER=0
+    # unterdrückt den Start, z. B. in Tests oder im reinen CLI-Betrieb).
+    from app.core.analyst import scheduler as _analyst_scheduler
+
+    _analyst_scheduler.start()
 
     app.layout = html.Div(
         [
