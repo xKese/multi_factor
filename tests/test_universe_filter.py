@@ -39,16 +39,16 @@ def test_filters_all_reasons():
 
     reasons = out.loc[1, "filter_reasons"]
     assert not out.loc[1, "filter_pass"]
-    # Alle Verstöße: Marktkapitalisierung, Piotroski, Altman, Abdeckung,
-    # Extremverschuldung.
-    for expected in ("market_cap", "piotroski", "altman", "coverage", "extreme_leverage"):
+    # Alle Verstöße: Marktkapitalisierung, Piotroski, Abdeckung,
+    # Extremverschuldung. Altman Z (1,0 < 1,8) ist bewusst kein Grund mehr.
+    for expected in ("market_cap", "piotroski", "coverage", "extreme_leverage"):
         assert expected in reasons, reasons
+    assert "altman" not in reasons and "altman_na" not in reasons
 
-    # Financials: Altman übersprungen (trotz NaN), Piotroski-Schwelle
-    # skaliert (4 von 6 ≥ 3,33), Extremverschuldung greift nicht.
+    # Financials: Piotroski-Schwelle skaliert (4 von 6 ≥ 3,33),
+    # Extremverschuldung greift nicht.
     fin_reasons = out.loc[2, "filter_reasons"]
     assert out.loc[2, "filter_pass"], fin_reasons
-    assert "altman_na" not in fin_reasons
     assert "extreme_leverage" not in fin_reasons
 
     # Fehlender Piotroski → eigener Grund "piotroski_na".
@@ -56,6 +56,21 @@ def test_filters_all_reasons():
         _universe(piotroski=[np.nan, 3.0, 4.0]), Settings()
     )
     assert "piotroski_na" in out_na.loc[0, "filter_reasons"]
+
+
+def test_altman_not_a_filter():
+    """Altman Z ist kein Filterkriterium: weder ein niedriger Wert noch ein
+    fehlender Wert (z. B. Technologieunternehmen ohne klassische
+    Industriebilanz) macht einen Titel nicht eligible."""
+    df = _universe(altman_z=[0.5, np.nan, np.nan])
+    out, _ = apply_universe_filters(df, Settings())
+    assert out.loc[0, "filter_pass"], out.loc[0, "filter_reasons"]
+    assert all("altman" not in r for r in out["filter_reasons"])
+
+    # Auch ganz ohne Spalte läuft der Filter durch.
+    df2 = _universe().drop(columns=["altman_z"])
+    out2, _ = apply_universe_filters(df2, Settings())
+    assert out2.loc[0, "filter_pass"]
 
 
 def test_filters_optional_columns():

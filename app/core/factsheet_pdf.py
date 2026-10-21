@@ -317,7 +317,7 @@ def generate_thesis(row: pd.Series) -> str:
 
     filter_ok = str(row.get("filter_ok") or "")
     if filter_ok == "NEIN":
-        parts.append("Qualitätsfilter (Piotroski/Altman/Marktkap.) nicht bestanden.")
+        parts.append("Qualitätsfilter (Piotroski/Marktkap.) nicht bestanden.")
 
     return " ".join(parts).strip()
 
@@ -428,7 +428,9 @@ def build_context(
         {
             "label": "Altman Z",
             "value": fmt_de(altman, 2) if altman is not None else "–",
-            "tone": "up" if (altman is not None and altman >= settings.min_altman_z) else "down",
+            # Reine Information, kein Filterkriterium (für Tech-/Dienst-
+            # leistungsunternehmen nicht anwendbar) → neutrale Tonung.
+            "tone": "neutral",
         },
         {
             "label": "Filter",

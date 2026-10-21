@@ -37,17 +37,14 @@ GROWTH_OUTLIER_INVALID: frozenset[str] = frozenset(
     }
 )
 
-# Sektor-Erkennung für die Altman-Z-Filter-Ausnahme: Der Altman Z-Score ist
-# für Banken/Versicherer konzeptionell nicht definiert (Bilanzstruktur), daher
-# wird das Filterkriterium für Financials übersprungen. Match per Substring
-# auf den Koyfin-GICS-Sektornamen ("Financials").
+# Sektor-Erkennung für Financials (Banken/Versicherer): eigener Piotroski-
+# Kriteriensatz (6 statt 9), eigener v2-Indikatorsatz, Ausnahme vom
+# Extremverschuldungs-Filter. Match per Substring auf den Koyfin-GICS-
+# Sektornamen ("Financials").
 FINANCIAL_SECTOR_MARKER: str = "financ"
 
-# Real Estate (REITs) hat dieselbe Altman-Z-Problematik: Die Z-Score-Gewichte
-# sind auf Industrieunternehmen kalibriert; die Bilanzstruktur von
-# Immobiliengesellschaften (hoher Anlagenanteil, hohe strukturelle
-# Verschuldung) macht die Schwelle bedeutungslos. Match per Substring auf den
-# GICS-Sektornamen ("Real Estate").
+# Sektor-Erkennung für Real Estate (REITs): v2-Indikatorsatz ohne Accruals.
+# Match per Substring auf den GICS-Sektornamen ("Real Estate").
 REAL_ESTATE_SECTOR_MARKER: str = "real estate"
 
 # Indikatoren, die für Banken/Versicherer (GICS-Sektor Financials)
@@ -61,7 +58,7 @@ REAL_ESTATE_SECTOR_MARKER: str = "real estate"
 # - ocf_ni: Cash-Conversion ohne Aussagekraft (siehe OCF)
 # - debt_equity: Fremdkapital (Einlagen) ist das Geschäftsmodell, kein Risiko-
 #   signal; die relevante Größe wäre regulatorisches Kapital (nicht im Export)
-# - altman_z: siehe FINANCIAL_SECTOR_MARKER
+# - altman_z: Z-Score für Banken/Versicherer konzeptionell nicht definiert
 FINANCIAL_IRRELEVANT_INDICATORS: frozenset[str] = frozenset(
     {
         "ev_ebitda",
@@ -258,7 +255,6 @@ class Settings:
     )
 
     min_piotroski: float = 5.0
-    min_altman_z: float = 1.8
     min_market_cap: float = 1000.0
     # Empfehlungs-Schwellen mit bewusst asymmetrischem HOLD-Band: BUY erst ab
     # ``buy_threshold``, SELL erst unter ``sell_threshold``. Das breitere Band
@@ -421,7 +417,9 @@ class Settings:
     # ── Universumsfilter v2 (Spec 4, harte Ausschlüsse) ─────────────────
     filter_min_market_cap: float = 1000.0
     filter_min_piotroski: float = 5.0
-    filter_min_altman: float = 1.8
+    # Hinweis: Der Altman Z-Score ist kein Filterkriterium (für Technologie-,
+    # Software- und Dienstleistungsunternehmen nicht anwendbar); er bleibt
+    # reine Anzeigespalte.
     # Liquiditätsfilter: durchschnittlicher Tagesumsatz 3M in Mio EUR; nur
     # angewendet, wenn die optionale Spalte ``adv_3m`` vorhanden ist.
     filter_min_adv: float = 2.0

@@ -15,12 +15,10 @@ import pandas as pd
 
 from .config import (
     FINANCIAL_IRRELEVANT_INDICATORS,
-    FINANCIAL_SECTOR_MARKER,
     GROWTH_CLIP_LIMIT,
     GROWTH_MIN_VALID,
     GROWTH_OUTLIER_INVALID,
     NEGATIVE_IS_INVALID,
-    REAL_ESTATE_SECTOR_MARKER,
     Settings,
 )
 from .momentum import (
@@ -349,34 +347,23 @@ def compute_scores(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     # Klassifikation.
     df["classification"] = df["total_score"].apply(_classify)
 
-    # Filter. Für Financials und Real Estate wird das Altman-Z-Kriterium
-    # übersprungen — der Z-Score ist für Banken/Versicherer konzeptionell
-    # nicht definiert und für REITs auf eine sachfremde Bilanzstruktur
-    # kalibriert; beide Sektoren wären sonst de facto vom Filter
-    # ausgeschlossen. Die Piotroski-Schwelle wird auf die je Zeile bewertbare
-    # Skala umgerechnet: Financials werden auf 6 statt 9 Kriterien gescort
+    # Filter (Piotroski, Market Cap). Der Altman Z-Score ist kein
+    # Filterkriterium: Die Z-Score-Gewichte sind auf klassische
+    # Industriebilanzen kalibriert und für Technologie-, Software- und
+    # Dienstleistungsunternehmen (ebenso Financials/REITs) nicht anwendbar.
+    # Die Piotroski-Schwelle wird auf die je Zeile bewertbare Skala
+    # umgerechnet: Financials werden auf 6 statt 9 Kriterien gescort
     # (siehe ``piotroski``), min_piotroski = 5 von 9 entspricht dort 3,33.
     def _filter_row(r: pd.Series) -> str:
         piotr = r.get("piotroski")
-        altman = r.get("altman_z")
         mcap = r.get("market_cap")
-        sector = r.get("sector")
-        sector_lc = sector.lower() if isinstance(sector, str) else ""
-        is_financial = FINANCIAL_SECTOR_MARKER in sector_lc
-        skip_altman = is_financial or REAL_ESTATE_SECTOR_MARKER in sector_lc
         if pd.isna(piotr) or pd.isna(mcap):
-            return "-"
-        if not skip_altman and pd.isna(altman):
             return "-"
         max_criteria = r.get("piotroski_max_criteria")
         if pd.isna(max_criteria) or not max_criteria:
             max_criteria = PIOTROSKI_MAX_CRITERIA
         min_piotroski = settings.min_piotroski * max_criteria / PIOTROSKI_MAX_CRITERIA
-        if (
-            piotr >= min_piotroski
-            and mcap >= settings.min_market_cap
-            and (skip_altman or altman >= settings.min_altman_z)
-        ):
+        if piotr >= min_piotroski and mcap >= settings.min_market_cap:
             return "JA"
         return "NEIN"
 

@@ -219,9 +219,10 @@ def test_piotroski_complete_data_still_scored():
     assert (scored["piotroski"] >= 0).all() and (scored["piotroski"] <= 9).all()
 
 
-def test_altman_filter_skipped_for_financials():
-    """Financials: Altman-Z-Kriterium wird übersprungen (konzeptionell nicht
-    definiert für Banken/Versicherer)."""
+def test_altman_not_a_filter_criterion():
+    """Altman Z ist kein Filterkriterium mehr: Weder ein fehlender Wert
+    (Financials) noch ein Wert unter der früheren Schwelle 1,8
+    (z. B. Technologieunternehmen) führt zu ``NEIN`` oder ``-``."""
     df = _full_universe()
     df["sector"] = ["Financials"] * 3 + ["Materials"] * 3
     # Vollständige Piotroski-Daten mit starken Signalen (>= 5 Punkte).
@@ -242,11 +243,11 @@ def test_altman_filter_skipped_for_financials():
     df["revenue_prev"] = [700.0] * 6
     df["cogs"] = [400.0] * 6
     df["cogs_prev"] = [420.0] * 6
-    df["altman_z"] = [None] * 3 + [0.5] * 3  # Financials: NaN, Rest: unter Schwelle
+    df["altman_z"] = [None] * 3 + [0.5] * 3  # Financials: NaN, Rest: niedrig
 
     scored = compute_scores(df, Settings())
     assert (scored.loc[:2, "filter_ok"] == "JA").all(), "Financials ohne Altman → JA"
-    assert (scored.loc[3:, "filter_ok"] == "NEIN").all(), "Altman < 1,8 → NEIN"
+    assert (scored.loc[3:, "filter_ok"] == "JA").all(), "niedriger Altman → trotzdem JA"
 
 
 def test_rev_growth_1y_computed():
@@ -481,9 +482,9 @@ def test_piotroski_financial_min_valid_criteria():
     assert scored_ind["piotroski"].isna().all()
 
 
-def test_altman_filter_skipped_for_real_estate():
-    """Real Estate: Altman-Z-Kriterium wird wie bei Financials übersprungen
-    (Z-Score auf Industrieunternehmen kalibriert)."""
+def test_real_estate_filter_without_altman():
+    """Real Estate: fehlender Altman Z beeinflusst den Filter nicht
+    (Altman Z ist kein Filterkriterium)."""
     df = _full_universe()
     df["sector"] = ["Real Estate"] * 3 + ["Materials"] * 3
     df["industry"] = ["REITs"] * 3 + ["Chemicals"] * 3

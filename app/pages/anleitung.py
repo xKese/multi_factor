@@ -74,10 +74,11 @@ bleibt als „Scoring v1 (Vergleich)" aufklappbar):
   bestanden). Eine BUY/SELL-Empfehlung gibt es in v2 nicht — die Zone
   ersetzt sie.
 - **Universumsfilter** (harte Ausschlüsse, Gründe in `Filter-Gründe`):
-  Market Cap ≥ 1 Mrd., Piotroski ≥ 5 (Financials proportional), Altman
-  Z ≥ 1,8 (Skip für Financials/Real Estate), Datenabdeckung ≥ 60 %,
-  optional Liquidität (`adv_3m`), IPO-Alter (`ipo_date`) und
-  Extremverschuldung.
+  Market Cap ≥ 1 Mrd., Piotroski ≥ 5 (Financials proportional),
+  Datenabdeckung ≥ 60 %, optional Liquidität (`adv_3m`), IPO-Alter
+  (`ipo_date`) und Extremverschuldung. Der Altman Z-Score ist bewusst
+  kein Filter (u. a. für Technologieunternehmen nicht anwendbar) und wird
+  nur informativ angezeigt.
 - **Optionale CSV-Zusatzspalten** (Header-Erkennung, Position beliebig):
   `EV/EBIT`, `Net Debt/EBITDA`, `FCF Yield`, `ADV 3M`, `IPO Date` —
   fehlen sie, gelten dokumentierte Fallbacks (mit Info-Diagnose).
@@ -133,11 +134,12 @@ bleibt als „Scoring v1 (Vergleich)" aufklappbar):
   und forward (EPS- und Umsatz-Schätzungen).
 - **Momentum** nutzt das 12-1-Momentum (12M-Return ohne letzten Monat) statt
   des reinen 12M-Returns.
-- **Filter**: Piotroski ≥ 5, Altman Z ≥ 1,8, Market Cap ≥ 1 Mrd. Für
-  Financials und Real Estate wird das Altman-Kriterium übersprungen (dort
-  nicht definiert bzw. sachfremd kalibriert). Piotroski gilt nur bei
-  mindestens 6 von 9 bewertbaren Kriterien als aussagekräftig (Financials:
-  4 von 6) — sonst Filter „-".
+- **Filter**: Piotroski ≥ 5, Market Cap ≥ 1 Mrd. Der Altman Z-Score ist
+  kein Filterkriterium — seine Gewichte sind auf Industriebilanzen
+  kalibriert und für Technologie-, Software- und Dienstleistungsunternehmen
+  (ebenso Financials/Real Estate) nicht anwendbar; er wird nur informativ
+  angezeigt. Piotroski gilt nur bei mindestens 6 von 9 bewertbaren
+  Kriterien als aussagekräftig (Financials: 4 von 6) — sonst Filter „-".
 - **Klassifikation**: A ≥ 80 · B+ ≥ 70 · B ≥ 60 · C ≥ 50 · D ≥ 40 · F < 40.
 - **Empfehlung**: STRONG BUY ≥ 80 · BUY ab BUY-Schwelle (Default 70) ·
   HOLD · SELL unter SELL-Schwelle (Default 45); Schwellen editierbar in den
