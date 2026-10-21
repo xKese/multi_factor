@@ -168,14 +168,15 @@ def test_synthesize_company_validates(fake):
     assert c["vorschlag"]["typ"] == "ÜBERPRÜFEN" and c["vorschlag"]["disclaimer"]
     assert res.suggestion["suggestion_type"] == "ÜBERPRÜFEN" and res.suggestion["n_interplay"] == 3
     assert res.suggestion["n_unpriced"] == 1 and res.suggestion["quant_zone"] == "HALTEN"
-    assert len(res.suggestion["evidence"]) == 1
+    # String-Belege werden als Quant-Referenz übernommen statt verworfen.
+    assert len(res.suggestion["evidence"]) == 2
     assert [l["related_uid"] for l in res.links] == ["MBG", None, "SAN~bancosantander"]
     assert all(l["uid"] == "SAP" for l in res.links)
 
     # Bestandstitel: EINSTIEG → ÜBERPRÜFEN; HALTEN bleibt
-    fake([{**_load("ollama_synthesis_sample.json"), "vorschlag": {"typ": "EINSTIEG_PRÜFEN", "konfidenz": "x"}}])
+    fake([{**_load("ollama_synthesis_sample.json"), "vorschlag": {"typ": "EINSTIEG_PRÜFEN", "konfidenz": "x", "begruendung": "b"}}])
     res2 = tasks.synthesize_company(_item(True), [], {}, {}, [], {}, None, Settings(), held=True, scored=_scored())
-    assert res2.suggestion["suggestion_type"] == "ÜBERPRÜFEN" and res2.suggestion["confidence"] == 0.5
+    assert res2.suggestion["suggestion_type"] == "ÜBERPRÜFEN" and res2.suggestion["confidence"] is None
     fake([{**_load("ollama_synthesis_sample.json")}])
     res3 = tasks.synthesize_company(_item(True), [], {}, {}, [], {}, None, Settings(), held=True, scored=_scored())
     assert res3.suggestion["suggestion_type"] == "HALTEN"
@@ -261,3 +262,64 @@ def test_scan_trends_single_and_skips(fake):
     fake([{"trends": []}])
     res4 = tasks.scan_trends("r1", [], [{"title": "T"}], _trend_scored(), s, set())
     assert [d.code for d in res4.diagnostics] == ["trend_scan_empty"]
+
+
+@pytest.mark.parametrize(
+    "vorschlag, expected_typ, expected_conf, expected_kons",
+    [
+        ({"typ": "Einstieg prüfen", "konfidenz": "0,7", "begruendung": "b", "quant_konsistenz": "bestätigt"}, "EINSTIEG_PRÜFEN", 0.7, "bestaetigt"),
+        ({"typ": "Reduzieren / Verkauf prüfen", "konfidenz": "70 %", "begruendung": "b", "quant_konsistenz": "widerspricht"}, "ÜBERPRÜFEN", 0.7, "widerspricht"),
+        ({"typ": "halten", "konfidenz": 65, "begruendung": "b", "quant_konsistenz": {"urteil": "bestätigt"}}, "ÜBERPRÜFEN", 0.65, "bestaetigt"),
+        ({"empfehlung": "Überprüfen", "confidence": 0.8, "rationale": "b", "konsistenz": "unklar"}, "ÜBERPRÜFEN", 0.8, "neutral"),
+        ({"type": "info", "konfidenz": None, "begründung": "b"}, "INFO", None, "neutral"),
+        ("Kaufen", "EINSTIEG_PRÜFEN", None, "neutral"),
+    ],
+)
+def test_norm_vorschlag_variants(vorschlag, expected_typ, expected_conf, expected_kons):
+    content = {"vorschlag": vorschlag}
+    out, diags = tasks._norm_vorschlag(content, held=False)
+    assert out["typ"] == expected_typ
+    assert out["konfidenz"] == (pytest.approx(expected_conf) if expected_conf is not None else None)
+    assert out["quant_konsistenz"] == expected_kons
+    assert not any(d.code == "vorschlag_unparsed" for d in diags)
+
+
+def test_norm_vorschlag_unparsed_is_diagnosed():
+    out, diags = tasks._norm_vorschlag({"vorschlag": {"foo": "bar"}}, held=False)
+    assert out["typ"] == "INFO" and out["konfidenz"] is None
+    assert "nicht im erwarteten Format" in out["begruendung"]
+    assert [d.code for d in diags] == ["vorschlag_unparsed"] and "foo" in diags[0].message
+    out2, diags2 = tasks._norm_vorschlag({}, held=True)
+    assert out2["typ"] == "INFO" and diags2[0].code == "vorschlag_unparsed"
+    # Unbekannter Typ, aber Begründung vorhanden → INFO mit Info-Diagnose
+    out3, diags3 = tasks._norm_vorschlag({"vorschlag": {"typ": "xyz", "begruendung": "b", "evidenz": ["[1]", {"quelle": "News", "referenz": "[2]"}]}}, held=False)
+    assert out3["typ"] == "INFO" and [d.code for d in diags3] == ["vorschlag_typ_unbekannt"]
+    assert out3["evidenz"] == [{"quelle": "quant", "referenz": "[1]"}, {"quelle": "news", "referenz": "[2]"}]
+
+
+def test_validate_synthesis_normalises_nested_enums():
+    content = {
+        "faktor_zusammenspiel": [{"muster": "M", "richtung": "verstärkend", "evidenz_urteil": "bestätigt", "regel_code": "value_trap"}],
+        "quellen_zusammenhaenge": [{"quellen": ["News", "Insider-Transaktionen"], "befund": "B", "richtung": "bestätigend", "bedeutung": "4"}],
+        "nicht_eingepreiste_themen": [{"thema": "T", "art": "Produktzyklus", "zeithorizont": "mittelfristig", "konfidenz": "60 %", "richtung": "bullish"}],
+        "vorschlag": {"typ": "ÜBERPRÜFEN", "konfidenz": 0.5, "begruendung": "b"},
+    }
+    out, _ = tasks._validate_synthesis(content, [], held=False)
+    assert out["faktor_zusammenspiel"][0]["richtung"] == "verstaerkend"
+    assert out["faktor_zusammenspiel"][0]["evidenz_urteil"] == "bestaetigt"
+    assert out["quellen_zusammenhaenge"][0]["quellen"] == ["insider", "news"]
+    assert out["quellen_zusammenhaenge"][0]["bedeutung"] == 4
+    t = out["nicht_eingepreiste_themen"][0]
+    assert (t["art"], t["zeithorizont"], t["konfidenz"], t["richtung"]) == ("produktzyklus", "mittel", 0.6, "positiv")
+
+
+def test_normalize_helpers():
+    from app.core.analyst.normalize import canon, norm_enum, norm_float, pick
+
+    assert canon("Einstieg prüfen!") == "einstieg_pruefen"
+    assert norm_enum("Früh", ["frueh", "teilweise", "bereits"]) == "frueh"
+    assert norm_enum("Zuliefer", ["direkt", "zulieferer"]) == "zulieferer"
+    assert norm_enum("", ["a"]) is None and norm_enum("zzz", ["aaaa", "bbbb"]) is None
+    assert norm_float("0,75") == 0.75 and norm_float("75%", 0, 1) == 0.75 and norm_float(80, 0, 1) == 0.8
+    assert norm_float("1.234,5") == 1234.5 and norm_float("abc") is None and norm_float(True) is None
+    assert pick({"Begründung": "x"}, "begruendung") == "x" and pick({}, "a", default=1) == 1

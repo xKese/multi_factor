@@ -388,13 +388,19 @@ def _tables(_fp, early, kind):
     last_run = runs[0]["run_id"] if runs else None
     n_syn = len(store.list_insights(kind="synthesis", run_id=last_run, limit=100)) if last_run else 0
     events = store.list_events(limit=100, kind=kind or None)
+    n_unparsed = 0
+    if runs:
+        n_unparsed = sum(1 for d in diags_from_json(runs[0].get("diagnostics_json")) if d.code == "vorschlag_unparsed")
+    sugg_count = f"{sum(1 for s in suggestions if s.get('status') == 'open')} offen von {len(suggestions)}"
+    if n_unparsed:
+        sugg_count += f" · {n_unparsed} im letzten Lauf nicht im erwarteten Format (siehe Diagnose)"
     return (
         _trends_view(trends, bool(early)),
         f"{len(trends)} Trends",
         _themes_view(themes, cross),
         f"{len(themes)} Themen",
         _suggestions_table(suggestions),
-        f"{sum(1 for s in suggestions if s.get('status') == 'open')} offen von {len(suggestions)}",
+        sugg_count,
         _analyses_view(last_run),
         f"{n_syn} Synthesen im letzten Lauf",
         _events_table(events),

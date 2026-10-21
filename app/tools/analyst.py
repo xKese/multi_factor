@@ -8,6 +8,7 @@ Beispiele::
     python -m app.tools.analyst models                        # Ollama-Modelle
     python -m app.tools.analyst watchlist --limit 20
     python -m app.tools.analyst status | themes | trends [--run RUN_ID]
+    python -m app.tools.analyst inspect --uid AAPL [--kind synthesis] [--raw]
 
 Exit-Codes: ``0`` Erfolg/teilweise (Warnungen auf stderr), ``1`` fehlende
 Voraussetzungen (Keys, Universum) oder Lauf-Fehler, ``2`` Argumentfehler —
@@ -198,6 +199,36 @@ def _cmd_trends(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_inspect(args: argparse.Namespace) -> int:
+    """Gespeichertes Insight eines Titels anzeigen (Fehlersuche)."""
+    import json
+
+    from app.core.analyst import store
+
+    if args.uid:
+        rec = store.load_insight(args.uid, args.kind)
+    else:
+        rows = store.list_insights(kind=args.kind, run_id=args.run, limit=1)
+        rec = rows[0] if rows else None
+    if rec is None:
+        print(f"Kein Insight ({args.kind}) für {args.uid or 'Run-Ebene'} gefunden.", file=sys.stderr)
+        return 1
+    print(
+        f"{rec.get('kind')} · uid {rec.get('uid') or '–'} · Lauf {rec.get('run_id')} · "
+        f"Periode {rec.get('period')} · Status {rec.get('status')} · Modell {rec.get('model')} · "
+        f"Calls {rec.get('n_calls')}"
+    )
+    if args.raw:
+        print(rec.get("raw_text") or "(kein Rohtext)")
+    else:
+        content = rec.get("content")
+        if content is None:
+            print("(nicht parsebar — Rohtext mit --raw anzeigen)")
+        else:
+            print(json.dumps(content, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.tools.analyst", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -236,6 +267,13 @@ def main(argv: list[str] | None = None) -> int:
     p_trends = sub.add_parser("trends", help="Trends & Profiteure eines Laufs")
     p_trends.add_argument("--run", help="Run-ID (Default: letzter Lauf mit Trends)")
     p_trends.set_defaults(func=_cmd_trends)
+
+    p_inspect = sub.add_parser("inspect", help="Gespeichertes Insight (Synthese/Transkript/…) anzeigen")
+    p_inspect.add_argument("--uid", help="uid des Titels (ohne: Run-Ebene, z. B. kind trend)")
+    p_inspect.add_argument("--kind", default="synthesis", choices=["synthesis", "transcript_summary", "news_digest", "themes", "trend"])
+    p_inspect.add_argument("--run", help="Run-ID (nur Run-Ebene)")
+    p_inspect.add_argument("--raw", action="store_true", help="Rohantwort des Modells statt geparstem Inhalt")
+    p_inspect.set_defaults(func=_cmd_inspect)
 
     try:
         args = parser.parse_args(argv)

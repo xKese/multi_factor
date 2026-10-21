@@ -15,9 +15,10 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from ..diagnostics import SEV_INFO, Diagnostic
+from ..diagnostics import SEV_INFO, SEV_WARNING, Diagnostic
 from ..uid import slugify_name
 from . import ollama_client, prompts, trend_scan
+from .normalize import norm_enum, norm_float, pick
 from .factor_interplay import InterplayHint
 
 ollama = ollama_client
@@ -248,10 +249,97 @@ def resolve_company_mentions(mentions: list[dict], scored: pd.DataFrame | None, 
     return out
 
 
+SUGGESTION_ALIASES = {
+    "einstieg": "EINSTIEG_PRÜFEN", "kaufen": "EINSTIEG_PRÜFEN", "kauf": "EINSTIEG_PRÜFEN",
+    "buy": "EINSTIEG_PRÜFEN", "aufbauen": "EINSTIEG_PRÜFEN",
+    "halten": "HALTEN", "hold": "HALTEN", "beibehalten": "HALTEN",
+    "ueberpruefen": "ÜBERPRÜFEN", "pruefen": "ÜBERPRÜFEN", "review": "ÜBERPRÜFEN", "beobachten": "ÜBERPRÜFEN",
+    "reduzieren": "REDUZIEREN_VERKAUF_PRÜFEN", "verkaufen": "REDUZIEREN_VERKAUF_PRÜFEN",
+    "verkauf": "REDUZIEREN_VERKAUF_PRÜFEN", "sell": "REDUZIEREN_VERKAUF_PRÜFEN", "abbauen": "REDUZIEREN_VERKAUF_PRÜFEN",
+    "info": "INFO", "information": "INFO", "keine": "INFO", "neutral": "INFO",
+}
+URTEIL_ALIASES = {
+    "bestaetigend": "bestaetigt", "konsistent": "bestaetigt", "stuetzt": "bestaetigt", "confirms": "bestaetigt",
+    "widerspruechlich": "widerspricht", "inkonsistent": "widerspricht", "contradicts": "widerspricht",
+    "unklar": "neutral", "gemischt": "neutral",
+}
+
+
+def _norm_vorschlag(content: dict, held: bool) -> tuple[dict, list[Diagnostic]]:
+    """``vorschlag`` tolerant lesen; bei unverwertbarem Block Diagnose statt
+    stiller Defaults."""
+    diags: list[Diagnostic] = []
+    raw = pick(content, "vorschlag", "empfehlung", "recommendation", "suggestion")
+    if isinstance(raw, str):
+        raw = {"typ": raw}
+    v: dict = dict(raw) if isinstance(raw, dict) else {}
+    typ_raw = pick(v, "typ", "type", "vorschlag_typ", "empfehlung", "aktion", "action", "kategorie")
+    typ = norm_enum(typ_raw, prompts.SUGGESTION_TYPES, SUGGESTION_ALIASES)
+    conf = norm_float(pick(v, "konfidenz", "confidence", "sicherheit", "wahrscheinlichkeit"), 0.0, 1.0)
+    begr = pick(v, "begruendung", "begründung", "rationale", "reasoning", "erklaerung", "erklärung", "text", default="")
+    begr = str(begr or "").strip()
+    kons = norm_enum(
+        pick(v, "quant_konsistenz", "konsistenz", "quant_abgleich", "consistency"),
+        prompts.URTEIL, URTEIL_ALIASES,
+    )
+    if isinstance(pick(v, "quant_konsistenz", "konsistenz", "quant_abgleich"), dict):
+        kons = norm_enum(pick(pick(v, "quant_konsistenz", "konsistenz", "quant_abgleich"), "urteil"), prompts.URTEIL, URTEIL_ALIASES)
+    problems = []
+    if typ is None:
+        problems.append(f"typ={typ_raw!r}")
+    if not begr:
+        problems.append("begruendung fehlt")
+    if typ is None and not begr:
+        keys = ", ".join(sorted(str(k) for k in (v.keys() if v else content.keys())))[:200]
+        diags.append(
+            Diagnostic(
+                SEV_WARNING,
+                "vorschlag_unparsed",
+                f"Vorschlag vom Modell nicht im erwarteten Format ({'; '.join(problems)}; Keys: {keys}).",
+            )
+        )
+        typ = "INFO"
+        begr = "Vorschlag vom Modell nicht im erwarteten Format — Rohantwort über "
+        begr += "`python -m app.tools.analyst inspect --uid <uid> --raw` prüfen."
+    elif typ is None:
+        diags.append(Diagnostic(SEV_INFO, "vorschlag_typ_unbekannt", f"Vorschlagstyp {typ_raw!r} nicht zuordenbar — als INFO geführt."))
+        typ = "INFO"
+    if held and typ == "EINSTIEG_PRÜFEN":
+        typ = "ÜBERPRÜFEN"
+    if not held and typ in ("HALTEN", "REDUZIEREN_VERKAUF_PRÜFEN"):
+        typ = "ÜBERPRÜFEN"
+    evid = pick(v, "evidenz", "evidence", "belege", default=[]) or []
+    if isinstance(evid, dict):
+        evid = [evid]
+    ev_out = []
+    for e in evid:
+        if isinstance(e, dict):
+            ev_out.append({"quelle": norm_enum(pick(e, "quelle", "source"), prompts.EVIDENCE_SOURCES) or "quant",
+                           "referenz": str(pick(e, "referenz", "reference", "beleg", default="") or "")})
+        elif isinstance(e, str) and e.strip():
+            ev_out.append({"quelle": "quant", "referenz": e.strip()})
+    out = {
+        **v,
+        "typ": typ,
+        "konfidenz": conf,
+        "begruendung": begr,
+        "quant_konsistenz": kons or "neutral",
+        "evidenz": ev_out,
+        "disclaimer": prompts.DISCLAIMER,
+    }
+    return out, diags
+
+
 def _validate_synthesis(content: dict, hints: list[InterplayHint], held: bool) -> tuple[dict, list[Diagnostic]]:
     diags: list[Diagnostic] = []
     # Faktor-Zusammenspiel: jeder Hinweis muss adressiert sein.
-    fz = [x for x in content.get("faktor_zusammenspiel") or [] if isinstance(x, dict)]
+    fz = []
+    for x in content.get("faktor_zusammenspiel") or []:
+        if not isinstance(x, dict):
+            continue
+        x["richtung"] = norm_enum(x.get("richtung"), ["verstaerkend", "widerspruechlich", "neutral"]) or "neutral"
+        x["evidenz_urteil"] = norm_enum(x.get("evidenz_urteil"), ["bestaetigt", "widerspricht", "keine_evidenz"], URTEIL_ALIASES) or "keine_evidenz"
+        fz.append(x)
     seen = {str(x.get("regel_code")) for x in fz if x.get("regel_code")}
     for h in hints:
         if h.code not in seen:
@@ -273,42 +361,30 @@ def _validate_synthesis(content: dict, hints: list[InterplayHint], held: bool) -
     for z in content.get("quellen_zusammenhaenge") or []:
         if not isinstance(z, dict):
             continue
-        quellen = [str(q) for q in (z.get("quellen") or []) if q]
+        quellen = [norm_enum(q, prompts.EVIDENCE_SOURCES) or str(q) for q in (z.get("quellen") or []) if q]
         if len(set(quellen)) < 2:
             continue
         z["quellen"] = sorted(set(quellen))
+        z["richtung"] = norm_enum(z.get("richtung"), ["bestaetigend", "widerspruechlich", "neutral"], URTEIL_ALIASES) or "neutral"
+        bed = norm_float(z.get("bedeutung"))
+        z["bedeutung"] = int(max(1, min(5, round(bed)))) if bed is not None else 3
         qz.append(z)
     content["quellen_zusammenhaenge"] = qz
-    # Themen: Konfidenz clampen.
+    # Themen: Konfidenz/Enums tolerant.
     themes = []
     for t in content.get("nicht_eingepreiste_themen") or []:
         if not isinstance(t, dict) or not t.get("thema"):
             continue
-        try:
-            t["konfidenz"] = max(0.0, min(1.0, float(t.get("konfidenz", 0.5))))
-        except (TypeError, ValueError):
-            t["konfidenz"] = 0.5
+        conf = norm_float(t.get("konfidenz"), 0.0, 1.0)
+        t["konfidenz"] = conf if conf is not None else 0.5
+        t["art"] = norm_enum(t.get("art"), prompts.THEMA_ART) or "sonstiges"
+        t["zeithorizont"] = norm_enum(t.get("zeithorizont"), prompts.HORIZONS, {"kurzfristig": "kurz", "mittelfristig": "mittel", "langfristig": "lang"}) or "mittel"
+        t["richtung"] = norm_enum(t.get("richtung"), ["positiv", "negativ"], {"bullish": "positiv", "bearish": "negativ"}) or "positiv"
         themes.append(t)
     content["nicht_eingepreiste_themen"] = themes
-    # Vorschlag: Typ-Regeln.
-    v = content.get("vorschlag") if isinstance(content.get("vorschlag"), dict) else {}
-    typ = str(v.get("typ") or "INFO").strip().upper()
-    if typ not in prompts.SUGGESTION_TYPES:
-        typ = "INFO"
-    if held and typ == "EINSTIEG_PRÜFEN":
-        typ = "ÜBERPRÜFEN"
-    if not held and typ in ("HALTEN", "REDUZIEREN_VERKAUF_PRÜFEN"):
-        typ = "ÜBERPRÜFEN"
-    v["typ"] = typ
-    try:
-        v["konfidenz"] = max(0.0, min(1.0, float(v.get("konfidenz", 0.5))))
-    except (TypeError, ValueError):
-        v["konfidenz"] = 0.5
-    if str(v.get("quant_konsistenz") or "") not in prompts.URTEIL:
-        v["quant_konsistenz"] = "neutral"
-    v["begruendung"] = str(v.get("begruendung") or "")
-    v["evidenz"] = [e for e in (v.get("evidenz") or []) if isinstance(e, dict)]
-    v["disclaimer"] = prompts.DISCLAIMER
+    # Vorschlag.
+    v, vdiags = _norm_vorschlag(content, held)
+    diags.extend(vdiags)
     content["vorschlag"] = v
     return content, diags
 
@@ -389,16 +465,14 @@ def cluster_themes(
         if not isinstance(t, dict) or not t.get("titel"):
             continue
         uids = [str(u) for u in (t.get("betroffene_uids") or []) if str(u) in valid_uids]
-        try:
-            conf = max(0.0, min(1.0, float(t.get("konfidenz", 0.5))))
-        except (TypeError, ValueError):
-            conf = 0.5
+        conf = norm_float(t.get("konfidenz"), 0.0, 1.0)
+        conf = conf if conf is not None else 0.5
         themes.append(
             {
                 "title": t.get("titel"),
                 "description": t.get("beschreibung"),
-                "kind": t.get("art"),
-                "direction": t.get("richtung"),
+                "kind": norm_enum(t.get("art"), ["sektor", "region", "makro", "firmenspezifisch"]) or "makro",
+                "direction": norm_enum(t.get("richtung"), ["positiv", "negativ", "gemischt"], {"bullish": "positiv", "bearish": "negativ", "neutral": "gemischt"}) or "gemischt",
                 "confidence": conf,
                 "uids": uids,
                 "sectors": [str(s) for s in t.get("sektoren") or []],
@@ -431,19 +505,15 @@ def cluster_themes(
 def _normalize_trend(t: dict) -> dict | None:
     if not isinstance(t, dict) or not t.get("titel"):
         return None
-    try:
-        conf = max(0.0, min(1.0, float(t.get("konfidenz", 0.5))))
-    except (TypeError, ValueError):
-        conf = 0.5
-    try:
-        strength = int(t.get("staerke", 3))
-    except (TypeError, ValueError):
-        strength = 3
+    conf = norm_float(t.get("konfidenz"), 0.0, 1.0)
+    conf = conf if conf is not None else 0.5
+    strength_f = norm_float(t.get("staerke"))
+    strength = int(round(strength_f)) if strength_f is not None else 3
     return {
         "title": t.get("titel"),
         "description": t.get("beschreibung"),
-        "kind": t.get("art") if t.get("art") in prompts.TREND_ART else "sonstiges",
-        "horizon": t.get("zeithorizont") if t.get("zeithorizont") in prompts.HORIZONS else "mittel",
+        "kind": norm_enum(t.get("art"), prompts.TREND_ART) or "sonstiges",
+        "horizon": norm_enum(t.get("zeithorizont"), prompts.HORIZONS, {"kurzfristig": "kurz", "mittelfristig": "mittel", "langfristig": "lang"}) or "mittel",
         "strength": max(1, min(5, strength)),
         "confidence": conf,
         "evidence": [e for e in t.get("evidenz") or [] if isinstance(e, dict)],

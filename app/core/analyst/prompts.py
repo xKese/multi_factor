@@ -486,9 +486,14 @@ def build_synthesis_user_prompt(
         "nach diesen Daten noch nicht verarbeitet hat.\n"
         "- verbundene_unternehmen: Zulieferer, Kunden, Wettbewerber, Partner, die im Call "
         "oder in den News genannt werden (Ticker nur, wenn sicher).\n"
-        "- vorschlag: EINSTIEG_PRÜFEN nur für Titel außerhalb des Bestands; HALTEN und "
+        "- vorschlag (PFLICHT, Objekt mit genau diesen Keys): typ, konfidenz, begruendung, "
+        "evidenz, quant_konsistenz. typ ist exakt einer der Werte EINSTIEG_PRÜFEN | HALTEN | "
+        "ÜBERPRÜFEN | REDUZIEREN_VERKAUF_PRÜFEN | INFO (Großschreibung, Unterstriche). "
+        "EINSTIEG_PRÜFEN nur für Titel außerhalb des Bestands; HALTEN und "
         "REDUZIEREN_VERKAUF_PRÜFEN nur für Bestandstitel; sonst ÜBERPRÜFEN oder INFO. "
-        "Begründung mit Quellenbezug; quant_konsistenz = Verhältnis zum Quant-Prior.\n"
+        "konfidenz als Dezimalzahl mit Punkt zwischen 0.0 und 1.0 (kein Prozent, kein Komma). "
+        "quant_konsistenz exakt bestaetigt | widerspricht | neutral (ohne Umlaut). "
+        "begruendung: 3–5 Sätze mit Quellenbezug — nie leer.\n"
         "- Hat sich gegenüber der vorherigen Analyse etwas geändert? Dann benenne es.\n"
     )
     return (

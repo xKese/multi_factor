@@ -125,3 +125,21 @@ def test_watchlist_command(state, monkeypatch, capsys):
     assert cli.main(["watchlist", "--limit", "5"]) == 0
     out = capsys.readouterr().out
     assert "1 Titel" in out and "SAP" in out and "kandidat" in out
+
+
+def test_inspect_command(monkeypatch, capsys):
+    from app.core.analyst import store
+
+    monkeypatch.setattr(store, "load_insight", lambda uid, kind, period=None: None)
+    assert cli.main(["inspect", "--uid", "SAP"]) == 1
+    rec = {"kind": "synthesis", "uid": "SAP", "run_id": "r1", "period": "r1", "status": "ok", "model": "m", "n_calls": 1,
+           "content": {"vorschlag": {"typ": "INFO"}}, "raw_text": "{\"roh\": 1}"}
+    monkeypatch.setattr(store, "load_insight", lambda uid, kind, period=None: rec)
+    assert cli.main(["inspect", "--uid", "SAP"]) == 0
+    out = capsys.readouterr().out
+    assert "synthesis · uid SAP" in out and '"typ": "INFO"' in out
+    assert cli.main(["inspect", "--uid", "SAP", "--raw"]) == 0
+    assert '{"roh": 1}' in capsys.readouterr().out
+    monkeypatch.setattr(store, "list_insights", lambda kind=None, run_id=None, limit=1: [{**rec, "uid": None, "kind": "trend", "content": None}])
+    assert cli.main(["inspect", "--kind", "trend"]) == 0
+    assert "nicht parsebar" in capsys.readouterr().out
