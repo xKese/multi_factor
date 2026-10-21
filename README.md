@@ -310,6 +310,108 @@ cd multi_factor && TRADINGAGENTS_URL=http://localhost:8000 python -m app.main
 Ohne erreichbaren Service bleibt die App voll funktionsfähig — nur die
 Agenten-Funktionen sind deaktiviert (Hinweis in der UI).
 
+## KI-Analyst (Ollama Cloud + Alpha Vantage)
+
+Kontinuierlicher Analyst-Agent, der die Titel des Universums beobachtet und
+**Vorschläge als Entscheidungsunterstützung** liefert (kein Auto-Trade).
+Seite `/ki-analyst`, Karte in den Einstellungen, Spalte „KI-Analyst“ im
+Dashboard, Badges und Karte in der Einzelanalyse, Markdown-Report je Lauf
+(`reports/ki_analyst_<run_id>.md`). Kern-Code Dash-frei in
+`app/core/analyst/`.
+
+**Was der Agent je Titel tut**
+
+1. **Ereignisse erkennen** (Alpha Vantage): neuer Quartalsbericht mit
+   EPS-Überraschung (`EARNINGS`), neues Earnings-Call-Transkript
+   (`EARNINGS_CALL_TRANSCRIPT`), Insider-Käufe/-Verkäufe
+   (`INSIDER_TRANSACTIONS`), News mit Ticker-Relevanz (`NEWS_SENTIMENT`),
+   nächster Berichtstermin (`EARNINGS_CALENDAR`, ein Call je Lauf) sowie
+   Zonenwechsel/Score-Sprünge aus dem Universum. Ein Cursor je Titel
+   (`analyst_watch_state`) sorgt dafür, dass jedes Ereignis nur einmal
+   gemeldet und jedes Transkript-Quartal nur einmal ausgewertet wird.
+2. **Regelbasierte Faktor-Hinweise** (`factor_interplay.py`, ohne LLM):
+   Value-Falle (Value hoch + Momentum tief), Momentum ohne Fundament,
+   Capex-Ausweitung bei schwachem Investment-Faktor, Revisionen vs.
+   Guidance, Accruals vs. Cash-Flow-Kommentar, Verwässerung vs.
+   Rückkauf-Rhetorik, Verschuldung vs. Guidance-Sicherheit,
+   Qualitätsprämie, Trendbruch trotz Revisionen — je Regel eine Prüffrage,
+   die der Transkript-Pass beantworten muss.
+3. **LLM-Auswertung** (Ollama Cloud, JSON-Schema-Ausgaben, deutsch):
+   Earnings-Call-Zusammenfassung (Guidance-Änderung, Ton 1–5, Vertrauen
+   ins Management, Glaubwürdigkeits-Flags, Risiken, Q&A, Quant-Abgleich;
+   lange Transkripte per Map-Reduce), News-Digest, dann eine **Synthese
+   über alle Quellen** (Quant-Prior aus `build_factor_context`,
+   Kursreaktion seit Bericht, Regelhinweise, Earnings-Überraschung,
+   Berichtstermin, Transkript, News, Insider, Ereignisse, vorherige
+   Analyse) mit `faktor_zusammenspiel`, `quellen_zusammenhaenge` (jeder
+   Eintrag verknüpft mindestens zwei Quellen), `nicht_eingepreiste_themen`
+   (gegen Bewertungs-Z, 12-1-Momentum, Revisionen, Sentiment-Trend und
+   Kursreaktion geprüft), `verbundene_unternehmen` (Zulieferer, Kunden,
+   Wettbewerber → auf Universums-uids abgebildet) und einem **Vorschlag**
+   (EINSTIEG_PRÜFEN · HALTEN · ÜBERPRÜFEN · REDUZIEREN_VERKAUF_PRÜFEN ·
+   INFO; Bestandsregeln werden im Code erzwungen).
+
+**Run-Ebene (Universum)**
+
+- **Themen-Clustering** (1 Call): firmenbezogene Themen werden zu Sektor-,
+  Regions-, Makro-Themen gebündelt, inkl. firmenübergreifender
+  Verknüpfungen (`analyst_themes`, `analyst_company_links`).
+- **Trend-Scan & Profiteure** (1–2 Calls): Markt-News je Alpha-Vantage-Topic
+  (`analyst_trend_topics`) plus Themen → 3–8 aktuelle Trends; je Trend
+  Profiteure **ausschließlich aus einer kompaktierten Kandidatentabelle**
+  des Universums (Filter bestanden, Top-N je GICS-Industriegruppe, Bestand
+  und Themen-Titel erzwungen, globaler Deckel; bei großen Universen
+  zweistufig: Industriegruppen-Profil → Gruppen → Namen, Zulieferer-/
+  Enabler-Gruppen immer dabei). Jeder Profiteur erhält Rolle (direkt,
+  Zulieferer, Enabler, Picks & Shovels, 2. Ordnung), Begründungskette und
+  ein **deterministisches Quant-Tag** „früh / teilweise / bereits
+  eingepreist“ (aus `z_momentum`, `z_eps_revisions_3m`, `mom_12_1`) neben
+  dem LLM-Urteil; die Aktion (Kandidat prüfen · Watchlist · Position prüfen
+  · Nur Information) wird aus Zone, Bestand und Tag abgeleitet.
+
+**Setup**
+
+```bash
+export OLLAMA_API_KEY=...          # Ollama Cloud (https://ollama.com), nie im Repo
+export ALPHAVANTAGE_API_KEY=...   # Premium-Key (wie Risikomodul)
+# optional: OLLAMA_BASE_URL (Default https://ollama.com), KI_ANALYST_SCHEDULER=0
+
+python -m app.tools.analyst models                    # verfügbare Cloud-Modelle
+python -m app.tools.analyst watchlist --limit 10      # Scope-Auflösung, keine LLM-Calls
+python -m app.tools.analyst run --dry-run --limit 3   # Ereignisse + Hinweise, 0 LLM-Calls
+python -m app.tools.analyst run --limit 5 --max-llm-calls 25
+python -m app.tools.analyst status | themes | trends
+# Cron-Beispiel (werktags 22:30): 30 22 * * 1-5 cd /srv/app && python -m app.tools.analyst run
+```
+
+Exit-Codes `0` (done/partial, Warnungen auf stderr), `1` (fehlende Keys/
+Universum, Lauf-Fehler), `2` (Argumentfehler). Alternativ läuft der
+**In-App-Scheduler** (Daemon-Thread, Einstellungen → „KI-Analyst“ →
+„In-App-Scheduler aktiv“, Intervall in Minuten) oder der Button „Jetzt
+ausführen“ auf der Seite.
+
+**Umfang & Kostenkontrolle (Einstellungen)**: Scope `portfolio` (aktives
+Portfolio + Modellportfolio + Zone KANDIDAT, Default), `universe` oder
+`custom` (eigene Liste); max. Titel je Lauf (Round-Robin: Bestand zuerst,
+dann die am längsten nicht geprüften, dann Score); max. LLM-Calls je Lauf
+(3 Calls Reserve für die Run-Ebene); News-Fenster/-Limit/-Relevanz;
+Transkript-Schwelle für Map-Reduce; Schalter für Transkripte, News,
+Insider, Kursreaktion, Themen, Trends. Das AV-Rate-Limit teilt sich der
+Analyst mit dem Risikomodul (`risk_av_requests_per_minute`).
+
+**Fehlerverhalten (keine stillen Fallbacks)**: fehlende Keys → Hinweis auf
+der Seite, CLI Exit 1; nicht auflösbares AV-Symbol → Warnung, Titel läuft
+nur mit Quant-Daten; kein Transkript (typisch Nicht-US) → Info, Cursor
+wird fortgeschrieben; AV-Rate-Limit → Status `partial`, Trend-Scan nur aus
+Themen; ungültiges LLM-JSON nach einem Retry → Insight `unparsed` mit
+Rohtext; Ollama-Fehler → restliche LLM-Aufrufe übersprungen; vom LLM
+nicht adressierte Regelhinweise werden als „keine Evidenz“ ergänzt.
+
+**Grenzen**: Transkripte und News bei Alpha Vantage sind US-zentriert;
+Zulieferer-/Kunden-Zuordnungen und Profiteur-Ketten sind LLM-Hypothesen
+mit Quellenangabe, keine geprüften Fakten; der Agent verändert nie
+Scores, Zonen oder das Modellportfolio.
+
 ## Daten hochladen
 
 1. Browser auf <http://127.0.0.1:8050/daten-import> (Docker: Port 5000)
@@ -493,7 +595,9 @@ Diagnose-Fehler an Stichtagen), 2 bei Abbruch/Konfigurationsfehler.
 python -m tests.test_scoring        # Smoke-Test Scoring
 python -m pytest tests -q           # komplette Suite (inkl. Agenten-Client,
                                     # Ticker-Mapping, Agenten-Persistenz,
-                                    # Risiko-&-Benchmark-Modul, Backtest-Engine)
+                                    # Risiko-&-Benchmark-Modul, Backtest-Engine,
+                                    # KI-Analyst: AV-Fetcher, Ollama-Client,
+                                    # Regeltabelle, Trend-Scan, Runner, CLI, Seite)
 ```
 
 Smoke-Test gegen `tests/fixtures/koyfin_sample.csv` (10 synthetische Tickers).

@@ -1,0 +1,32 @@
+{
+  "faktor_zusammenspiel": [
+    {"muster": "Value-Falle?", "faktoren": ["value", "momentum"], "richtung": "widerspruechlich",
+     "interpretation": "Management nennt temporäre Faktoren.", "evidenz_urteil": "widerspricht",
+     "belege": ["CEO: 'Pricing is stable'"], "regel_code": "value_trap"},
+    {"muster": "Eigenes Muster", "faktoren": ["quality"], "richtung": "neutral",
+     "interpretation": "x", "evidenz_urteil": "keine_evidenz", "belege": [], "regel_code": null}
+  ],
+  "quellen_zusammenhaenge": [
+    {"quellen": ["insider", "earnings"], "befund": "CEO kauft nach positiver Überraschung.",
+     "richtung": "bestaetigend", "bedeutung": 4, "belege": ["Insider 2026-10-15", "EPS +4,5 %"]},
+    {"quellen": ["news"], "befund": "nur eine Quelle", "richtung": "neutral", "bedeutung": 1, "belege": []},
+    {"quellen": ["news", "news"], "befund": "doppelt gleiche Quelle", "richtung": "neutral", "bedeutung": 1, "belege": []}
+  ],
+  "nicht_eingepreiste_themen": [
+    {"thema": "Neue Produktlinie", "art": "produktzyklus", "evidenz": ["[1]"],
+     "warum_nicht_eingepreist": "Kurs seit Call −2 %, Revisionen 0,0.", "zeithorizont": "mittel",
+     "konfidenz": 1.7, "bestaetigung_durch": "Q4-Auftragseingang", "richtung": "positiv"},
+    {"thema": "", "art": "sonstiges"}
+  ],
+  "verbundene_unternehmen": [
+    {"name": "Mercedes-Benz Group", "ticker": null, "beziehung": "kunde", "kontext": "Großkunde", "quelle": "Call"},
+    {"name": "Unknown Supplier Ltd", "ticker": "ZZZ", "beziehung": "zulieferer", "kontext": "x", "quelle": "News [2]"},
+    {"name": "SAP SE", "ticker": "SAP", "beziehung": "partner", "kontext": "Selbstreferenz", "quelle": "Call"},
+    {"name": "Banco Santander", "ticker": null, "beziehung": "weird", "kontext": "y", "quelle": "News"}
+  ],
+  "vorschlag": {
+    "typ": "HALTEN", "konfidenz": 0.8, "begruendung": "Solide.",
+    "evidenz": [{"quelle": "transcript", "referenz": "CEO"}, "kein-dict"],
+    "quant_konsistenz": "bestaetigt"
+  }
+}

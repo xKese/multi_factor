@@ -96,3 +96,17 @@ def test_model_portfolio_upsert(tmp_path, monkeypatch):
     assert loaded.pc_target_n == 33
     assert loaded.v2_weight_value == 0.35
     assert loaded.scoring_version == "v1"
+
+    # KI-Analyst-Felder (Listen und Skalare) überleben den Roundtrip.
+    s4 = Settings()
+    s4.analyst_enabled = True
+    s4.analyst_model = "deepseek-v3.1:671b"
+    s4.analyst_custom_tickers = ["SAP", "MBG~mercedes"]
+    s4.analyst_trend_topics = ["technology"]
+    p.save_settings(s4)
+    loaded4 = p.load_settings()
+    assert loaded4 is not None
+    assert loaded4.analyst_enabled is True
+    assert loaded4.analyst_model == "deepseek-v3.1:671b"
+    assert loaded4.analyst_custom_tickers == ["SAP", "MBG~mercedes"]
+    assert loaded4.analyst_trend_topics == ["technology"]

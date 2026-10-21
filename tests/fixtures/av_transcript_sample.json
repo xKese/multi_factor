@@ -1,0 +1,13 @@
+{
+  "symbol": "TEST",
+  "quarter": "2026Q2",
+  "transcript": [
+    {"speaker": "Operator", "title": "Operator", "content": "Good morning and welcome to the Q2 2026 earnings call.", "sentiment": "0.5"},
+    {"speaker": "Jane Doe", "title": "CEO", "content": "We delivered record revenue of 2.4 billion, up 12 percent. We are raising full-year guidance to 9.8 to 10.0 billion.", "sentiment": "0.8"},
+    {"speaker": "John Roe", "title": "CFO", "content": "Operating margin expanded 150 basis points. Free cash flow was 410 million. Capex will increase next year as we expand capacity.", "sentiment": "0.7"},
+    {"speaker": "Operator", "title": "Operator", "content": "We will now begin the question and answer session.", "sentiment": "0.5"},
+    {"speaker": "Alex Analyst", "title": "Analyst, Big Bank", "content": "Can you talk about pricing pressure in Europe?", "sentiment": "0.4"},
+    {"speaker": "Jane Doe", "title": "CEO", "content": "Pricing is stable; we see some competitive intensity but our backlog is strong.", "sentiment": "0.6"},
+    {"speaker": "", "title": "", "content": "", "sentiment": "None"}
+  ]
+}

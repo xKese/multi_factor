@@ -1,0 +1,13 @@
+{
+  "themen": [
+    {"titel": "KI-Capex-Zyklus", "beschreibung": "d", "art": "sektor", "richtung": "positiv",
+     "betroffene_uids": ["SAP", "MBG", "GHOST"], "sektoren": ["IT"], "regionen": ["EU"],
+     "konfidenz": 0.7, "bestaetigung_durch": "Q4-Zahlen", "belege": ["SAP Call"]},
+    {"titel": "", "art": "makro"}
+  ],
+  "verknuepfungen": [
+    {"uid_a": "SAP", "uid_b": "MBG", "beziehung": "kunde", "beleg": "Call"},
+    {"uid_a": "SAP", "uid_b": "GHOST", "beziehung": "kunde", "beleg": "x"},
+    {"uid_a": "SAP", "uid_b": "SAP", "beziehung": "kunde", "beleg": "x"}
+  ]
+}

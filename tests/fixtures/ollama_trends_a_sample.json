@@ -1,0 +1,8 @@
+{
+  "trends": [
+    {"titel": "Netzausbau für KI-Rechenzentren", "beschreibung": "Transformatoren knapp.", "art": "energie_transport",
+     "zeithorizont": "mittel", "staerke": 4, "konfidenz": 0.8,
+     "evidenz": [{"quelle": "news", "referenz": "[1]"}],
+     "betroffene_industriegruppen": ["Utilities", "Capital Goods"], "verlierer_hinweis": null}
+  ]
+}

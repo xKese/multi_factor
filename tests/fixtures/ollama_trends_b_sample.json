@@ -1,0 +1,15 @@
+{
+  "trends": [
+    {"titel": "Netzausbau für KI-Rechenzentren", "beschreibung": "Transformatoren knapp.", "art": "energie_transport",
+     "zeithorizont": "mittel", "staerke": 9, "konfidenz": 0.8,
+     "evidenz": [{"quelle": "news", "referenz": "[1]"}],
+     "betroffene_industriegruppen": ["Utilities", "Capital Goods"], "verlierer_hinweis": "Stromintensive Industrie",
+     "profiteure": [
+       {"uid": "CG0", "ticker": "CG0", "rolle": "zulieferer", "begruendungskette": ["Trend", "Mechanismus", "Firma"],
+        "evidenz": ["[1]"], "eingepreist": "frueh", "eingepreist_begruendung": "z_mom 0,1", "vorgeschlagene_aktion": "Kandidat prüfen"},
+       {"uid": "GHOST", "ticker": "GHOST", "rolle": "direkt", "begruendungskette": [], "evidenz": [],
+        "eingepreist": "bereits", "eingepreist_begruendung": "", "vorgeschlagene_aktion": "Watchlist"}
+     ]},
+    {"titel": "", "beschreibung": "leer"}
+  ]
+}

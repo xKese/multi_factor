@@ -1,0 +1,33 @@
+{
+  "items": "2",
+  "feed": [
+    {
+      "title": "Grid operators accelerate transformer orders amid AI data-center boom",
+      "url": "https://example.com/topic/1",
+      "time_published": "20261019T120000",
+      "summary": "Utilities report multi-year backlogs for transformers and switchgear.",
+      "source": "Energy Wire",
+      "overall_sentiment_score": "0.33",
+      "overall_sentiment_label": "Somewhat-Bullish",
+      "ticker_sentiment": [
+        {"ticker": "GRID", "relevance_score": "0.7", "ticker_sentiment_score": "0.4", "ticker_sentiment_label": "Bullish"},
+        {"ticker": "MINOR", "relevance_score": "0.1", "ticker_sentiment_score": "0.0", "ticker_sentiment_label": "Neutral"}
+      ],
+      "topics": [
+        {"topic": "Energy & Transportation", "relevance_score": "1.0"},
+        {"topic": "Technology", "relevance_score": "0.6"}
+      ]
+    },
+    {
+      "title": "Grid operators accelerate transformer orders amid AI data-center boom",
+      "url": "https://example.com/topic/1",
+      "time_published": "20261019T120000",
+      "summary": "Duplicate item (same url).",
+      "source": "Energy Wire",
+      "overall_sentiment_score": "0.33",
+      "overall_sentiment_label": "Somewhat-Bullish",
+      "ticker_sentiment": [],
+      "topics": [{"topic": "Energy & Transportation", "relevance_score": "1.0"}]
+    }
+  ]
+}

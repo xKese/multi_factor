@@ -25,6 +25,7 @@ ALL_PAGES = [
         ("Dashboard", "/"),
         ("Einzelanalyse", "/einzelanalyse"),
         ("Agenten-Analyse", "/agenten-analyse"),
+        ("KI-Analyst", "/ki-analyst"),
         ("Momentum-Monitor", "/sma"),
         ("Sektor-Momentum", "/sektor-momentum"),
         ("M&S Portfolio", "/portfolios"),
@@ -67,9 +68,9 @@ def _classes(component, name):
     ]
 
 
-def test_main_nav_has_eleven_tabs():
+def test_main_nav_has_twelve_tabs():
     main, _ = split_pages(ALL_PAGES)
-    assert len(main) == 11
+    assert len(main) == 12
 
 
 def test_utility_pages_leave_the_tab_row():
@@ -150,8 +151,8 @@ def test_utility_menu_lists_exactly_the_three_pages():
     assert all(i.to_plotly_json()["props"]["role"] == "menuitem" for i in items)
 
 
-def test_tab_row_renders_eleven_nav_links():
+def test_tab_row_renders_twelve_nav_links():
     header = header_layout(ALL_PAGES)
     links = _classes(header, "ms-nav-link")
-    assert len(links) == 11
+    assert len(links) == 12
     assert links[0].href == "/"

@@ -243,6 +243,33 @@ Universums-Median) ist ein reiner Hinweis, kein Tilt.
 **Grenzen**: Faktor-Timing hat schwache Out-of-Sample-Evidenz — die
 kleinen Tilts sind Absicht; das System unterstützt die Entscheidung, es
 ersetzt sie nicht.
+
+## KI-Analyst
+
+Der KI-Analyst beobachtet die Titel des Universums laufend und macht
+Vorschläge als Entscheidungsunterstützung — er handelt nicht und verändert
+keine Scores oder Zonen.
+
+- **Voraussetzung:** Umgebungsvariablen `OLLAMA_API_KEY` (Ollama Cloud) und
+  `ALPHAVANTAGE_API_KEY`. Fehlt ein Key, zeigt die Seite einen Hinweis.
+- **Umfang** (Einstellungen → KI-Analyst): Portfolio + Modellportfolio +
+  Kandidaten (Standard), gesamtes Universum oder eigene Liste; max. Titel und
+  max. LLM-Aufrufe je Lauf begrenzen die Kosten.
+- **Starten:** Button „Jetzt ausführen" auf `/ki-analyst`, In-App-Scheduler
+  (Intervall in Minuten) oder `python -m app.tools.analyst run`
+  (`--dry-run` zeigt Ereignisse und Hinweise ohne LLM-Aufrufe).
+- **Lesen:** „Trends & Profiteure" (Rolle, Begründungskette, Quant-Tag
+  früh/teilweise/bereits eingepreist, Aktion), „Themen" (Universum,
+  firmenübergreifende Verknüpfungen), „Vorschläge" (Einstieg prüfen ·
+  Halten · Überprüfen · Reduzieren/Verkauf prüfen · Info, mit Erledigt/
+  Verwerfen), „Firmen-Analysen" (Earnings-Call, News-Digest,
+  Faktor-Zusammenspiel, quellenübergreifende Zusammenhänge, nicht
+  eingepreiste Themen, verbundene Unternehmen), Ereignis-Feed und Läufe mit
+  Diagnose. Jeder Lauf schreibt `reports/ki_analyst_<lauf>.md`.
+- **Badges:** Dashboard-Spalte „KI-Analyst" und die Einzelanalyse zeigen den
+  neuesten offenen Vorschlag und Trend-Profiteur-Marker; die Karte
+  „KI-Analyst" in der Einzelanalyse enthält die vollständige Synthese.
+
 """
 
 

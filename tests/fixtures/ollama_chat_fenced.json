@@ -1,0 +1,5 @@
+{
+  "model": "gpt-oss:120b",
+  "message": {"role": "assistant", "content": "Hier ist das Ergebnis:\n```json\n{\"zusammenfassung\": \"Mit Zaun.\", \"ton\": 3}\n```\nViel Erfolg."},
+  "done": true
+}
