@@ -110,3 +110,11 @@ def test_model_portfolio_upsert(tmp_path, monkeypatch):
     assert loaded4.analyst_model == "deepseek-v3.1:671b"
     assert loaded4.analyst_custom_tickers == ["SAP", "MBG~mercedes"]
     assert loaded4.analyst_trend_topics == ["technology"]
+    s5 = Settings()
+    s5.analyst_chat_model = "kimi-k2:1t"
+    s5.analyst_chat_mode = "context"
+    s5.analyst_chat_max_tool_rounds = 3
+    p.save_settings(s5)
+    loaded5 = p.load_settings()
+    assert loaded5.analyst_chat_model == "kimi-k2:1t" and loaded5.analyst_chat_mode == "context"
+    assert loaded5.analyst_chat_max_tool_rounds == 3

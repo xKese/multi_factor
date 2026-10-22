@@ -343,6 +343,14 @@ class Settings:
     analyst_trend_max_beneficiaries: int = 8
     analyst_llm_timeout_seconds: int = 300
     analyst_report_dir: str = "reports"
+    # KI-Chat (Popup auf jeder Seite): Modell leer = Analyst-Modell; Modus
+    # auto = Werkzeugaufrufe, Fallback Kontextmodus bei Modellen ohne
+    # Tool-Unterstützung; tools/context erzwingen den jeweiligen Weg.
+    analyst_chat_model: str = ""
+    analyst_chat_mode: str = "auto"
+    analyst_chat_max_tool_rounds: int = 8
+    analyst_chat_history_messages: int = 20
+    analyst_chat_max_tool_chars: int = 12000
 
     # ── Risiko & Benchmark ──────────────────────────────────────────────
     # Benchmark-Proxy: iShares MSCI ACWI ETF (US-Listing, USD). Bereits im

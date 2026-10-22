@@ -132,6 +132,12 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
     "analyst_trend_max_beneficiaries",
     "analyst_llm_timeout_seconds",
     "analyst_report_dir",
+    # KI-Chat.
+    "analyst_chat_model",
+    "analyst_chat_mode",
+    "analyst_chat_max_tool_rounds",
+    "analyst_chat_history_messages",
+    "analyst_chat_max_tool_chars",
     # Risiko & Benchmark. Hinweis: ``_apply_settings_dict`` mergt nur
     # ``dict[str, float]``-Felder mit den Defaults — gespeicherte
     # Szenario-/Schock-Dicts gewinnen als Ganzes (dokumentiert im README).
@@ -472,6 +478,37 @@ def load_universe_snapshot(snapshot_date: date) -> pd.DataFrame | None:
     except SQLAlchemyError as exc:
         log.warning("Laden des Universum-Snapshots fehlgeschlagen: %s", exc)
         return None
+
+
+def load_uid_history(uid: str, limit: int = 12) -> pd.DataFrame:
+    """Punkt-in-Zeit-Verlauf eines Titels aus ``koyfin_universe_history``
+    (alle Spalten, die letzten ``limit`` Snapshots, aufsteigend sortiert).
+    Fail-open: leerer DataFrame."""
+
+    engine = get_engine()
+    if engine is None:
+        return pd.DataFrame()
+    try:
+        with engine.begin() as conn:
+            if not inspect(conn).has_table(_UNIVERSE_HISTORY_TABLE):
+                return pd.DataFrame()
+            df = pd.read_sql(
+                text(
+                    f"SELECT * FROM {_UNIVERSE_HISTORY_TABLE} WHERE uid = :u "
+                    "ORDER BY snapshot_date DESC LIMIT :n"
+                ),
+                conn,
+                params={"u": str(uid), "n": int(limit)},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden des Titel-Verlaufs fehlgeschlagen: %s", exc)
+        return pd.DataFrame()
+    if df.empty:
+        return df
+    if "snapshot_date" in df.columns:
+        df["snapshot_date"] = df["snapshot_date"].map(_coerce_snapshot_date)
+        df = df.sort_values("snapshot_date")
+    return df.reset_index(drop=True)
 
 
 def list_snapshots() -> list[tuple[date, int]]:

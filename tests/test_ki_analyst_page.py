@@ -181,3 +181,25 @@ def test_settings_card_and_save(monkeypatch):
     assert s.analyst_model == "gpt-oss:120b" and s.analyst_scope == "portfolio" and s.analyst_interval_minutes == 360
     assert s.analyst_max_companies_per_run == 1 and s.analyst_max_llm_calls_per_run == 80
     assert s.analyst_trend_max_trends == 20 and s.analyst_trend_max_candidates == 10 and s.analyst_report_dir == "reports"
+
+
+def test_chat_settings_card_and_save(monkeypatch):
+    from app.pages import einstellungen as es
+
+    view = str(es._chat_card())
+    assert "chat-model" in view and "chat-mode" in view and "save-chat-settings" in view
+    saved = {}
+    monkeypatch.setattr(es, "save_settings", lambda s: saved.setdefault("ok", True))
+    out = es._save_chat_settings(1, " qwen3:235b ", "context", 12, 30, 20000)
+    s = STATE.settings
+    assert saved.get("ok") and "gespeichert" in str(out)
+    assert s.analyst_chat_model == "qwen3:235b" and s.analyst_chat_mode == "context"
+    assert s.analyst_chat_max_tool_rounds == 12 and s.analyst_chat_history_messages == 30 and s.analyst_chat_max_tool_chars == 20000
+    es._save_chat_settings(2, None, "weird", 99, -3, "x")
+    assert s.analyst_chat_model == "" and s.analyst_chat_mode == "auto"
+    assert s.analyst_chat_max_tool_rounds == 20 and s.analyst_chat_history_messages == 0 and s.analyst_chat_max_tool_chars == 12000
+    import pytest
+    from dash.exceptions import PreventUpdate
+
+    with pytest.raises(PreventUpdate):
+        es._save_chat_settings(0, "", "auto", 1, 1, 2000)

@@ -323,3 +323,19 @@ def test_normalize_helpers():
     assert norm_float("0,75") == 0.75 and norm_float("75%", 0, 1) == 0.75 and norm_float(80, 0, 1) == 0.8
     assert norm_float("1.234,5") == 1234.5 and norm_float("abc") is None and norm_float(True) is None
     assert pick({"Begründung": "x"}, "begruendung") == "x" and pick({}, "a", default=1) == 1
+
+
+def test_synthesis_prompt_sections_12_13_koyfin_and_history(fake):
+    from app.core.analyst import prompts
+
+    user = prompts.build_synthesis_user_prompt(_item(held=False), [], {}, {"scoring_version": "v2"}, _hints(), {}, None, False,
+                                               koyfin_text="**SAP — SAP SE**\n- P/E: 25,00", history_text="| Stand | Score |")
+    assert "## 12. Koyfin-Kennzahlen (vollständig)\n**SAP — SAP SE**" in user
+    assert "## 13. Verlauf (letzte Snapshots)\n| Stand | Score |" in user
+    assert "Koyfin" in user.split("## 1.")[0]  # Aufgabentext verweist auf die Koyfin-Daten
+    user2 = prompts.build_synthesis_user_prompt(_item(held=False), [], {}, {"scoring_version": "v2"}, _hints(), {}, None, False)
+    assert "## 12. Koyfin-Kennzahlen (vollständig)\nnicht verfügbar" in user2
+    f = fake([_load("ollama_synthesis_sample.json")])
+    tasks.synthesize_company(_item(held=False), [], {}, {"scoring_version": "v2"}, _hints(), {}, None, Settings(), held=False,
+                             scored=_scored(), period="p", koyfin_text="KOYFIN-BLOCK", history_text="VERLAUF-BLOCK")
+    assert "KOYFIN-BLOCK" in f.calls[0]["user"] and "VERLAUF-BLOCK" in f.calls[0]["user"]

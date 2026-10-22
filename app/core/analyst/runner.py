@@ -30,7 +30,7 @@ from ..av_client import AlphaVantageError
 from ..diagnostics import SEV_ERROR, SEV_INFO, SEV_WARNING, Diagnostic
 from ..uid import base_ticker, row_by_uid
 from . import events as ev
-from . import ollama_client, report, store, tasks, trend_scan, watchlist
+from . import ollama_client, report, snapshot, store, tasks, trend_scan, watchlist
 from .factor_interplay import detect_interplay
 from .ollama_client import OllamaError
 
@@ -251,9 +251,16 @@ def _analyse_company(item, row, cursor, settings, budget, events, extras, comp, 
             comp.diagnostics.append(Diagnostic(SEV_WARNING, "llm_unparsed", f"{item.ticker}: News-Digest nicht parsebar.", item.uid))
     if budget.llm_available(reserve):
         previous = store.load_latest_synthesis(item.uid)
+        try:
+            koyfin_text = snapshot.render_snapshot_text(snapshot.koyfin_snapshot(row, settings))
+            history_text = snapshot.render_history_text(snapshot.uid_history(item.uid))
+        except Exception as exc:  # noqa: BLE001 — Zusatzquelle, nie blockierend
+            log.info("Koyfin-Steckbrief für %s nicht erstellt: %s", item.ticker, exc)
+            koyfin_text, history_text = None, None
         syn = tasks.synthesize_company(
             item, events, insights, factor_context, comp.hints, comp.market_reaction, previous,
             settings, held, scored=scored, model=model, period=run_id,
+            koyfin_text=koyfin_text, history_text=history_text,
         )
         budget.llm_calls += syn.insight.n_calls
         comp.llm_calls += syn.insight.n_calls

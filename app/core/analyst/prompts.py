@@ -459,8 +459,11 @@ def build_synthesis_user_prompt(
     previous_synthesis: dict | None,
     held: bool,
     calendar_event=None,
+    koyfin_text: str | None = None,
+    history_text: str | None = None,
 ) -> str:
-    """Synthese-Prompt mit **allen** Quellen als nummerierte Abschnitte."""
+    """Synthese-Prompt mit **allen** Quellen als nummerierte Abschnitte
+    (inkl. vollständiger Koyfin-Kennzahlen und Verlauf, Abschnitte 12/13)."""
     from .factor_interplay import hints_to_prompt
 
     by_kind = {}
@@ -495,6 +498,9 @@ def build_synthesis_user_prompt(
         "quant_konsistenz exakt bestaetigt | widerspricht | neutral (ohne Umlaut). "
         "begruendung: 3–5 Sätze mit Quellenbezug — nie leer.\n"
         "- Hat sich gegenüber der vorherigen Analyse etwas geändert? Dann benenne es.\n"
+        "- Nutze die vollständigen Koyfin-Kennzahlen und den Verlauf (Abschnitte 12/13) — "
+        "insbesondere, wenn Transkript oder News fehlen (typisch bei europäischen Titeln): "
+        "Margen, Wachstum, Multiples, Bilanzdynamik und Kursverlauf sind dann die Hauptquelle.\n"
     )
     return (
         f"{_header(item, held)}\n\n{task}\n"
@@ -512,6 +518,8 @@ def build_synthesis_user_prompt(
         + _section(9, "Insider-Transaktionen", _insider_text(by_kind.get("insider")))
         + _section(10, "Ereignisse seit dem letzten Lauf", _events_text(events))
         + _section(11, "Vorherige Analyse", _previous_text(previous_synthesis))
+        + _section(12, "Koyfin-Kennzahlen (vollständig)", koyfin_text)
+        + _section(13, "Verlauf (letzte Snapshots)", history_text)
     )
 
 

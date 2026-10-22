@@ -274,6 +274,32 @@ keine Scores oder Zonen.
   neuesten offenen Vorschlag und Trend-Profiteur-Marker; die Karte
   „KI-Analyst" in der Einzelanalyse enthält die vollständige Synthese.
 
+## KI-Chat
+
+Der Button „KI-Chat" unten rechts öffnet auf jeder Seite ein Panel, in dem
+Sie dem Analyst-Agenten Fragen stellen — zu einzelnen Titeln, zu Märkten
+und zu allem, was das Tool kennt (Koyfin-Daten, Scores, Zonen, Verlauf,
+Portfolios, Modellportfolio, Factor Timing, Risiko, Analyst-Läufe,
+Methodik).
+
+- **Voraussetzung:** `OLLAMA_API_KEY`; mit `ALPHAVANTAGE_API_KEY` zusätzlich
+  Live-News, Earnings, Transkripte, Insider-Transaktionen, Kurse und Makro.
+- **Datenbasis:** Der Agent nutzt Werkzeuge über die gespeicherten Daten —
+  darunter *alle* importierten Koyfin-Kennzahlen je Titel (auch die, die das
+  Scoring nicht verwendet) und deren Verlauf. Das ist besonders für
+  europäische Titel wichtig, die Alpha Vantage nicht abdeckt.
+- **Seitenbezug:** In der Einzelanalyse zeigt das Panel „Bezug: Ticker —
+  Name"; Fragen ohne Titel beziehen sich auf diesen Titel (Schalter
+  „Seitenbezug nutzen").
+- **Bedienung:** Enter sendet, Shift+Enter Zeilenumbruch; Schnellfragen bei
+  leerer Unterhaltung; Unterhaltungen bleiben gespeichert und lassen sich
+  wechseln, umbenennen und löschen. Jede Antwort nennt ihre Quellen und
+  zeigt die verwendeten Werkzeuge.
+- **Einstellungen → KI-Chat:** Modell, Modus (automatisch / nur Werkzeuge /
+  nur Kontext für Modelle ohne Tool-Calling), Werkzeug-Runden, Verlauf,
+  Zeichenlimit. CLI: `python -m app.tools.analyst chat "Frage" --uid SAP`.
+- Antworten sind Entscheidungsunterstützung, keine Anlageberatung.
+
 """
 
 

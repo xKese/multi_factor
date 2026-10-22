@@ -393,10 +393,11 @@ def synthesize_company(
     item, events: list, insights: dict, factor_context: dict, hints: list[InterplayHint],
     market_reaction: dict, previous_synthesis: dict | None, settings, held: bool,
     scored: pd.DataFrame | None = None, model: str | None = None, period: str | None = None,
-    calendar_event=None,
+    calendar_event=None, koyfin_text: str | None = None, history_text: str | None = None,
 ) -> SynthesisResult:
     user = prompts.build_synthesis_user_prompt(
-        item, factor_context, events, insights, hints, market_reaction, previous_synthesis, held, calendar_event
+        item, factor_context, events, insights, hints, market_reaction, previous_synthesis, held,
+        calendar_event, koyfin_text=koyfin_text, history_text=history_text,
     )
     parsed, raw, n = _call(user, prompts.SYNTHESIS_SCHEMA, prompts.SYNTHESIS_REQUIRED, settings, model)
     res = _result(KIND_SYNTHESIS, parsed, raw, n, settings, model, user, period)

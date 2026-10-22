@@ -46,8 +46,11 @@ _COMPANY_LINKS = "analyst_company_links"
 _TRENDS = "analyst_trends"
 _TREND_LINKS = "analyst_trend_links"
 _WATCH = "analyst_watch_state"
+_CHAT_SESSIONS = "analyst_chat_sessions"
+_CHAT_MESSAGES = "analyst_chat_messages"
 
 SUGGESTION_STATUSES = ("open", "done", "dismissed")
+CHAT_ROLES = ("user", "assistant", "tool")
 
 
 # --------------------------------------------------------------------------- #
@@ -259,6 +262,31 @@ def _ensure_watch(conn) -> None:
     )
 
 
+def _ensure_chat_sessions(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_CHAT_SESSIONS} ("
+            "id INTEGER PRIMARY KEY, title TEXT, context_uid TEXT, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "n_messages INTEGER NOT NULL DEFAULT 0)"
+        )
+    )
+
+
+def _ensure_chat_messages(conn) -> None:
+    conn.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {_CHAT_MESSAGES} ("
+            "id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL, role TEXT NOT NULL, "
+            "content TEXT, tool_name TEXT, tool_calls_json TEXT, trace_json TEXT, model TEXT, "
+            "n_llm_calls INTEGER, n_av_calls INTEGER, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+    )
+    conn.execute(text(f"CREATE INDEX IF NOT EXISTS idx_acm_session ON {_CHAT_MESSAGES}(session_id)"))
+
+
 def ensure_tables() -> None:
     """Legt alle Tabellen an (idempotent). Raised bei DB-Problemen."""
     with _engine().begin() as conn:
@@ -271,6 +299,8 @@ def ensure_tables() -> None:
             _ensure_company_links,
             _ensure_trends,
             _ensure_watch,
+            _ensure_chat_sessions,
+            _ensure_chat_messages,
         ):
             fn(conn)
 
@@ -1099,3 +1129,158 @@ def save_watch_state(uid: str, **fields) -> None:
                 ),
                 {**cols, "uid": str(uid)},
             )
+
+
+# --------------------------------------------------------------------------- #
+# KI-Chat: Sitzungen und Nachrichten
+# --------------------------------------------------------------------------- #
+def create_chat_session(title: str | None = None, context_uid: str | None = None) -> int:
+    with _engine().begin() as conn:
+        _ensure_chat_sessions(conn)
+        sid = _next_id(conn, _CHAT_SESSIONS)
+        conn.execute(
+            text(
+                f"INSERT INTO {_CHAT_SESSIONS} (id, title, context_uid, created_at, updated_at, n_messages) "
+                "VALUES (:id, :title, :ctx, :now, :now, 0)"
+            ),
+            {"id": sid, "title": title or "Neue Unterhaltung", "ctx": context_uid, "now": datetime.now()},
+        )
+    return sid
+
+
+def _decode_session(row: dict) -> dict:
+    row["created_at"] = _ts(row.get("created_at"))
+    row["updated_at"] = _ts(row.get("updated_at"))
+    return row
+
+
+def list_chat_sessions(limit: int = 50) -> list[dict]:
+    engine = persistence.get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.begin() as conn:
+            _ensure_chat_sessions(conn)
+            rows = _rows(
+                conn,
+                f"SELECT * FROM {_CHAT_SESSIONS} ORDER BY updated_at DESC, id DESC LIMIT :n",
+                {"n": int(limit)},
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Chat-Sitzungen fehlgeschlagen: %s", exc)
+        return []
+    return [_decode_session(r) for r in rows]
+
+
+def load_chat_session(session_id: int) -> dict | None:
+    engine = persistence.get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.begin() as conn:
+            _ensure_chat_sessions(conn)
+            rows = _rows(conn, f"SELECT * FROM {_CHAT_SESSIONS} WHERE id = :id", {"id": int(session_id)})
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Chat-Sitzung fehlgeschlagen: %s", exc)
+        return None
+    return _decode_session(rows[0]) if rows else None
+
+
+def rename_chat_session(session_id: int, title: str) -> None:
+    with _engine().begin() as conn:
+        _ensure_chat_sessions(conn)
+        conn.execute(
+            text(f"UPDATE {_CHAT_SESSIONS} SET title = :t, updated_at = :now WHERE id = :id"),
+            {"t": str(title)[:120], "now": datetime.now(), "id": int(session_id)},
+        )
+
+
+def delete_chat_session(session_id: int) -> None:
+    with _engine().begin() as conn:
+        _ensure_chat_sessions(conn)
+        _ensure_chat_messages(conn)
+        conn.execute(text(f"DELETE FROM {_CHAT_MESSAGES} WHERE session_id = :id"), {"id": int(session_id)})
+        conn.execute(text(f"DELETE FROM {_CHAT_SESSIONS} WHERE id = :id"), {"id": int(session_id)})
+
+
+def touch_chat_session(session_id: int) -> None:
+    with _engine().begin() as conn:
+        _ensure_chat_sessions(conn)
+        conn.execute(
+            text(f"UPDATE {_CHAT_SESSIONS} SET updated_at = :now WHERE id = :id"),
+            {"now": datetime.now(), "id": int(session_id)},
+        )
+
+
+def append_chat_message(
+    session_id: int,
+    role: str,
+    content: str,
+    *,
+    tool_name: str | None = None,
+    tool_calls=None,
+    trace=None,
+    model: str | None = None,
+    n_llm_calls: int | None = None,
+    n_av_calls: int | None = None,
+) -> int:
+    if role not in CHAT_ROLES:
+        raise ValueError(f"Unbekannte Chat-Rolle: {role}")
+    with _engine().begin() as conn:
+        _ensure_chat_sessions(conn)
+        _ensure_chat_messages(conn)
+        mid = _next_id(conn, _CHAT_MESSAGES)
+        conn.execute(
+            text(
+                f"INSERT INTO {_CHAT_MESSAGES} (id, session_id, role, content, tool_name, tool_calls_json, "
+                "trace_json, model, n_llm_calls, n_av_calls, created_at) VALUES (:id, :sid, :role, :content, "
+                ":tool_name, :tool_calls_json, :trace_json, :model, :n_llm, :n_av, :now)"
+            ),
+            {
+                "id": mid, "sid": int(session_id), "role": role, "content": content,
+                "tool_name": tool_name, "tool_calls_json": _json(tool_calls) if tool_calls is not None else None,
+                "trace_json": _json(trace) if trace is not None else None, "model": model,
+                "n_llm": n_llm_calls, "n_av": n_av_calls, "now": datetime.now(),
+            },
+        )
+        conn.execute(
+            text(
+                f"UPDATE {_CHAT_SESSIONS} SET n_messages = n_messages + 1, updated_at = :now WHERE id = :id"
+            ),
+            {"now": datetime.now(), "id": int(session_id)},
+        )
+    return mid
+
+
+def _decode_chat_message(row: dict) -> dict:
+    row["tool_calls"] = _loads(row.pop("tool_calls_json", None))
+    row["trace"] = _loads(row.pop("trace_json", None))
+    row["created_at"] = _ts(row.get("created_at"))
+    return row
+
+
+def load_chat_messages(
+    session_id: int, limit: int = 200, roles: tuple[str, ...] | None = None
+) -> list[dict]:
+    """Nachrichten einer Sitzung, aufsteigend (die letzten ``limit``)."""
+    engine = persistence.get_engine()
+    if engine is None:
+        return []
+    params: dict = {"sid": int(session_id), "n": int(limit)}
+    clause = ""
+    if roles:
+        placeholders = ", ".join(f":r{i}" for i in range(len(roles)))
+        clause = f" AND role IN ({placeholders})"
+        params.update({f"r{i}": r for i, r in enumerate(roles)})
+    try:
+        with engine.begin() as conn:
+            _ensure_chat_messages(conn)
+            rows = _rows(
+                conn,
+                f"SELECT * FROM {_CHAT_MESSAGES} WHERE session_id = :sid{clause} ORDER BY id DESC LIMIT :n",
+                params,
+            )
+    except SQLAlchemyError as exc:
+        log.warning("Laden der Chat-Nachrichten fehlgeschlagen: %s", exc)
+        return []
+    return [_decode_chat_message(r) for r in reversed(rows)]

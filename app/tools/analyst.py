@@ -229,6 +229,60 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chat(args: argparse.Namespace) -> int:
+    """Eine Frage an den KI-Chat (synchron, Antwort auf stdout)."""
+    from app.core.analyst import chat, store
+
+    scored = _load_state()
+    if scored is None:
+        return 1
+    settings = STATE.settings
+    session_id = args.session
+    if session_id is None:
+        session_id = store.create_chat_session(chat.session_title_from_question(args.question), context_uid=args.uid)
+        print(f"Neue Sitzung {session_id}", file=sys.stderr)
+    elif store.load_chat_session(int(session_id)) is None:
+        print(f"Sitzung {session_id} nicht gefunden.", file=sys.stderr)
+        return 1
+    ctx = chat.build_context(settings, scored, STATE, page_uid=args.uid, use_page_context=bool(args.uid))
+
+    def _progress(msg: str) -> None:
+        if args.verbose:
+            print(f"  … {msg}", file=sys.stderr)
+
+    try:
+        res = chat.answer(int(session_id), args.question, ctx, settings, model=args.model, mode=args.mode, progress=_progress)
+    except chat.ChatConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(res.answer_md)
+    if args.verbose:
+        print(
+            f"\n[Sitzung {session_id} · Modus {res.mode} · Modell {res.model} · LLM-Calls {res.n_llm_calls} · "
+            f"AV-Calls {res.n_av_calls} · Werkzeuge {len(res.tool_trace)}]",
+            file=sys.stderr,
+        )
+        for t in res.tool_trace:
+            print(f"  - {t.get('tool')} {t.get('args')} → {t.get('chars')} Zeichen", file=sys.stderr)
+    return 1 if res.error else 0
+
+
+def _cmd_chat_sessions(args: argparse.Namespace) -> int:
+    from app.core.analyst import store
+
+    rows = store.list_chat_sessions(limit=args.limit)
+    if not rows:
+        print("Keine Chat-Sitzungen gespeichert.")
+        return 0
+    for r in rows:
+        print(
+            f"{r.get('id')}\t{(r.get('updated_at') or r.get('created_at') or '')}\t"
+            f"{r.get('n_messages') or 0} Nachrichten\t{r.get('title') or '–'}"
+            + (f"\t[{r.get('context_uid')}]" if r.get('context_uid') else "")
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.tools.analyst", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -274,6 +328,19 @@ def main(argv: list[str] | None = None) -> int:
     p_inspect.add_argument("--run", help="Run-ID (nur Run-Ebene)")
     p_inspect.add_argument("--raw", action="store_true", help="Rohantwort des Modells statt geparstem Inhalt")
     p_inspect.set_defaults(func=_cmd_inspect)
+
+    p_chat = sub.add_parser("chat", help="Frage an den KI-Chat (Werkzeuge über gespeicherte Daten + Alpha Vantage)")
+    p_chat.add_argument("question", help="Frage (in Anführungszeichen)")
+    p_chat.add_argument("--session", type=int, help="Bestehende Sitzungs-ID fortsetzen (Default: neue Sitzung)")
+    p_chat.add_argument("--uid", help="Titel als Bezug (uid/Ticker), wie der Seitenbezug im Panel")
+    p_chat.add_argument("--mode", choices=["auto", "tools", "context"], help="Chat-Modus (Default: Einstellungen)")
+    p_chat.add_argument("--model", help="Ollama-Modell (Default: Einstellungen)")
+    p_chat.add_argument("--verbose", "-v", action="store_true", help="Fortschritt und Werkzeug-Trace auf stderr")
+    p_chat.set_defaults(func=_cmd_chat)
+
+    p_cs = sub.add_parser("chat-sessions", help="Gespeicherte Chat-Sitzungen auflisten")
+    p_cs.add_argument("--limit", type=int, default=20)
+    p_cs.set_defaults(func=_cmd_chat_sessions)
 
     try:
         args = parser.parse_args(argv)

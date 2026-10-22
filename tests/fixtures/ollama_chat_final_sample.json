@@ -1,0 +1,8 @@
+{
+  "model": "gpt-oss:120b",
+  "message": {
+    "role": "assistant",
+    "content": "## SAP im Modell\n\n| Kennzahl | Wert |\n|---|---|\n| Composite | 88,0 |\n\n**Quellen:** company_snapshot(SAP), av_news(SAP.DEX) [1]"
+  },
+  "done": true
+}

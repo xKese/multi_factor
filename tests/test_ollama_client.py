@@ -183,3 +183,41 @@ def test_list_models_dedupes_and_fails_open(monkeypatch):
 
     monkeypatch.delenv("OLLAMA_API_KEY")
     assert oc.list_models() == []
+
+
+def test_chat_tools_parses_tool_calls_and_omits_format(monkeypatch):
+    payload = _load("ollama_chat_toolcall_sample.json")
+    fake = _fake_post([_FakeResponse(payload)])
+    monkeypatch.setattr(oc.requests, "post", fake)
+    tools = [{"type": "function", "function": {"name": "company_snapshot", "description": "d", "parameters": {"type": "object"}}}]
+    msg = oc.chat_tools([{"role": "user", "content": "x"}], "m", tools=tools, temperature=0.3)
+    body = fake.calls[0]["json"]
+    assert "format" not in body and body["tools"] == tools and body["options"]["temperature"] == 0.3
+    assert msg["content"] == ""
+    assert [c["name"] for c in msg["tool_calls"]] == ["company_snapshot", "av_news"]
+    assert msg["tool_calls"][0]["arguments"] == {"uid": "SAP"}
+    assert msg["tool_calls"][1]["arguments"] == {"uid": "SAP", "days": 7}  # JSON-String geparst
+    assert msg["raw_tool_calls"] == payload["message"]["tool_calls"]
+
+    final = _FakeResponse(_load("ollama_chat_final_sample.json"))
+    fake2 = _fake_post([final])
+    monkeypatch.setattr(oc.requests, "post", fake2)
+    msg2 = oc.chat_tools([{"role": "user", "content": "x"}], "m")
+    assert "tools" not in fake2.calls[0]["json"]
+    assert msg2["tool_calls"] == [] and msg2["content"].startswith("## SAP")
+
+    bad = _FakeResponse({"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "", "arguments": "{bad"}}]}})
+    monkeypatch.setattr(oc.requests, "post", _fake_post([bad]))
+    with pytest.raises(oc.OllamaError) as err:
+        oc.chat_tools([{"role": "user", "content": "x"}], "m")
+    assert err.value.kind == "parse"
+
+
+def test_post_400_carries_error_text_and_tools_unsupported(monkeypatch):
+    fake = _fake_post([_FakeResponse({"error": "registry.ollama.ai/library/x does not support tools"}, 400)])
+    monkeypatch.setattr(oc.requests, "post", fake)
+    with pytest.raises(oc.OllamaError) as err:
+        oc.chat_tools([{"role": "user", "content": "x"}], "m", tools=[{"type": "function"}])
+    assert "does not support tools" in str(err.value) and err.value.kind == "error"
+    assert oc.tools_unsupported(err.value) is True
+    assert oc.tools_unsupported(oc.OllamaError("Ollama: HTTP 400 — invalid request")) is False

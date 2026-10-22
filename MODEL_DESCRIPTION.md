@@ -1351,7 +1351,44 @@ LLM-Calls und bewegt keine Cursor. Scheduler: Daemon-Thread
 `analyst_themes`, `analyst_company_links`, `analyst_trends`,
 `analyst_trend_links`, `analyst_watch_state`.
 
+### 16.6 KI-Chat (`chat.py`, `chat_tools.py`, `snapshot.py`)
+
+Interaktiver Zugang zum Analyst-Agenten als Popup auf jeder Seite
+(`app/ui/chat_panel.py`). Frage → Agent-Schleife mit Ollama-Tool-Calling:
+das Modell ruft Werkzeuge auf (bis `analyst_chat_max_tool_rounds`, danach
+Abschluss ohne Werkzeuge) und antwortet mit Quellenabschnitt. Werkzeuge
+über gespeicherte Daten (`company_snapshot` mit **allen** Koyfin-Spalten
+in Gruppen Identität/Bewertung/Qualität/Wachstum/Momentum/Risiko/Bilanz,
+`company_history` aus `koyfin_universe_history`, `company_peers`,
+`screen_universe`, `universe_overview`, `sector_overview`,
+`changes_since`, `portfolio_overview`, `model_portfolio_overview`,
+`factor_timing_state`, `risk_overview`, `analyst_insights`,
+`analyst_run_overview`, `methodology`) und live über Alpha Vantage
+(`av_news`, `av_earnings`, `av_transcript`, `av_insider`, `av_prices`,
+`av_macro`, `av_symbol_search`; nur mit Key, Rate-Limiter
+`risk_av_requests_per_minute`). Werkzeuge raisen nie, kürzen auf
+`analyst_chat_max_tool_chars` und protokollieren einen Trace. Modi
+`auto`/`tools`/`context` (`analyst_chat_mode`): im Kontextmodus wird statt
+Tool-Calling ein deterministischer Daten-Dump (Seiten-Titel, in der Frage
+erkannte Firmen, Universums-/Analyst-Übersicht, Methodik) mitgegeben.
+Verlauf (`analyst_chat_history_messages` letzte user/assistant-
+Nachrichten) und Persistenz in `analyst_chat_sessions` /
+`analyst_chat_messages` (Rollen user/tool/assistant, Trace, Modell,
+Call-Zähler). Der Chat verändert keine Scores, Zonen oder Portfolios.
+
+`snapshot.py` liefert denselben vollständigen Koyfin-Steckbrief auch der
+Synthese des KI-Analysten (Prompt-Abschnitte 12 „Koyfin-Kennzahlen
+(vollständig)“ und 13 „Verlauf (letzte Snapshots)“).
+
 ## 15. Änderungsprotokoll
+
+- **2026-10-22 — KI-Chat.** Popup-Chat mit dem Analyst-Agenten auf jeder
+  Seite (Abschnitt 16.6): Ollama-Tool-Calling über Werkzeuge für alle
+  gespeicherten Tool-Daten (inkl. vollständiger Koyfin-Kennzahlen und
+  Verlauf je Titel) und Alpha Vantage live; Kontextmodus als Rückfall;
+  Sitzungen in der Datenbank; CLI `python -m app.tools.analyst chat`;
+  Settings `analyst_chat_*`. Die Analyst-Synthese erhält zusätzlich die
+  Prompt-Abschnitte 12/13 (Koyfin-Kennzahlen, Verlauf).
 
 - **2026-10-21 — KI-Analyst (Ollama Cloud + Alpha Vantage).** Neues
   Paket `app/core/analyst/` (Abschnitt 16): kontinuierlicher Analyst-Agent

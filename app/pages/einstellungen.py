@@ -543,6 +543,44 @@ def _analyst_card() -> dbc.Card:
     )
 
 
+def _chat_card() -> dbc.Card:
+    """Karte „KI-Chat": Modell, Modus, Werkzeug-Runden, Verlauf, Zeichenlimit."""
+    s = STATE.settings
+
+    def _row(label: str, control) -> dbc.Row:
+        return dbc.Row([dbc.Col(html.Label(label), md=5), dbc.Col(control, md=7)], className="mb-2")
+
+    return dbc.Card(
+        [
+            dbc.CardHeader("KI-Chat (Popup auf jeder Seite)"),
+            dbc.CardBody(
+                [
+                    html.Div(
+                        "Der Chat nutzt den Ollama-Key des KI-Analysten und beantwortet Fragen über Werkzeuge "
+                        "(Koyfin-Daten, Portfolios, Analyst-Läufe, Methodik; mit ALPHAVANTAGE_API_KEY auch Live-News, "
+                        "Earnings, Transkripte, Insider, Kurse, Makro).",
+                        className="ms-tt-muted small mb-3",
+                    ),
+                    _row("Modell (leer = Modell des KI-Analysten)",
+                         dbc.Input(id="chat-model", type="text", value=s.analyst_chat_model, placeholder="z. B. gpt-oss:120b")),
+                    _row("Modus",
+                         dbc.Select(id="chat-mode", value=s.analyst_chat_mode,
+                                    options=[{"label": "Automatisch (Werkzeuge, Rückfall auf Kontext)", "value": "auto"},
+                                             {"label": "Nur Werkzeuge (Tool-Calling)", "value": "tools"},
+                                             {"label": "Nur Kontext (ohne Tool-Calling)", "value": "context"}])),
+                    _row("Max. Werkzeug-Runden je Frage", dbc.Input(id="chat-max-rounds", type="number", value=s.analyst_chat_max_tool_rounds, min=1, max=20, step=1)),
+                    _row("Verlauf: Nachrichten als Kontext", dbc.Input(id="chat-history", type="number", value=s.analyst_chat_history_messages, min=0, max=100, step=1)),
+                    _row("Max. Zeichen je Werkzeug-Ergebnis", dbc.Input(id="chat-max-chars", type="number", value=s.analyst_chat_max_tool_chars, min=2000, max=60000, step=1000)),
+                    html.Div("CLI: python -m app.tools.analyst chat \"Frage\" [--uid SAP] [--mode context]", className="ms-tt-muted small mb-2"),
+                    dbc.Button("KI-Chat-Einstellungen speichern", id="save-chat-settings", color="dark", size="sm"),
+                    html.Div(id="chat-settings-status", className="mt-2 small"),
+                ]
+            ),
+        ],
+        className="mb-3",
+    )
+
+
 def _numeric_row(id_obj: dict, label: str, value, step, is_int: bool) -> dbc.Row:
     return dbc.Row(
         [
@@ -1160,6 +1198,7 @@ def layout(**_) -> html.Div:
             _pc_assignment_card(),
             _agents_card(),
             _analyst_card(),
+            _chat_card(),
             _snapshot_card(),
             html.Div(
                 [
@@ -1870,6 +1909,32 @@ def _save_analyst(n_clicks, model, scope, custom, enabled, interval, max_compani
     except Exception:  # noqa: BLE001 — Scheduler ist optional
         pass
     return dbc.Alert("KI-Analyst-Einstellungen gespeichert.", color="success", duration=4000, className="mb-0 py-2")
+
+
+@callback(
+    Output("chat-settings-status", "children"),
+    Input("save-chat-settings", "n_clicks"),
+    State("chat-model", "value"),
+    State("chat-mode", "value"),
+    State("chat-max-rounds", "value"),
+    State("chat-history", "value"),
+    State("chat-max-chars", "value"),
+    prevent_initial_call=True,
+)
+def _save_chat_settings(n_clicks, model, mode, rounds, history, max_chars):
+    if not n_clicks:
+        raise PreventUpdate
+    s = STATE.settings
+    s.analyst_chat_model = (model or "").strip()
+    s.analyst_chat_mode = mode if mode in ("auto", "tools", "context") else "auto"
+    s.analyst_chat_max_tool_rounds = _clamp_int(rounds, 1, 20, 8)
+    s.analyst_chat_history_messages = _clamp_int(history, 0, 100, 20)
+    s.analyst_chat_max_tool_chars = _clamp_int(max_chars, 2000, 60000, 12000)
+    try:
+        save_settings(s)
+    except Exception as exc:  # noqa: BLE001 — DB down: Einstellungen nur im Speicher
+        return html.Span(f"Gespeichert (nur für diese Sitzung — DB nicht erreichbar: {exc})", className="text-warning")
+    return html.Span("KI-Chat-Einstellungen gespeichert.", className="text-success")
 
 
 def _split_list(raw) -> list[str]:
