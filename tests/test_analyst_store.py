@@ -256,3 +256,47 @@ def test_reads_fail_open(store, monkeypatch):
     assert store.load_watch_states(["a"]) == {}
     with pytest.raises(RuntimeError):
         store.save_run({"run_id": "x"})
+
+
+def test_chat_sessions_and_messages(store):
+    sid = store.create_chat_session("Erste Frage", context_uid="SAP")
+    sid2 = store.create_chat_session()
+    assert sid2 == sid + 1
+    sessions = store.list_chat_sessions()
+    assert [s["id"] for s in sessions] == [sid2, sid]
+    assert sessions[1]["title"] == "Erste Frage" and sessions[1]["context_uid"] == "SAP"
+    assert sessions[0]["title"] == "Neue Unterhaltung" and sessions[0]["n_messages"] == 0
+
+    m1 = store.append_chat_message(sid, "user", "Wie steht SAP?")
+    m2 = store.append_chat_message(sid, "tool", "{…}", tool_name="company_snapshot", tool_calls={"uid": "SAP"})
+    m3 = store.append_chat_message(sid, "assistant", "## SAP", model="m", n_llm_calls=2, n_av_calls=1,
+                                   trace=[{"name": "company_snapshot", "args": {"uid": "SAP"}, "chars": 3}])
+    assert m1 < m2 < m3
+    sess = store.load_chat_session(sid)
+    assert sess["n_messages"] == 3
+    # Aktualisierte Sitzung rutscht nach oben.
+    assert store.list_chat_sessions()[0]["id"] == sid
+
+    msgs = store.load_chat_messages(sid)
+    assert [m["role"] for m in msgs] == ["user", "tool", "assistant"]
+    assert msgs[1]["tool_name"] == "company_snapshot" and msgs[1]["tool_calls"] == {"uid": "SAP"}
+    assert msgs[2]["trace"][0]["name"] == "company_snapshot" and msgs[2]["n_llm_calls"] == 2
+    assert [m["role"] for m in store.load_chat_messages(sid, roles=("user", "assistant"))] == ["user", "assistant"]
+    assert [m["id"] for m in store.load_chat_messages(sid, limit=1)] == [m3]
+
+    store.rename_chat_session(sid, "Umbenannt")
+    assert store.load_chat_session(sid)["title"] == "Umbenannt"
+    store.touch_chat_session(sid2)
+    assert store.list_chat_sessions()[0]["id"] == sid2
+    store.delete_chat_session(sid)
+    assert store.load_chat_session(sid) is None and store.load_chat_messages(sid) == []
+    with pytest.raises(ValueError):
+        store.append_chat_message(sid2, "system", "x")
+
+
+def test_chat_reads_fail_open(store, monkeypatch):
+    from app.core import persistence
+
+    monkeypatch.setattr(persistence, "get_engine", lambda: None)
+    assert store.list_chat_sessions() == [] and store.load_chat_session(1) is None
+    assert store.load_chat_messages(1) == []

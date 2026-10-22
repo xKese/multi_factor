@@ -76,8 +76,27 @@ window.dash_clientside.ms = {
     window.msCmdk = window.msCmdk || {};
     window.msCmdk.items = Array.isArray(data) ? data : [];
     return window.dash_clientside.no_update;
+  },
+  chatScroll: function (children) {
+    var box = document.getElementById("ms-chat-messages");
+    if (box) {
+      window.requestAnimationFrame(function () { box.scrollTop = box.scrollHeight; });
+    }
+    return window.dash_clientside.no_update;
   }
 };
+
+// KI-Chat: Enter sendet, Shift+Enter fügt einen Zeilenumbruch ein
+// (delegierter Listener, da das Textarea von Dash neu gerendert wird).
+document.addEventListener("keydown", function (ev) {
+  var el = ev.target;
+  if (!el || el.id !== "ms-chat-input") return;
+  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+    ev.preventDefault();
+    var btn = document.getElementById("ms-chat-send");
+    if (btn && !btn.disabled) btn.click();
+  }
+});
 
 /* ==========================================================================
    Command Palette — Ticker-Schnellsuche (Cmd+K / Ctrl+K / "/")

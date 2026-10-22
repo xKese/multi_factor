@@ -143,3 +143,51 @@ def test_inspect_command(monkeypatch, capsys):
     monkeypatch.setattr(store, "list_insights", lambda kind=None, run_id=None, limit=1: [{**rec, "uid": None, "kind": "trend", "content": None}])
     assert cli.main(["inspect", "--kind", "trend"]) == 0
     assert "nicht parsebar" in capsys.readouterr().out
+
+
+def test_chat_command(state, monkeypatch, capsys):
+    from app.core.analyst import chat, store
+
+    created = {}
+    monkeypatch.setattr(store, "create_chat_session", lambda title=None, context_uid=None: created.setdefault("id", 5) or 5)
+    monkeypatch.setattr(store, "load_chat_session", lambda sid: {"id": sid} if sid == 9 else None)
+    seen = {}
+
+    def fake_answer(session_id, question, ctx, settings, model=None, mode=None, progress=None):
+        seen.update(session_id=session_id, question=question, model=model, mode=mode, page_uid=ctx.page_uid)
+        if progress:
+            progress("Werkzeug x …")
+        return chat.ChatResult(answer_md="**Antwort**", tool_trace=[{"tool": "company_snapshot", "args": {"uid": "SAP"}, "chars": 10}],
+                               n_llm_calls=2, n_av_calls=1, model="m", mode="tools")
+
+    monkeypatch.setattr(chat, "answer", fake_answer)
+    assert cli.main(["chat", "Wie steht SAP?", "--uid", "SAP", "--mode", "tools", "--model", "m", "-v"]) == 0
+    out, err = capsys.readouterr()
+    assert "**Antwort**" in out and "Neue Sitzung 5" in err and "Werkzeug x" in err and "company_snapshot" in err
+    assert seen == {"session_id": 5, "question": "Wie steht SAP?", "model": "m", "mode": "tools", "page_uid": "SAP"}
+    assert cli.main(["chat", "Frage", "--session", "9"]) == 0 and seen["session_id"] == 9
+    assert cli.main(["chat", "Frage", "--session", "77"]) == 1
+    assert "nicht gefunden" in capsys.readouterr().err
+    monkeypatch.setattr(chat, "answer", lambda *a, **k: chat.ChatResult(answer_md="**Fehler:** x", error="x"))
+    assert cli.main(["chat", "Frage"]) == 1
+
+    def no_key(*a, **k):
+        raise chat.ChatConfigError("OLLAMA_API_KEY fehlt")
+
+    monkeypatch.setattr(chat, "answer", no_key)
+    assert cli.main(["chat", "Frage"]) == 1
+    assert "OLLAMA_API_KEY" in capsys.readouterr().err
+    assert cli.main(["chat"]) == 2
+
+
+def test_chat_sessions_command(monkeypatch, capsys):
+    from app.core.analyst import store
+
+    monkeypatch.setattr(store, "list_chat_sessions", lambda limit=20: [])
+    assert cli.main(["chat-sessions"]) == 0
+    assert "Keine Chat-Sitzungen" in capsys.readouterr().out
+    monkeypatch.setattr(store, "list_chat_sessions", lambda limit=20: [
+        {"id": 3, "title": "SAP-Fragen", "updated_at": datetime(2026, 10, 22, 9, 0), "n_messages": 4, "context_uid": "SAP"}])
+    assert cli.main(["chat-sessions", "--limit", "5"]) == 0
+    out = capsys.readouterr().out
+    assert "3\t" in out and "SAP-Fragen" in out and "[SAP]" in out and "4 Nachrichten" in out

@@ -50,6 +50,13 @@ INDEX_STRING = """<!DOCTYPE html>
 """
 
 
+def _chat_panel_layout():
+    """KI-Chat-Popup (global, auf jeder Seite; Callbacks im Modul)."""
+    from app.ui.chat_panel import layout as chat_layout
+
+    return chat_layout()
+
+
 def _read_modal_layout():
     """Lese-Modal der Agenten-Berichte — global, damit es auf jeder Seite
     statisch im DOM existiert (kein Render-Race, vgl. ea-agent-section)."""
@@ -108,6 +115,7 @@ def create_app() -> dash.Dash:
             html.Main(dash.page_container, className="ms-page"),
             command_palette_layout(),
             _read_modal_layout(),
+            _chat_panel_layout(),
         ],
         className="ms-app",
     )
@@ -162,6 +170,13 @@ def create_app() -> dash.Dash:
         ClientsideFunction(namespace="ms", function_name="cmdkSyncData"),
         Output("ms-cmdk", "data-ready"),
         Input("ms-cmdk-data", "data"),
+    )
+
+    # KI-Chat: nach jedem Re-Render der Nachrichtenliste ans Ende scrollen.
+    clientside_callback(
+        ClientsideFunction(namespace="ms", function_name="chatScroll"),
+        Output("ms-chat-messages", "data-scrolled"),
+        Input("ms-chat-messages", "children"),
     )
 
     # Agenten-Status-Chip in der Kopfzeile: auf jeder Seite sichtbar, zeigt

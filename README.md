@@ -420,6 +420,63 @@ Zulieferer-/Kunden-Zuordnungen und Profiteur-Ketten sind LLM-Hypothesen
 mit Quellenangabe, keine geprüften Fakten; der Agent verändert nie
 Scores, Zonen oder das Modellportfolio.
 
+## KI-Chat (Popup auf jeder Seite)
+
+Schwebender Button „KI-Chat“ unten rechts öffnet auf jeder Seite ein
+Seitenpanel, in dem man mit dem Analyst-Agenten chattet: Fragen zu
+Wertpapieren, Kapitalmärkten und zu allen Informationen des Tools (Koyfin-
+Import, Scores/Zonen, Verlauf, Portfolios, Modellportfolio, Factor Timing,
+Risiko, KI-Analyst-Läufe, Methodik). Unterhaltungen werden in der
+Datenbank gespeichert (`analyst_chat_sessions`, `analyst_chat_messages`)
+und lassen sich im Panel wechseln, umbenennen und löschen.
+
+**So arbeitet der Chat** (`app/core/analyst/chat.py`, `chat_tools.py`)
+
+- Das Modell (Ollama Cloud, Tool-Calling) ruft **Werkzeuge** auf und
+  antwortet erst dann; jede Antwort endet mit „Quellen“ (Werkzeuge,
+  Datenstände, News-URLs). Werkzeugaufrufe sind je Antwort aufklappbar.
+- **Gespeicherte Daten:** `resolve_company`, `company_snapshot` (**alle**
+  importierten Koyfin-Spalten — Basis, optionale und abgeleitete — in Gruppen
+  plus Scores, Faktor-Z, Filter, Piotroski, Altman, SMA/Trend, Bestand und
+  Modellportfolio-Mitgliedschaft), `company_history` (Verlauf über die
+  archivierten Importe), `company_peers`, `screen_universe` (Filter/Schwellen/
+  Sortierung über jede Spalte), `universe_overview`, `sector_overview`,
+  `changes_since`, `portfolio_overview`, `model_portfolio_overview`,
+  `factor_timing_state`, `risk_overview`, `analyst_insights`,
+  `analyst_run_overview`, `methodology`.
+- **Alpha Vantage live** (nur mit `ALPHAVANTAGE_API_KEY`, unbegrenzt, über
+  den bestehenden Rate-Limiter): `av_news` (Ticker oder Topic), `av_earnings`,
+  `av_transcript`, `av_insider`, `av_prices` (Kurs-Cache, Refresh ab 3 Tagen),
+  `av_macro` (Zinsen 10J/2J, Zinsstruktur, CPI, WTI), `av_symbol_search`.
+  Titel ohne AV-Symbol (typisch europäische Nebenwerte) erhalten den Hinweis
+  „nicht bei Alpha Vantage verfügbar“ — der Agent nutzt dann die vollständigen
+  Koyfin-Kennzahlen und den Verlauf.
+- **Seitenbezug:** auf `/einzelanalyse?ticker=…` (und jeder Seite mit
+  `?ticker=`/`?uid=`) zeigt das Panel „Bezug: SAP — SAP SE“; Fragen ohne
+  Titel beziehen sich darauf (abschaltbar).
+- **Modi** (Einstellungen → KI-Chat): `auto` (Werkzeuge, bei Modellen ohne
+  Tool-Unterstützung automatisch Kontextmodus), `tools`, `context`
+  (deterministischer Daten-Dump statt Tool-Calling — funktioniert mit jedem
+  Modell). Weitere Parameter: Modell (leer = Analyst-Modell), max.
+  Werkzeug-Runden, Verlaufsnachrichten als Kontext, Zeichenlimit je
+  Werkzeug-Ergebnis.
+- Enter sendet, Shift+Enter fügt einen Zeilenumbruch ein. Antworten entstehen
+  im Hintergrund (Status zeigt das laufende Werkzeug); maximal zwei Anfragen
+  gleichzeitig.
+
+**CLI**
+
+```bash
+python -m app.tools.analyst chat "Wie steht SAP im Modell und was sagen die letzten News?" --uid SAP --verbose
+python -m app.tools.analyst chat "Erkläre die Zonen." --mode context
+python -m app.tools.analyst chat "Und die Peers?" --session 3      # Sitzung fortsetzen
+python -m app.tools.analyst chat-sessions
+```
+
+Der KI-Analyst selbst erhält seit dieser Version in der Synthese ebenfalls
+die vollständigen Koyfin-Kennzahlen (Abschnitt 12) und den Verlauf der
+letzten Snapshots (Abschnitt 13) — wichtig für Titel ohne Transkript/News.
+
 ## Daten hochladen
 
 1. Browser auf <http://127.0.0.1:8050/daten-import> (Docker: Port 5000)

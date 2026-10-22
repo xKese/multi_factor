@@ -1,0 +1,12 @@
+{
+  "model": "gpt-oss:120b",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+      {"function": {"name": "company_snapshot", "arguments": {"uid": "SAP"}}},
+      {"function": {"name": "av_news", "arguments": "{\"uid\": \"SAP\", \"days\": 7}"}}
+    ]
+  },
+  "done": true
+}

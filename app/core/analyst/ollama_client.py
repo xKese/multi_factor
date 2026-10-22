@@ -92,7 +92,16 @@ def _post(path: str, body: dict, timeout: int) -> dict:
             log.info("Ollama-Serverfehler %s (Versuch %d)", status, attempt + 1)
             continue
         if status != 200:
-            raise OllamaError(f"Ollama: HTTP {status}", kind="error")
+            # Fehlertext des Bodys mitnehmen (z. B. „model does not support
+            # tools“) — der Chat erkennt daran fehlende Tool-Unterstützung.
+            detail = ""
+            try:
+                payload = resp.json()
+                if isinstance(payload, dict) and payload.get("error"):
+                    detail = f" — {str(payload['error'])[:300]}"
+            except ValueError:
+                pass
+            raise OllamaError(f"Ollama: HTTP {status}{detail}", kind="error")
         try:
             data = resp.json()
         except ValueError as exc:
@@ -127,6 +136,68 @@ def chat(
     if not isinstance(content, str) or not content.strip():
         raise OllamaError("Ollama: leere Antwort", kind="parse")
     return content
+
+
+def chat_tools(
+    messages: list[dict],
+    model: str,
+    tools: list[dict] | None = None,
+    temperature: float = 0.2,
+    timeout: int = 300,
+) -> dict:
+    """Chat-Aufruf ohne ``format`` (freier Markdown-Text), optional mit
+    Werkzeugen (Ollama-Tool-Calling).
+
+    Rückgabe ``{"content": str, "tool_calls": [{"name", "arguments": dict,
+    "id"}], "raw_tool_calls": list, "thinking": str | None}``. Argumente,
+    die als JSON-String kommen, werden geparst (ungültig → ``{}``). Leerer
+    Inhalt ohne Werkzeugaufrufe → ``OllamaError(kind="parse")``.
+    """
+    body: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": float(temperature)},
+    }
+    if tools:
+        body["tools"] = tools
+    data = _post("/api/chat", body, timeout)
+    message = data.get("message") if isinstance(data.get("message"), dict) else {}
+    content = message.get("content")
+    content = content if isinstance(content, str) else ""
+    raw_calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
+    calls: list[dict] = []
+    for tc in raw_calls:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+        name = str(fn.get("name") or "").strip()
+        if not name:
+            continue
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except ValueError:
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        calls.append({"name": name, "arguments": args, "id": tc.get("id") or fn.get("id")})
+    if not content.strip() and not calls:
+        raise OllamaError("Ollama: leere Antwort", kind="parse")
+    thinking = message.get("thinking")
+    return {
+        "content": content,
+        "tool_calls": calls,
+        "raw_tool_calls": raw_calls,
+        "thinking": thinking if isinstance(thinking, str) else None,
+    }
+
+
+def tools_unsupported(exc: Exception) -> bool:
+    """Erkennt die Ollama-Fehlermeldung für Modelle ohne Tool-Calling."""
+    text = str(exc).lower()
+    return "tool" in text and ("support" in text or "unterstütz" in text)
 
 
 def parse_json_response(text: str | None) -> dict | None:
